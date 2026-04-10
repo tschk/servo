@@ -12,6 +12,31 @@
 # for the subsequent runs.
 ''':' && {
     MACH_DIR=$(dirname "$0");
+    prepend_user_bin() {
+        if command -v python3 >/dev/null 2>&1; then
+            USER_BIN="$(python3 - <<'PY'
+import sysconfig
+print(sysconfig.get_path("scripts", scheme="posix_user"))
+PY
+)"
+            case ":$PATH:" in
+                *":${USER_BIN}:"*) ;;
+                *)
+                    PATH="${USER_BIN}:${PATH}"
+                    export PATH
+                    ;;
+            esac
+        fi
+        case ":$PATH:" in
+            *":$HOME/.local/bin:"*) ;;
+            *)
+                PATH="$HOME/.local/bin:$PATH"
+                export PATH
+                ;;
+        esac
+    }
+
+    prepend_user_bin
     run_in_nix_if_needed() {
         if { [ -f /etc/NIXOS ] || [ -n "${MACH_USE_NIX}" ]; } && [ -z "${IN_NIX_SHELL}" ]; then
             EXTRA_NIX_ARGS=${SERVO_ANDROID_BUILD:+'--arg buildAndroid true'}

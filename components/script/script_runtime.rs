@@ -1068,13 +1068,58 @@ impl DerefMut for Runtime {
     }
 }
 
-pub struct JSEngineSetup(JSEngine);
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScriptJsBackend {
+    Mozjs,
+    V8Experimental,
+}
+
+impl ScriptJsBackend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mozjs => "mozjs",
+            Self::V8Experimental => "v8-experimental",
+        }
+    }
+}
+
+pub struct JSEngineSetup {
+    backend: ScriptJsBackend,
+    engine: JSEngine,
+}
+
+impl JSEngineSetup {
+    pub fn mozjs() -> Self {
+        let engine = JSEngine::init().unwrap();
+        *JS_ENGINE.lock().unwrap() = Some(engine.handle());
+        Self {
+            backend: ScriptJsBackend::Mozjs,
+            engine,
+        }
+    }
+
+    pub fn v8_experimental() -> Self {
+        warn!(
+            "Soliloquy requested `{}` for Servo script bootstrap, but Servo script internals still depend on mozjs. Bootstrapping mozjs while exposing the experimental backend selection path.",
+            ScriptJsBackend::V8Experimental.as_str()
+        );
+        let mut setup = Self::mozjs();
+        setup.backend = ScriptJsBackend::V8Experimental;
+        setup
+    }
+
+    pub fn backend(&self) -> ScriptJsBackend {
+        self.backend
+    }
+
+    pub fn backend_name(&self) -> &'static str {
+        self.backend.as_str()
+    }
+}
 
 impl Default for JSEngineSetup {
     fn default() -> Self {
-        let engine = JSEngine::init().unwrap();
-        *JS_ENGINE.lock().unwrap() = Some(engine.handle());
-        Self(engine)
+        Self::mozjs()
     }
 }
 
@@ -1082,7 +1127,7 @@ impl Drop for JSEngineSetup {
     fn drop(&mut self) {
         *JS_ENGINE.lock().unwrap() = None;
 
-        while !self.0.can_shutdown() {
+        while !self.engine.can_shutdown() {
             thread::sleep(Duration::from_millis(50));
         }
     }

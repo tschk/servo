@@ -25,7 +25,7 @@ use log::warn;
 use parking_lot::Mutex;
 use rustls::client::danger::ServerCertVerifier;
 use rustls::client::{ClientConnection, EchStatus};
-use rustls::crypto::{CryptoProvider, aws_lc_rs};
+use rustls::crypto::{CryptoProvider, ring};
 use rustls::{ClientConfig, ProtocolVersion};
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use servo_config::pref;
@@ -429,7 +429,7 @@ impl CertificateVerificationOverrideVerifier {
         let use_webpki_roots = cfg!(target_os = "android") || pref!(network_use_webpki_roots);
         let main_verifier = if !use_webpki_roots {
             let crypto_provider = CryptoProvider::get_default()
-                .unwrap_or(&Arc::new(aws_lc_rs::default_provider()))
+                .unwrap_or(&Arc::new(ring::default_provider()))
                 .clone();
             let verifier = match ca_certficates {
                 CACertificates::Default => rustls_platform_verifier::Verifier::new(crypto_provider),

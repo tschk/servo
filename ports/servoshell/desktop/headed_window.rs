@@ -111,6 +111,7 @@ impl HeadedWindow {
         event_loop_proxy: EventLoopProxy<AppEvent>,
         initial_url: Url,
     ) -> Rc<Self> {
+        eprintln!("[sol-servo] headed_window.new start");
         let no_native_titlebar = servoshell_preferences.no_native_titlebar;
         let inner_size = servoshell_preferences.initial_window_size;
         let window_attr = winit::window::Window::default_attributes()
@@ -131,9 +132,11 @@ impl HeadedWindow {
         let window_attr = window_attr.with_name("org.servo.Servo", "Servo");
 
         #[allow(deprecated)]
+        eprintln!("[sol-servo] headed_window.create_window start");
         let winit_window = event_loop
             .create_window(window_attr)
             .expect("Failed to create window.");
+        eprintln!("[sol-servo] headed_window.create_window done");
 
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
@@ -141,15 +144,19 @@ impl HeadedWindow {
             winit_window.set_window_icon(Some(load_icon(icon_bytes)));
         }
 
+        eprintln!("[sol-servo] headed_window.window_handle start");
         let window_handle = winit_window
             .window_handle()
             .expect("winit window did not have a window handle");
+        eprintln!("[sol-servo] headed_window.window_handle done");
         HeadedWindow::force_srgb_color_space(window_handle.as_raw());
 
+        eprintln!("[sol-servo] headed_window.monitor lookup start");
         let monitor = winit_window
             .current_monitor()
             .or_else(|| winit_window.available_monitors().nth(0))
             .expect("No monitor detected");
+        eprintln!("[sol-servo] headed_window.monitor lookup done");
 
         let (screen_size, screen_scale) = servoshell_preferences.screen_size_override.map_or_else(
             || (monitor.size(), winit_window.scale_factor()),
@@ -160,30 +167,43 @@ impl HeadedWindow {
         let screen_size = (winit_size_to_euclid_size(screen_size).to_f64() / screen_scale).to_u32();
         let inner_size = winit_window.inner_size();
 
+        eprintln!("[sol-servo] headed_window.display_handle start");
         let display_handle = event_loop
             .display_handle()
             .expect("could not get display handle from window");
+        eprintln!("[sol-servo] headed_window.display_handle done");
+        eprintln!("[sol-servo] headed_window.window_handle(2) start");
         let window_handle = winit_window
             .window_handle()
             .expect("could not get window handle from window");
+        eprintln!("[sol-servo] headed_window.window_handle(2) done");
+        eprintln!("[sol-servo] headed_window.window_rendering_context.new start");
         let window_rendering_context = Rc::new(
             WindowRenderingContext::new(display_handle, window_handle, inner_size)
                 .expect("Could not create RenderingContext for Window"),
         );
+        eprintln!("[sol-servo] headed_window.window_rendering_context.new done");
 
         // Setup for GL accelerated media handling. This is only active on certain Linux platforms
         // and Windows.
         {
+            eprintln!("[sol-servo] headed_window.setup_gl_accelerated_media start");
             let details = window_rendering_context.surfman_details();
             setup_gl_accelerated_media(details.0, details.1);
+            eprintln!("[sol-servo] headed_window.setup_gl_accelerated_media done");
         }
 
         // Make sure the gl context is made current.
+        eprintln!("[sol-servo] headed_window.make_current start");
         window_rendering_context
             .make_current()
             .expect("Could not make window RenderingContext current");
+        eprintln!("[sol-servo] headed_window.make_current done");
 
+        eprintln!("[sol-servo] headed_window.offscreen_context start");
         let rendering_context = Rc::new(window_rendering_context.offscreen_context(inner_size));
+        eprintln!("[sol-servo] headed_window.offscreen_context done");
+        eprintln!("[sol-servo] headed_window.gui.new start");
         let gui = RefCell::new(Gui::new(
             &winit_window,
             event_loop,
@@ -191,9 +211,11 @@ impl HeadedWindow {
             rendering_context.clone(),
             initial_url,
         ));
+        eprintln!("[sol-servo] headed_window.gui.new done");
 
         debug!("Created window {:?}", winit_window.id());
-        Rc::new(HeadedWindow {
+        eprintln!("[sol-servo] headed_window.struct build start");
+        let headed_window = Rc::new(HeadedWindow {
             gui,
             winit_window,
             webview_relative_mouse_point: Cell::new(Point2D::zero()),
@@ -214,7 +236,21 @@ impl HeadedWindow {
             dialogs: Default::default(),
             visible_input_method: Default::default(),
             last_mouse_position: Default::default(),
-        })
+        });
+        eprintln!("[sol-servo] headed_window.struct build done");
+
+        info!(
+            "forcing initial window map and redraw: size={:?} visible={} id={:?}",
+            headed_window.winit_window.inner_size(),
+            headed_window.winit_window.is_visible().unwrap_or(true),
+            headed_window.winit_window.id()
+        );
+        headed_window.winit_window.set_visible(true);
+        eprintln!("[sol-servo] headed_window.request_redraw");
+        headed_window.winit_window.request_redraw();
+
+        eprintln!("[sol-servo] headed_window.new end");
+        headed_window
     }
 
     pub(crate) fn winit_window(&self) -> &winit::window::Window {
@@ -545,6 +581,13 @@ impl HeadedWindow {
         if event == WindowEvent::RedrawRequested {
             // WARNING: do not defer painting or presenting to some later tick of the event
             // loop or servoshell may become unresponsive! (servo#30312)
+            eprintln!(
+                "[sol-servo] redraw requested: size={:?} visible={} active_webview={} title={}",
+                self.winit_window.inner_size(),
+                self.winit_window.is_visible().unwrap_or(true),
+                window.active_webview().is_some(),
+                self.last_title.borrow().as_str()
+            );
             let mut gui = self.gui.borrow_mut();
             gui.update(&state, &window, self);
             gui.paint(&self.winit_window);
@@ -862,6 +905,12 @@ impl PlatformWindow for HeadedWindow {
     }
 
     fn request_repaint(&self, window: &ServoShellWindow) {
+        eprintln!(
+            "[sol-servo] request_repaint: visible={} active_webview={} size={:?}",
+            self.winit_window.is_visible().unwrap_or(true),
+            window.active_webview().is_some(),
+            self.winit_window.inner_size()
+        );
         self.winit_window.request_redraw();
 
         // FIXME: This is a workaround for dialogs, which do not seem to animate, unless we
@@ -889,8 +938,8 @@ impl PlatformWindow for HeadedWindow {
         let new_outer_size =
             new_outer_size.clamp(MIN_WINDOW_INNER_SIZE + decoration_size, screen_size * 2);
 
-        if outer_size.width == new_outer_size.width as u32 &&
-            outer_size.height == new_outer_size.height as u32
+        if outer_size.width == new_outer_size.width as u32
+            && outer_size.height == new_outer_size.height as u32
         {
             return Some(new_outer_size);
         }

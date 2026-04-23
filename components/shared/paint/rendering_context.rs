@@ -119,9 +119,9 @@ impl SurfmanRenderingContext {
     ) -> Result<Self, Error> {
         let device = connection.create_device(adapter)?;
 
-        let flags = ContextAttributeFlags::ALPHA |
-            ContextAttributeFlags::DEPTH |
-            ContextAttributeFlags::STENCIL;
+        let flags = ContextAttributeFlags::ALPHA
+            | ContextAttributeFlags::DEPTH
+            | ContextAttributeFlags::STENCIL;
         let gl_api = connection.gl_api();
         let version = match &gl_api {
             GLApi::GLES => surfman::GLVersion { major: 3, minor: 0 },
@@ -380,11 +380,13 @@ impl RenderingContext for SoftwareRenderingContext {
     }
 
     fn present(&self) {
+        eprintln!("[sol-servo] rendering_context.present begin");
         let device = &mut self.surfman_rendering_info.device.borrow_mut();
         let context = &mut self.surfman_rendering_info.context.borrow_mut();
         let _ = self
             .swap_chain
             .swap_buffers(device, context, PreserveBuffer::No);
+        eprintln!("[sol-servo] rendering_context.present end");
     }
 
     fn make_current(&self) -> Result<(), Error> {
@@ -465,20 +467,57 @@ impl WindowRenderingContext {
             return Err(Error::Failed);
         }
 
-        let connection = Connection::from_display_handle(display_handle)?;
-        let adapter = connection.create_adapter()?;
-        let surfman_context = SurfmanRenderingContext::new(&connection, &adapter, refresh_driver)?;
+        let force_connection_new = std::env::var("SOLILOQUY_SURFMAN_CONNECTION_NEW")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        eprintln!(
+            "[sol-servo] window_rendering_context.connection start connection_new={}",
+            force_connection_new
+        );
+        let connection = if force_connection_new {
+            Connection::new()?
+        } else {
+            Connection::from_display_handle(display_handle)?
+        };
+        eprintln!("[sol-servo] window_rendering_context.connection done");
 
+        let force_software_adapter = std::env::var("SOLILOQUY_SURFMAN_SOFTWARE")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        eprintln!(
+            "[sol-servo] window_rendering_context.adapter start software={}",
+            force_software_adapter
+        );
+        let adapter = if force_software_adapter {
+            connection.create_software_adapter()?
+        } else {
+            connection.create_adapter()?
+        };
+        eprintln!("[sol-servo] window_rendering_context.adapter done");
+
+        eprintln!("[sol-servo] window_rendering_context.surfman_context start");
+        let surfman_context =
+            SurfmanRenderingContext::new(&connection, &adapter, refresh_driver)?;
+        eprintln!("[sol-servo] window_rendering_context.surfman_context done");
+
+        eprintln!("[sol-servo] window_rendering_context.native_widget start");
         let native_widget = connection
             .create_native_widget_from_window_handle(
                 window_handle,
                 Size2D::new(size.width as i32, size.height as i32),
             )
             .expect("Failed to create native widget");
+        eprintln!("[sol-servo] window_rendering_context.native_widget done");
 
+        eprintln!("[sol-servo] window_rendering_context.create_surface start");
         let surface = surfman_context.create_surface(SurfaceType::Widget { native_widget })?;
+        eprintln!("[sol-servo] window_rendering_context.create_surface done");
+        eprintln!("[sol-servo] window_rendering_context.bind_surface start");
         surfman_context.bind_surface(surface)?;
+        eprintln!("[sol-servo] window_rendering_context.bind_surface done");
+        eprintln!("[sol-servo] window_rendering_context.make_current start");
         surfman_context.make_current()?;
+        eprintln!("[sol-servo] window_rendering_context.make_current done");
 
         Ok(Self {
             size: Cell::new(size),
@@ -568,6 +607,7 @@ impl RenderingContext for WindowRenderingContext {
     }
 
     fn present(&self) {
+        log::info!("window rendering context present");
         if let Err(error) = self.surfman_context.present_bound_surface() {
             warn!("Error presenting surface: {error:?}");
         }

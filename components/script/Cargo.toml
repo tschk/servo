@@ -41,6 +41,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(crown)'] }
 
 [dependencies]
 accountable-refcell = { workspace = true, optional = true }
+aws-lc-rs = { workspace = true }
 aes = { workspace = true }
 aes-gcm = { workspace = true }
 aes-kw = { workspace = true }
@@ -48,7 +49,7 @@ app_units = { workspace = true }
 argon2 = { workspace = true }
 arrayvec = { workspace = true }
 atomic_refcell = { workspace = true }
-aws-lc-rs = { workspace = true }
+ring = { workspace = true }
 backtrace = { workspace = true }
 base64 = { workspace = true }
 base64ct = { workspace = true }

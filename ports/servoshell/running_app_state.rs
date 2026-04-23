@@ -34,6 +34,8 @@ use url::Url;
     not(any(target_os = "android", target_env = "ohos"))
 ))]
 pub(crate) use crate::desktop::gamepad::ServoshellGamepadDelegate;
+#[cfg(not(any(target_os = "android", target_env = "ohos")))]
+use crate::desktop::soliloquy::SoliloquyOptimizations;
 use crate::prefs::{EXPERIMENTAL_PREFS, ServoShellPreferences};
 use crate::webdriver::WebDriverEmbedderControls;
 use crate::window::{PlatformWindow, ServoShellWindow, ServoShellWindowId};
@@ -208,6 +210,11 @@ pub(crate) struct RunningAppState {
     /// Whether the user has enabled experimental preferences.
     experimental_preferences_enabled: Cell<bool>,
 
+    /// Soliloquy-specific optimization state used to map live Servo WebViews onto
+    /// the local residency, prefetch, and cache heuristics.
+    #[cfg(not(any(target_os = "android", target_env = "ohos")))]
+    soliloquy_optimizations: RefCell<SoliloquyOptimizations>,
+
     /// The set of [`ServoShellWindow`]s that currently exist for this instance of servoshell.
     // This is the last field of the struct to ensure that windows are dropped *after* all
     // other references to the relevant rendering contexts have been destroyed.
@@ -272,7 +279,18 @@ impl RunningAppState {
             exit_scheduled: Default::default(),
             user_content_manager,
             experimental_preferences_enabled,
+            #[cfg(not(any(target_os = "android", target_env = "ohos")))]
+            soliloquy_optimizations: RefCell::new(SoliloquyOptimizations::new()),
             accessibility_active: Cell::new(false),
+        }
+    }
+
+    pub(crate) fn bootstrap_soliloquy(&self, initial_url: &Url) {
+        #[cfg(not(any(target_os = "android", target_env = "ohos")))]
+        {
+            let mut optimizations = self.soliloquy_optimizations.borrow_mut();
+            optimizations.bootstrap(initial_url);
+            optimizations.log_state("bootstrapped");
         }
     }
 
@@ -291,6 +309,12 @@ impl RunningAppState {
         if platform_window.has_platform_focus() {
             self.focus_window(window.clone());
         }
+
+        // Kick the first frame immediately so headed backends do not sit on a black window
+        // waiting for an external redraw stimulus that may never arrive in appliance mode.
+        window.set_needs_update();
+        window.set_needs_repaint();
+        window.update_and_request_repaint_if_necessary(self);
 
         window
     }
@@ -411,6 +435,7 @@ impl RunningAppState {
         self: &Rc<Self>,
         create_platform_window: Option<&dyn Fn(Url) -> Rc<dyn PlatformWindow>>,
     ) -> bool {
+        eprintln!("[sol-servo] running_app_state.spin_event_loop start");
         // We clone here to avoid a double borrow. User interface commands can update the list of windows.
         let windows: Vec<_> = self.windows.borrow().values().cloned().collect();
         for window in windows {
@@ -429,6 +454,8 @@ impl RunningAppState {
 
         self.servo.spin_event_loop();
 
+        eprintln!("[sol-servo] running_app_state.spin_event_loop after servo.spin_event_loop");
+
         for window in self.windows.borrow().values() {
             window.update_and_request_repaint_if_necessary(self);
         }
@@ -441,8 +468,8 @@ impl RunningAppState {
 
         // When no more windows are open, exit the application. Do not do this when
         // running WebDriver, which expects to keep running with no WebView open.
-        if self.servoshell_preferences.webdriver_port.get().is_none() &&
-            self.windows.borrow().is_empty()
+        if self.servoshell_preferences.webdriver_port.get().is_none()
+            && self.windows.borrow().is_empty()
         {
             self.schedule_exit()
         }
@@ -622,6 +649,7 @@ impl RunningAppState {
             .dismiss_embedder_controls_for_webview(webview_id);
 
         info!("Loading URL in webview {}: {}", webview_id, url);
+        self.track_navigation_request(webview_id, &url);
         self.set_load_status_sender(webview_id, load_status_sender);
         webview.load(url);
     }
@@ -686,6 +714,52 @@ impl RunningAppState {
     pub(crate) fn accessibility_active(&self) -> bool {
         self.accessibility_active.get()
     }
+
+    pub(crate) fn track_webview_created(&self, webview: &WebView) {
+        #[cfg(not(any(target_os = "android", target_env = "ohos")))]
+        {
+            let url = webview.url();
+            self.soliloquy_optimizations
+                .borrow_mut()
+                .register_webview(webview.id(), url.as_ref());
+        }
+    }
+
+    pub(crate) fn track_webview_activated(&self, webview_id: WebViewId) {
+        #[cfg(not(any(target_os = "android", target_env = "ohos")))]
+        {
+            self.soliloquy_optimizations
+                .borrow_mut()
+                .activate_webview(webview_id);
+        }
+    }
+
+    pub(crate) fn track_navigation_request(&self, webview_id: WebViewId, url: &Url) {
+        #[cfg(not(any(target_os = "android", target_env = "ohos")))]
+        {
+            self.soliloquy_optimizations
+                .borrow_mut()
+                .record_navigation_request(webview_id, url);
+        }
+    }
+
+    pub(crate) fn track_navigation_committed(&self, webview_id: WebViewId, url: &Url) {
+        #[cfg(not(any(target_os = "android", target_env = "ohos")))]
+        {
+            self.soliloquy_optimizations
+                .borrow_mut()
+                .record_navigation_committed(webview_id, url);
+        }
+    }
+
+    pub(crate) fn track_webview_closed(&self, webview_id: WebViewId) {
+        #[cfg(not(any(target_os = "android", target_env = "ohos")))]
+        {
+            self.soliloquy_optimizations
+                .borrow_mut()
+                .close_webview(webview_id);
+        }
+    }
 }
 
 impl WebViewDelegate for RunningAppState {
@@ -701,6 +775,10 @@ impl WebViewDelegate for RunningAppState {
     }
 
     fn notify_history_changed(&self, webview: WebView, _entries: Vec<Url>, _current: usize) {
+        let current_url = _entries.get(_current).cloned().or_else(|| webview.url());
+        if let Some(url) = current_url.as_ref() {
+            self.track_navigation_committed(webview.id(), url);
+        }
         self.window_for_webview_id(webview.id()).set_needs_update();
     }
 
@@ -746,18 +824,21 @@ impl WebViewDelegate for RunningAppState {
 
         webview.notify_theme_change(platform_window.theme());
         window.add_webview(webview.clone());
+        self.track_webview_created(&webview);
 
         // When WebDriver is enabled, do not focus and raise the WebView to the top,
         // as that is what the specification expects. Otherwise, we would like `window.open()`
         // to create a new foreground tab
         if self.servoshell_preferences.webdriver_port.get().is_none() {
             window.activate_webview(webview.id());
+            self.track_webview_activated(webview.id());
         } else {
             webview.hide();
         }
     }
 
     fn notify_closed(&self, webview: WebView) {
+        self.track_webview_closed(webview.id());
         self.window_for_webview_id(webview.id())
             .close_webview(webview.id())
     }
@@ -784,6 +865,9 @@ impl WebViewDelegate for RunningAppState {
         self.window_for_webview_id(webview.id()).set_needs_update();
 
         if status == LoadStatus::Complete {
+            if let Some(url) = webview.url() {
+                self.track_navigation_committed(webview.id(), &url);
+            }
             if let Some(sender) = self
                 .webdriver_senders
                 .borrow_mut()

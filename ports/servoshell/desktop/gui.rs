@@ -24,7 +24,7 @@ use egui_winit::EventResponse;
 use euclid::{Length, Point2D, Rect, Scale, Size2D};
 #[cfg(target_os = "windows")]
 use log::info;
-use log::warn;
+use log::{info, warn};
 use servo::{
     DeviceIndependentPixel, DevicePixel, Image, LoadStatus, OffscreenRenderingContext, PixelFormat,
     RenderingContext, WebView, WebViewId,
@@ -594,6 +594,11 @@ impl Gui {
 
     /// Paint the GUI, as of the last update.
     pub(crate) fn paint(&mut self, window: &Window) {
+        eprintln!(
+            "[sol-servo] gui.paint begin: visible={} size={:?}",
+            window.is_visible().unwrap_or(true),
+            window.inner_size()
+        );
         self.rendering_context
             .make_current()
             .expect("Could not make RenderingContext current");
@@ -602,6 +607,7 @@ impl Gui {
             .prepare_for_rendering();
         self.context.paint(window);
         self.rendering_context.parent_context().present();
+        eprintln!("[sol-servo] gui.paint end");
     }
 
     /// Updates the location field from the given [`RunningAppState`], unless the user has started

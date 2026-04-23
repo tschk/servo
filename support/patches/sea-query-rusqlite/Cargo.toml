@@ -1,0 +1,23 @@
+[package]
+name = "sea-query-rusqlite"
+version = "0.8.0-rc.15"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+rusqlite = "0.37"
+sea-query = { version = "1.0.0-rc.31", default-features = false, features = ["backend-sqlite", "derive"] }
+
+[features]
+default = []
+with-chrono = ["sea-query/with-chrono"]
+with-time = ["sea-query/with-time"]
+with-uuid = ["sea-query/with-uuid"]
+with-json = ["sea-query/with-json"]
+with-rust_decimal = ["sea-query/with-rust_decimal"]
+with-bigdecimal = ["sea-query/with-bigdecimal"]
+with-ipnetwork = ["sea-query/with-ipnetwork"]
+with-mac_address = ["sea-query/with-mac_address"]
+postgres-array = ["sea-query/postgres-array"]
+postgres-vector = ["sea-query/postgres-vector"]
+sea-orm = []

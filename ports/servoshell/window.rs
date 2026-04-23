@@ -82,6 +82,7 @@ impl ServoShellWindow {
     ) -> WebView {
         let webview = self.create_toplevel_webview(state, url);
         self.activate_webview(webview.id());
+        state.track_webview_activated(webview.id());
         webview
     }
 
@@ -109,6 +110,7 @@ impl ServoShellWindow {
         if state.accessibility_active() {
             webview.set_accessibility_active(true);
         }
+        state.track_webview_created(&webview);
         webview
     }
 
@@ -310,8 +312,10 @@ impl ServoShellWindow {
                         warn!("failed to parse location");
                         break;
                     };
+                    let url = url.into_url();
                     if let Some(active_webview) = self.active_webview() {
-                        active_webview.load(url.into_url());
+                        state.track_navigation_request(active_webview.id(), &url);
+                        active_webview.load(url);
                     }
                 },
                 UserInterfaceCommand::Back => {

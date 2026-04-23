@@ -29,6 +29,7 @@ rust-version = "1.86.0"
 [workspace.dependencies]
 accesskit = { version = "0.24.0", features = ["serde"] }
 accountable-refcell = "0.2.2"
+aws-lc-rs = { version = "1.14", default-features = false, features = ["non-fips"] }
 aes = "0.8.4"
 aes-gcm = "0.10.3"
 aes-kw = { version = "0.2.1", features = ["alloc"] }
@@ -38,7 +39,7 @@ argon2 = { version = "0.5", features = ["alloc"] }
 arrayvec = "0.7"
 async-tungstenite = { version = "0.34", features = ["tokio-rustls-webpki-roots"] }
 atomic_refcell = "0.1.13"
-aws-lc-rs = { version = "1.16", default-features = false, features = ["aws-lc-sys"] }
+ring = "0.16"
 backtrace = "0.3"
 base64 = "0.22.1"
 base64ct = { version = "1.8", features = ["alloc"] }
@@ -155,7 +156,7 @@ regex = "1.12"
 resvg = "0.45.0"
 rsa = { version = "0.9.10", features = ["sha1", "sha2"] }
 rustc-hash = "2.1.2"
-rustls = { version = "0.23", default-features = false, features = ["logging", "std", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["logging", "std", "tls12", "ring"] }
 rustls-pki-types = "1.14"
 rustls-platform-verifier = "0.6.2"
 sea-query = { version = "1.0.0-rc.31", default-features = false, features = ["backend-sqlite", "derive"] }
@@ -350,6 +351,8 @@ lto = "thin"
 codegen-units = 1
 
 [patch.crates-io]
+surfman = { path = "support/patches/surfman" }
+sea-query-rusqlite = { path = "support/patches/sea-query-rusqlite" }
 # If you need to temporarily test Servo with a local fork of some upstream
 # crate, add that here. Use the form:
 #

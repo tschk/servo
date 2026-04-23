@@ -77,6 +77,7 @@ impl App {
 
     /// Initialize Application once event loop start running.
     pub fn init(&mut self, active_event_loop: Option<&ActiveEventLoop>) {
+        eprintln!("[sol-servo] app.init start headless={}", active_event_loop.is_none());
         let mut protocol_registry = ProtocolRegistry::default();
         let _ = protocol_registry.register(
             "urlinfo",
@@ -96,7 +97,9 @@ impl App {
             .event_loop_waker(self.waker.clone());
 
         let url = self.initial_url.as_url().clone();
+        eprintln!("[sol-servo] app.init creating platform window for {url}");
         let platform_window = self.create_platform_window(url, active_event_loop);
+        eprintln!("[sol-servo] app.init platform window created");
 
         #[cfg(feature = "webxr")]
         let servo_builder =
@@ -106,7 +109,9 @@ impl App {
                 &self.preferences,
             ));
 
+        eprintln!("[sol-servo] app.init building servo");
         let servo = servo_builder.build();
+        eprintln!("[sol-servo] app.init servo built");
         servo.setup_logging();
 
         let user_content_manager = Rc::new(UserContentManager::new(&servo));
@@ -124,9 +129,13 @@ impl App {
             #[cfg(feature = "gamepad")]
             ServoshellGamepadDelegate::maybe_new().map(Rc::new),
         ));
+        running_state.bootstrap_soliloquy(self.initial_url.as_url());
+        eprintln!("[sol-servo] app.init opening initial window");
         running_state.open_window(platform_window, self.initial_url.as_url().clone());
+        eprintln!("[sol-servo] app.init initial window opened");
 
         self.state = AppState::Running(running_state);
+        eprintln!("[sol-servo] app.init complete");
     }
 
     fn create_platform_window(
@@ -140,9 +149,11 @@ impl App {
         );
 
         let Some(active_event_loop) = active_event_loop else {
+            eprintln!("[sol-servo] create_platform_window headless");
             return HeadlessWindow::new(&self.servoshell_preferences);
         };
 
+        eprintln!("[sol-servo] create_platform_window headed start");
         HeadedWindow::new(
             &self.servoshell_preferences,
             active_event_loop,
@@ -158,18 +169,26 @@ impl App {
             return false;
         };
 
+        eprintln!("[sol-servo] pump_servo_event_loop start");
         let create_platform_window = |url: Url| self.create_platform_window(url, active_event_loop);
         if !state.spin_event_loop(Some(&create_platform_window)) {
+            eprintln!("[sol-servo] pump_servo_event_loop requested shutdown");
             self.state = AppState::ShuttingDown;
             return false;
         }
+        eprintln!("[sol-servo] pump_servo_event_loop end");
         true
     }
 }
 
 impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        eprintln!("[sol-servo] winit resumed");
         self.init(Some(event_loop));
+        if !self.pump_servo_event_loop(Some(event_loop)) {
+            event_loop.exit()
+        }
+        event_loop.set_control_flow(ControlFlow::Poll);
     }
 
     fn window_event(
@@ -178,6 +197,7 @@ impl ApplicationHandler<AppEvent> for App {
         window_id: WindowId,
         window_event: WindowEvent,
     ) {
+        eprintln!("[sol-servo] winit window_event: {window_event:?}");
         let now = Instant::now();
         trace_winit_event!(
             window_event,
@@ -205,6 +225,7 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, app_event: AppEvent) {
+        eprintln!("[sol-servo] winit user_event: {app_event:?}");
         let AppState::Running(state) = &self.state else {
             return;
         };
@@ -224,5 +245,15 @@ impl ApplicationHandler<AppEvent> for App {
 
         // Block until the window gets an event
         event_loop.set_control_flow(ControlFlow::Wait);
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        eprintln!("[sol-servo] winit about_to_wait");
+        if !self.pump_servo_event_loop(Some(event_loop)) {
+            event_loop.exit();
+            return;
+        }
+
+        event_loop.set_control_flow(ControlFlow::Poll);
     }
 }

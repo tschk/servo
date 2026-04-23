@@ -1237,7 +1237,12 @@ pub fn run_content_process(token: String) {
         create_sandbox();
     }
 
-    let _js_engine_setup = script::init();
+    let js_engine_setup = script::init();
+    info!(
+        "Servo content process selected script backend `{}`.",
+        js_engine_setup.backend_name()
+    );
+    let _js_engine_setup = js_engine_setup;
 
     match unprivileged_content {
         UnprivilegedContent::ScriptEventLoop(new_event_loop_info) => {

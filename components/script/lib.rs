@@ -76,7 +76,7 @@ mod links;
 
 pub use init::init;
 pub(crate) use script_bindings::DomTypes;
-pub use script_runtime::JSEngineSetup;
+pub use script_runtime::{JSEngineSetup, ScriptJsBackend};
 pub use script_thread::ScriptThread;
 pub use serviceworker_manager::ServiceWorkerManager;
 

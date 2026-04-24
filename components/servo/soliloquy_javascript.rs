@@ -3,8 +3,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use std::collections::HashMap;
+#[cfg(feature = "soliloquy_v8")]
+use std::sync::Once;
 
 use embedder_traits::{JSValue, JavaScriptEvaluationError};
+#[cfg(feature = "soliloquy_v8")]
+use rusty_v8 as v8;
 use servo_base::id::WebViewId;
 
 use crate::soliloquy_bridge::{
@@ -14,6 +18,8 @@ use crate::soliloquy_bridge::{
 };
 
 const SOLILOQUY_JS_ENGINE_ENV: &str = "SOLILOQUY_JS_ENGINE";
+#[cfg(feature = "soliloquy_v8")]
+static SOLILOQUY_V8_INIT: Once = Once::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SoliloquyJavascriptBackend {
@@ -88,40 +94,75 @@ impl SoliloquyScriptBackend for MozjsScriptBackend {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SoliloquyV8IsolateState {
     DispatchOnly,
+    #[cfg(feature = "soliloquy_v8")]
+    RustyV8Ready,
 }
 
 impl SoliloquyV8IsolateState {
     fn as_str(self) -> &'static str {
         match self {
             Self::DispatchOnly => "dispatch-only",
-        }
-    }
-
-    fn real_isolate_ready(self) -> bool {
-        match self {
-            Self::DispatchOnly => false,
+            #[cfg(feature = "soliloquy_v8")]
+            Self::RustyV8Ready => "rusty_v8-ready",
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SoliloquyV8IsolateOwner {
     state: SoliloquyV8IsolateState,
+    #[cfg(feature = "soliloquy_v8")]
+    isolate: Option<v8::OwnedIsolate>,
 }
 
 impl SoliloquyV8IsolateOwner {
-    fn dispatch_only() -> Self {
-        Self {
-            state: SoliloquyV8IsolateState::DispatchOnly,
+    fn new() -> Self {
+        #[cfg(feature = "soliloquy_v8")]
+        {
+            return Self::rusty_v8();
+        }
+
+        #[cfg(not(feature = "soliloquy_v8"))]
+        {
+            Self::dispatch_only()
         }
     }
 
-    fn state_label(self) -> &'static str {
+    fn dispatch_only() -> Self {
+        Self {
+            state: SoliloquyV8IsolateState::DispatchOnly,
+            #[cfg(feature = "soliloquy_v8")]
+            isolate: None,
+        }
+    }
+
+    #[cfg(feature = "soliloquy_v8")]
+    fn rusty_v8() -> Self {
+        SOLILOQUY_V8_INIT.call_once(|| {
+            let platform = v8::new_default_platform(0, false).make_shared();
+            v8::V8::initialize_platform(platform);
+            v8::V8::initialize();
+        });
+
+        Self {
+            state: SoliloquyV8IsolateState::RustyV8Ready,
+            isolate: Some(v8::Isolate::new(v8::CreateParams::default())),
+        }
+    }
+
+    fn state_label(&self) -> &'static str {
         self.state.as_str()
     }
 
-    fn real_isolate_ready(self) -> bool {
-        self.state.real_isolate_ready()
+    fn real_isolate_ready(&self) -> bool {
+        #[cfg(feature = "soliloquy_v8")]
+        {
+            matches!(self.state, SoliloquyV8IsolateState::RustyV8Ready) && self.isolate.is_some()
+        }
+
+        #[cfg(not(feature = "soliloquy_v8"))]
+        {
+            false
+        }
     }
 }
 
@@ -132,7 +173,7 @@ struct V8DispatchScriptBackend {
 impl Default for V8DispatchScriptBackend {
     fn default() -> Self {
         Self {
-            isolate_owner: SoliloquyV8IsolateOwner::dispatch_only(),
+            isolate_owner: SoliloquyV8IsolateOwner::new(),
         }
     }
 }
@@ -150,7 +191,7 @@ impl SoliloquyScriptBackend for V8DispatchScriptBackend {
 
         evaluate_live_dom_assignment(webview_id, trimmed)
             .or_else(|| evaluate_live_dom_property(webview_id, trimmed))
-            .or_else(|| evaluate_command(webview_id, trimmed, self.isolate_owner))
+            .or_else(|| evaluate_command(webview_id, trimmed, &self.isolate_owner))
             .or_else(|| evaluate_literal(trimmed))
             .or_else(|| evaluate_binary_plus(trimmed))
             .or_else(|| evaluate_engine_probe(webview_id, trimmed))
@@ -213,7 +254,7 @@ fn evaluate_live_dom_assignment(
 fn evaluate_command(
     webview_id: WebViewId,
     script: &str,
-    isolate_owner: SoliloquyV8IsolateOwner,
+    isolate_owner: &SoliloquyV8IsolateOwner,
 ) -> Option<SoliloquyJavascriptEvaluation> {
     let command = parse_soliloquy_command(script)?;
     let (result, mutation) = dispatch_command(webview_id, command, isolate_owner);
@@ -334,7 +375,7 @@ fn parse_quoted_arguments(payload: &str) -> Option<Vec<String>> {
 fn dispatch_command(
     webview_id: WebViewId,
     command: SoliloquyBridgeCommand,
-    isolate_owner: SoliloquyV8IsolateOwner,
+    isolate_owner: &SoliloquyV8IsolateOwner,
 ) -> (SoliloquyBridgeResult, Option<SoliloquyBridgeMutation>) {
     match command {
         SoliloquyBridgeCommand::EngineBackend => (
@@ -579,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn v8_dispatch_backend_reports_dispatch_only_isolate_owner() {
+    fn v8_dispatch_backend_reports_isolate_owner_status() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
         std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
@@ -602,11 +643,23 @@ mod tests {
             status.get("activeEngine"),
             Some(&JSValue::String("soliloquy-dispatch".to_string()))
         );
-        assert_eq!(
-            status.get("isolateOwner"),
-            Some(&JSValue::String("dispatch-only".to_string()))
-        );
-        assert_eq!(status.get("realIsolate"), Some(&JSValue::Boolean(false)));
+        #[cfg(feature = "soliloquy_v8")]
+        {
+            assert_eq!(
+                status.get("isolateOwner"),
+                Some(&JSValue::String("rusty_v8-ready".to_string()))
+            );
+            assert_eq!(status.get("realIsolate"), Some(&JSValue::Boolean(true)));
+        }
+
+        #[cfg(not(feature = "soliloquy_v8"))]
+        {
+            assert_eq!(
+                status.get("isolateOwner"),
+                Some(&JSValue::String("dispatch-only".to_string()))
+            );
+            assert_eq!(status.get("realIsolate"), Some(&JSValue::Boolean(false)));
+        }
 
         std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
     }

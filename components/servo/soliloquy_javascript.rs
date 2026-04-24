@@ -59,7 +59,7 @@ impl SoliloquyJavascriptDispatcher {
                 MozjsScriptBackend.maybe_evaluate(webview_id, script)
             },
             SoliloquyJavascriptBackend::V8Experimental => {
-                V8DispatchScriptBackend.maybe_evaluate(webview_id, script)
+                V8DispatchScriptBackend::default().maybe_evaluate(webview_id, script)
             },
         }
     }
@@ -85,7 +85,57 @@ impl SoliloquyScriptBackend for MozjsScriptBackend {
     }
 }
 
-struct V8DispatchScriptBackend;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SoliloquyV8IsolateState {
+    DispatchOnly,
+}
+
+impl SoliloquyV8IsolateState {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::DispatchOnly => "dispatch-only",
+        }
+    }
+
+    fn real_isolate_ready(self) -> bool {
+        match self {
+            Self::DispatchOnly => false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SoliloquyV8IsolateOwner {
+    state: SoliloquyV8IsolateState,
+}
+
+impl SoliloquyV8IsolateOwner {
+    fn dispatch_only() -> Self {
+        Self {
+            state: SoliloquyV8IsolateState::DispatchOnly,
+        }
+    }
+
+    fn state_label(self) -> &'static str {
+        self.state.as_str()
+    }
+
+    fn real_isolate_ready(self) -> bool {
+        self.state.real_isolate_ready()
+    }
+}
+
+struct V8DispatchScriptBackend {
+    isolate_owner: SoliloquyV8IsolateOwner,
+}
+
+impl Default for V8DispatchScriptBackend {
+    fn default() -> Self {
+        Self {
+            isolate_owner: SoliloquyV8IsolateOwner::dispatch_only(),
+        }
+    }
+}
 
 impl SoliloquyScriptBackend for V8DispatchScriptBackend {
     fn maybe_evaluate(
@@ -100,7 +150,7 @@ impl SoliloquyScriptBackend for V8DispatchScriptBackend {
 
         evaluate_live_dom_assignment(webview_id, trimmed)
             .or_else(|| evaluate_live_dom_property(webview_id, trimmed))
-            .or_else(|| evaluate_command(webview_id, trimmed))
+            .or_else(|| evaluate_command(webview_id, trimmed, self.isolate_owner))
             .or_else(|| evaluate_literal(trimmed))
             .or_else(|| evaluate_binary_plus(trimmed))
             .or_else(|| evaluate_engine_probe(webview_id, trimmed))
@@ -160,9 +210,13 @@ fn evaluate_live_dom_assignment(
     })
 }
 
-fn evaluate_command(webview_id: WebViewId, script: &str) -> Option<SoliloquyJavascriptEvaluation> {
+fn evaluate_command(
+    webview_id: WebViewId,
+    script: &str,
+    isolate_owner: SoliloquyV8IsolateOwner,
+) -> Option<SoliloquyJavascriptEvaluation> {
     let command = parse_soliloquy_command(script)?;
-    let (result, mutation) = dispatch_command(webview_id, command);
+    let (result, mutation) = dispatch_command(webview_id, command, isolate_owner);
     Some(match mutation {
         Some(mutation) => SoliloquyJavascriptEvaluation {
             result: Ok(result.into_js_value()),
@@ -280,6 +334,7 @@ fn parse_quoted_arguments(payload: &str) -> Option<Vec<String>> {
 fn dispatch_command(
     webview_id: WebViewId,
     command: SoliloquyBridgeCommand,
+    isolate_owner: SoliloquyV8IsolateOwner,
 ) -> (SoliloquyBridgeResult, Option<SoliloquyBridgeMutation>) {
     match command {
         SoliloquyBridgeCommand::EngineBackend => (
@@ -299,6 +354,14 @@ fn dispatch_command(
                 (
                     "activeEngine".to_string(),
                     JSValue::String("soliloquy-dispatch".to_string()),
+                ),
+                (
+                    "isolateOwner".to_string(),
+                    JSValue::String(isolate_owner.state_label().to_string()),
+                ),
+                (
+                    "realIsolate".to_string(),
+                    JSValue::Boolean(isolate_owner.real_isolate_ready()),
                 ),
                 ("bridgeReady".to_string(), JSValue::Boolean(false)),
                 ("controlsDom".to_string(), JSValue::Boolean(false)),
@@ -511,6 +574,39 @@ mod tests {
                 JSValue::String("not.supported".to_string())
             )))
         );
+
+        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+    }
+
+    #[test]
+    fn v8_dispatch_backend_reports_dispatch_only_isolate_owner() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        reset_webview_snapshots();
+        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+
+        let result = SoliloquyJavascriptDispatcher::maybe_evaluate(
+            WebViewId(7),
+            "window.__soliloquyEval('engine.status')",
+        );
+
+        let envelope = match result {
+            Some(Ok(JSValue::Object(object))) => object,
+            other => panic!("unexpected engine.status envelope: {other:?}"),
+        };
+        let status = match envelope.get("value") {
+            Some(JSValue::Object(object)) => object,
+            other => panic!("unexpected engine.status value: {other:?}"),
+        };
+
+        assert_eq!(
+            status.get("activeEngine"),
+            Some(&JSValue::String("soliloquy-dispatch".to_string()))
+        );
+        assert_eq!(
+            status.get("isolateOwner"),
+            Some(&JSValue::String("dispatch-only".to_string()))
+        );
+        assert_eq!(status.get("realIsolate"), Some(&JSValue::Boolean(false)));
 
         std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
     }

@@ -130,6 +130,46 @@ mod tests {
     }
 
     #[test]
+    fn dom_inspection_dispatch_stays_local() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("SOLILOQUY_JS_ENGINE", "v8-experimental");
+        let (proxy, receiver) = ConstellationProxy::new();
+        let mut evaluator = JavaScriptEvaluator::new(proxy);
+        let result = Rc::new(RefCell::new(None));
+        let callback_result = result.clone();
+
+        evaluator.evaluate(
+            servo_base::id::WebViewId(17),
+            "window.__soliloquyEval('dom.inspect', 'document.title')".to_string(),
+            Box::new(move |value| *callback_result.borrow_mut() = Some(value)),
+        );
+
+        assert!(matches!(*result.borrow(), Some(Ok(JSValue::Object(_)))));
+        assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
+        std::env::remove_var("SOLILOQUY_JS_ENGINE");
+    }
+
+    #[test]
+    fn unsupported_structured_commands_fall_back_to_constellation() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("SOLILOQUY_JS_ENGINE", "v8-experimental");
+        let (proxy, receiver) = ConstellationProxy::new();
+        let mut evaluator = JavaScriptEvaluator::new(proxy);
+
+        evaluator.evaluate(
+            servo_base::id::WebViewId(19),
+            "window.__soliloquyEval('dom.inspect', 'document.body.innerHTML')".to_string(),
+            Box::new(|_| {}),
+        );
+
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(EmbedderToConstellationMessage::EvaluateJavaScript(_, _, _))
+        ));
+        std::env::remove_var("SOLILOQUY_JS_ENGINE");
+    }
+
+    #[test]
     fn unsupported_scripts_fall_back_to_constellation() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("SOLILOQUY_JS_ENGINE", "v8-experimental");

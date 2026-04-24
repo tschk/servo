@@ -54,12 +54,45 @@ impl SoliloquyJavascriptDispatcher {
         webview_id: WebViewId,
         script: &str,
     ) -> Option<SoliloquyJavascriptEvaluation> {
-        if SoliloquyJavascriptBackend::from_environment()
-            != SoliloquyJavascriptBackend::V8Experimental
-        {
-            return None;
+        match SoliloquyJavascriptBackend::from_environment() {
+            SoliloquyJavascriptBackend::Mozjs => {
+                MozjsScriptBackend.maybe_evaluate(webview_id, script)
+            },
+            SoliloquyJavascriptBackend::V8Experimental => {
+                V8DispatchScriptBackend.maybe_evaluate(webview_id, script)
+            },
         }
+    }
+}
 
+trait SoliloquyScriptBackend {
+    fn maybe_evaluate(
+        &self,
+        webview_id: WebViewId,
+        script: &str,
+    ) -> Option<SoliloquyJavascriptEvaluation>;
+}
+
+struct MozjsScriptBackend;
+
+impl SoliloquyScriptBackend for MozjsScriptBackend {
+    fn maybe_evaluate(
+        &self,
+        _webview_id: WebViewId,
+        _script: &str,
+    ) -> Option<SoliloquyJavascriptEvaluation> {
+        None
+    }
+}
+
+struct V8DispatchScriptBackend;
+
+impl SoliloquyScriptBackend for V8DispatchScriptBackend {
+    fn maybe_evaluate(
+        &self,
+        webview_id: WebViewId,
+        script: &str,
+    ) -> Option<SoliloquyJavascriptEvaluation> {
         let trimmed = script.trim();
         if trimmed.is_empty() {
             return Some(SoliloquyJavascriptEvaluation::ok(JSValue::Undefined));

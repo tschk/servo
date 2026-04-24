@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#[cfg(feature = "soliloquy_v8")]
+use std::cell::RefCell;
 use std::collections::HashMap;
 #[cfg(feature = "soliloquy_v8")]
 use std::sync::Once;
@@ -20,6 +22,10 @@ use crate::soliloquy_bridge::{
 const SOLILOQUY_JS_ENGINE_ENV: &str = "SOLILOQUY_JS_ENGINE";
 #[cfg(feature = "soliloquy_v8")]
 static SOLILOQUY_V8_INIT: Once = Once::new();
+#[cfg(feature = "soliloquy_v8")]
+thread_local! {
+    static SOLILOQUY_V8_ISOLATE: RefCell<Option<v8::OwnedIsolate>> = RefCell::new(None);
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SoliloquyJavascriptBackend {
@@ -108,10 +114,26 @@ impl SoliloquyV8IsolateState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SoliloquyV8OwnerLifetime {
+    None,
+    #[cfg(feature = "soliloquy_v8")]
+    ThreadLocal,
+}
+
+impl SoliloquyV8OwnerLifetime {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            #[cfg(feature = "soliloquy_v8")]
+            Self::ThreadLocal => "thread-local",
+        }
+    }
+}
+
 struct SoliloquyV8IsolateOwner {
     state: SoliloquyV8IsolateState,
-    #[cfg(feature = "soliloquy_v8")]
-    isolate: Option<v8::OwnedIsolate>,
+    lifetime: SoliloquyV8OwnerLifetime,
 }
 
 impl SoliloquyV8IsolateOwner {
@@ -130,8 +152,7 @@ impl SoliloquyV8IsolateOwner {
     fn dispatch_only() -> Self {
         Self {
             state: SoliloquyV8IsolateState::DispatchOnly,
-            #[cfg(feature = "soliloquy_v8")]
-            isolate: None,
+            lifetime: SoliloquyV8OwnerLifetime::None,
         }
     }
 
@@ -143,9 +164,16 @@ impl SoliloquyV8IsolateOwner {
             v8::V8::initialize();
         });
 
+        SOLILOQUY_V8_ISOLATE.with(|isolate| {
+            let mut isolate = isolate.borrow_mut();
+            if isolate.is_none() {
+                *isolate = Some(v8::Isolate::new(v8::CreateParams::default()));
+            }
+        });
+
         Self {
             state: SoliloquyV8IsolateState::RustyV8Ready,
-            isolate: Some(v8::Isolate::new(v8::CreateParams::default())),
+            lifetime: SoliloquyV8OwnerLifetime::ThreadLocal,
         }
     }
 
@@ -153,10 +181,14 @@ impl SoliloquyV8IsolateOwner {
         self.state.as_str()
     }
 
+    fn lifetime_label(&self) -> &'static str {
+        self.lifetime.as_str()
+    }
+
     fn real_isolate_ready(&self) -> bool {
         #[cfg(feature = "soliloquy_v8")]
         {
-            matches!(self.state, SoliloquyV8IsolateState::RustyV8Ready) && self.isolate.is_some()
+            matches!(self.state, SoliloquyV8IsolateState::RustyV8Ready)
         }
 
         #[cfg(not(feature = "soliloquy_v8"))]
@@ -404,6 +436,10 @@ fn dispatch_command(
                     "realIsolate".to_string(),
                     JSValue::Boolean(isolate_owner.real_isolate_ready()),
                 ),
+                (
+                    "ownerLifetime".to_string(),
+                    JSValue::String(isolate_owner.lifetime_label().to_string()),
+                ),
                 ("bridgeReady".to_string(), JSValue::Boolean(false)),
                 ("controlsDom".to_string(), JSValue::Boolean(false)),
                 ("commandChannel".to_string(), JSValue::Boolean(true)),
@@ -650,6 +686,10 @@ mod tests {
                 Some(&JSValue::String("rusty_v8-ready".to_string()))
             );
             assert_eq!(status.get("realIsolate"), Some(&JSValue::Boolean(true)));
+            assert_eq!(
+                status.get("ownerLifetime"),
+                Some(&JSValue::String("thread-local".to_string()))
+            );
         }
 
         #[cfg(not(feature = "soliloquy_v8"))]
@@ -659,6 +699,10 @@ mod tests {
                 Some(&JSValue::String("dispatch-only".to_string()))
             );
             assert_eq!(status.get("realIsolate"), Some(&JSValue::Boolean(false)));
+            assert_eq!(
+                status.get("ownerLifetime"),
+                Some(&JSValue::String("none".to_string()))
+            );
         }
 
         std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);

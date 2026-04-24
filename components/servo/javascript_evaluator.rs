@@ -41,7 +41,7 @@ impl JavaScriptEvaluator {
         script: String,
         callback: Box<dyn FnOnce(Result<JSValue, JavaScriptEvaluationError>)>,
     ) {
-        if let Some(result) = SoliloquyJavascriptDispatcher::maybe_evaluate(&script) {
+        if let Some(result) = SoliloquyJavascriptDispatcher::maybe_evaluate(webview_id, &script) {
             info!(
                 "Soliloquy experimental dispatcher handled JavaScript evaluation locally for webview {:?}",
                 webview_id
@@ -78,6 +78,7 @@ impl JavaScriptEvaluator {
 mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
+    use std::sync::Mutex;
 
     use crossbeam_channel::TryRecvError;
     use embedder_traits::JSValue;
@@ -86,8 +87,11 @@ mod tests {
     use super::JavaScriptEvaluator;
     use crate::proxies::ConstellationProxy;
 
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn experimental_dispatcher_short_circuits_simple_scripts() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("SOLILOQUY_JS_ENGINE", "v8-experimental");
         let (proxy, receiver) = ConstellationProxy::new();
         let mut evaluator = JavaScriptEvaluator::new(proxy);
@@ -106,7 +110,28 @@ mod tests {
     }
 
     #[test]
+    fn structured_command_dispatch_stays_local() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("SOLILOQUY_JS_ENGINE", "v8-experimental");
+        let (proxy, receiver) = ConstellationProxy::new();
+        let mut evaluator = JavaScriptEvaluator::new(proxy);
+        let result = Rc::new(RefCell::new(None));
+        let callback_result = result.clone();
+
+        evaluator.evaluate(
+            servo_base::id::WebViewId(11),
+            "window.__soliloquyEval('webview.describe')".to_string(),
+            Box::new(move |value| *callback_result.borrow_mut() = Some(value)),
+        );
+
+        assert!(matches!(*result.borrow(), Some(Ok(JSValue::Object(_)))));
+        assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
+        std::env::remove_var("SOLILOQUY_JS_ENGINE");
+    }
+
+    #[test]
     fn unsupported_scripts_fall_back_to_constellation() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("SOLILOQUY_JS_ENGINE", "v8-experimental");
         let (proxy, receiver) = ConstellationProxy::new();
         let mut evaluator = JavaScriptEvaluator::new(proxy);

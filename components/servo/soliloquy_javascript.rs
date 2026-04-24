@@ -64,7 +64,7 @@ fn evaluate_command(
     script: &str,
 ) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
     let command = parse_soliloquy_command(script)?;
-    dispatch_command(webview_id, command).map(Ok)
+    dispatch_command(webview_id, &command).map(Ok)
 }
 
 fn evaluate_literal(script: &str) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
@@ -120,22 +120,61 @@ fn evaluate_engine_probe(
     }
 }
 
-fn parse_soliloquy_command(script: &str) -> Option<&str> {
+#[derive(Debug, PartialEq, Eq)]
+struct SoliloquyCommand {
+    name: String,
+    args: Vec<String>,
+}
+
+fn parse_soliloquy_command(script: &str) -> Option<SoliloquyCommand> {
     const PREFIXES: [&str; 2] = ["window.__soliloquyEval(", "globalThis.__soliloquyEval("];
     for prefix in PREFIXES {
         if let Some(rest) = script.strip_prefix(prefix) {
-            let command = rest.strip_suffix(')')?.trim();
-            let quote = command.chars().next()?;
-            if (quote == '\'' || quote == '"') && command.ends_with(quote) && command.len() >= 2 {
-                return Some(&command[1..command.len() - 1]);
-            }
+            let tokens = parse_quoted_arguments(rest.strip_suffix(')')?.trim())?;
+            let (name, args) = tokens.split_first()?;
+            return Some(SoliloquyCommand {
+                name: name.clone(),
+                args: args.to_vec(),
+            });
         }
     }
     None
 }
 
-fn dispatch_command(webview_id: WebViewId, command: &str) -> Option<JSValue> {
-    match command {
+fn parse_quoted_arguments(payload: &str) -> Option<Vec<String>> {
+    let mut values = Vec::new();
+    let mut cursor = payload.trim();
+
+    while !cursor.is_empty() {
+        let quote = cursor.chars().next()?;
+        if quote != '\'' && quote != '"' {
+            return None;
+        }
+
+        let rest = &cursor[quote.len_utf8()..];
+        let end = rest.find(quote)?;
+        values.push(rest[..end].to_string());
+        cursor = rest[end + quote.len_utf8()..].trim_start();
+
+        if cursor.is_empty() {
+            break;
+        }
+
+        if !cursor.starts_with(',') {
+            return None;
+        }
+        cursor = cursor[1..].trim_start();
+    }
+
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
+}
+
+fn dispatch_command(webview_id: WebViewId, command: &SoliloquyCommand) -> Option<JSValue> {
+    match command.name.as_str() {
         "engine.backend" => Some(JSValue::String(
             SoliloquyJavascriptBackend::from_environment()
                 .as_str()
@@ -152,6 +191,7 @@ fn dispatch_command(webview_id: WebViewId, command: &str) -> Option<JSValue> {
             ),
             ("bridgeReady".to_string(), JSValue::Boolean(false)),
             ("controlsDom".to_string(), JSValue::Boolean(false)),
+            ("commandChannel".to_string(), JSValue::Boolean(true)),
         ]))),
         "webview.id" => Some(JSValue::Number(webview_id.0 as f64)),
         "webview.describe" => Some(JSValue::Object(HashMap::from([
@@ -175,8 +215,34 @@ fn dispatch_command(webview_id: WebViewId, command: &str) -> Option<JSValue> {
                 JSValue::String("mozjs".to_string()),
             ),
         ]))),
+        "dom.inspect" => dispatch_dom_inspect(command.args.first()?),
         _ => None,
     }
+}
+
+fn dispatch_dom_inspect(target: &str) -> Option<JSValue> {
+    let (kind, writable) = match target {
+        "document.title" => ("string", true),
+        "location.href" => ("string", false),
+        "navigator.userAgent" => ("string", false),
+        "document.readyState" => ("string", false),
+        _ => return None,
+    };
+
+    Some(JSValue::Object(HashMap::from([
+        ("target".to_string(), JSValue::String(target.to_string())),
+        ("kind".to_string(), JSValue::String(kind.to_string())),
+        ("writable".to_string(), JSValue::Boolean(writable)),
+        (
+            "status".to_string(),
+            JSValue::String("fallback-required".to_string()),
+        ),
+        (
+            "fallbackEngine".to_string(),
+            JSValue::String("mozjs".to_string()),
+        ),
+        ("valueAvailable".to_string(), JSValue::Boolean(false)),
+    ])))
 }
 
 fn parse_number(script: &str) -> Option<f64> {
@@ -228,7 +294,8 @@ mod tests {
     use servo_base::id::WebViewId;
 
     use super::{
-        SOLILOQUY_JS_ENGINE_ENV, SoliloquyJavascriptBackend, SoliloquyJavascriptDispatcher,
+        SOLILOQUY_JS_ENGINE_ENV, SoliloquyCommand, SoliloquyJavascriptBackend,
+        SoliloquyJavascriptDispatcher, parse_soliloquy_command,
     };
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -291,6 +358,18 @@ mod tests {
         );
         assert!(matches!(dom_capabilities, Some(Ok(JSValue::Object(_)))));
 
+        let dom_inspect = SoliloquyJavascriptDispatcher::maybe_evaluate(
+            WebViewId(42),
+            "window.__soliloquyEval('dom.inspect', 'document.title')",
+        );
+        assert!(matches!(dom_inspect, Some(Ok(JSValue::Object(_)))));
+
+        let dom_inspect_unknown = SoliloquyJavascriptDispatcher::maybe_evaluate(
+            WebViewId(42),
+            "window.__soliloquyEval('dom.inspect', 'document.body.innerHTML')",
+        );
+        assert!(dom_inspect_unknown.is_none());
+
         assert!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
                 WebViewId(42),
@@ -298,6 +377,49 @@ mod tests {
             )
             .is_none()
         );
+
+        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+    }
+
+    #[test]
+    fn parser_supports_multiple_quoted_arguments() {
+        assert_eq!(
+            parse_soliloquy_command("window.__soliloquyEval('dom.inspect', 'location.href')"),
+            Some(SoliloquyCommand {
+                name: "dom.inspect".to_string(),
+                args: vec!["location.href".to_string()],
+            })
+        );
+    }
+
+    #[test]
+    fn dom_inspect_returns_fallback_metadata() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+
+        let result = SoliloquyJavascriptDispatcher::maybe_evaluate(
+            WebViewId(13),
+            "window.__soliloquyEval('dom.inspect', 'location.href')",
+        );
+
+        let object = match result {
+            Some(Ok(JSValue::Object(object))) => object,
+            other => panic!("unexpected dom.inspect result: {other:?}"),
+        };
+
+        assert_eq!(
+            object.get("target"),
+            Some(&JSValue::String("location.href".to_string()))
+        );
+        assert_eq!(
+            object.get("status"),
+            Some(&JSValue::String("fallback-required".to_string()))
+        );
+        assert_eq!(
+            object.get("fallbackEngine"),
+            Some(&JSValue::String("mozjs".to_string()))
+        );
+        assert_eq!(object.get("valueAvailable"), Some(&JSValue::Boolean(false)));
 
         std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
     }

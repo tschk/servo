@@ -8,8 +8,9 @@ use embedder_traits::{JSValue, JavaScriptEvaluationError};
 use servo_base::id::WebViewId;
 
 use crate::soliloquy_bridge::{
-    SoliloquyBridgeReadTarget, SoliloquyBridgeWrite, capabilities, describe_webview,
-    inspect_property, read_property, write_property,
+    SoliloquyBridgeMutation, SoliloquyBridgeReadTarget, SoliloquyBridgeResult,
+    SoliloquyBridgeWrite, capabilities, describe_webview, inspect_property, read_property,
+    resolve_write, write_property,
 };
 
 const SOLILOQUY_JS_ENGINE_ENV: &str = "SOLILOQUY_JS_ENGINE";
@@ -46,6 +47,13 @@ impl SoliloquyJavascriptDispatcher {
         webview_id: WebViewId,
         script: &str,
     ) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
+        Self::maybe_evaluate_with_mutations(webview_id, script).map(|evaluation| evaluation.result)
+    }
+
+    pub(crate) fn maybe_evaluate_with_mutations(
+        webview_id: WebViewId,
+        script: &str,
+    ) -> Option<SoliloquyJavascriptEvaluation> {
         if SoliloquyJavascriptBackend::from_environment()
             != SoliloquyJavascriptBackend::V8Experimental
         {
@@ -54,7 +62,7 @@ impl SoliloquyJavascriptDispatcher {
 
         let trimmed = script.trim();
         if trimmed.is_empty() {
-            return Some(Ok(JSValue::Undefined));
+            return Some(SoliloquyJavascriptEvaluation::ok(JSValue::Undefined));
         }
 
         evaluate_live_dom_assignment(webview_id, trimmed)
@@ -66,60 +74,106 @@ impl SoliloquyJavascriptDispatcher {
     }
 }
 
+pub(crate) struct SoliloquyJavascriptEvaluation {
+    pub(crate) result: Result<JSValue, JavaScriptEvaluationError>,
+    pub(crate) mutations: Vec<SoliloquyBridgeMutation>,
+}
+
+impl SoliloquyJavascriptEvaluation {
+    fn ok(value: JSValue) -> Self {
+        Self {
+            result: Ok(value),
+            mutations: Vec::new(),
+        }
+    }
+
+    fn bridge_result(result: SoliloquyBridgeResult) -> Self {
+        Self::ok(result.into_js_value())
+    }
+
+    fn with_mutation(value: JSValue, mutation: SoliloquyBridgeMutation) -> Self {
+        Self {
+            result: Ok(value),
+            mutations: vec![mutation],
+        }
+    }
+}
+
 fn evaluate_live_dom_property(
     webview_id: WebViewId,
     script: &str,
-) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
+) -> Option<SoliloquyJavascriptEvaluation> {
     let target = SoliloquyBridgeReadTarget::parse(script)?;
-    Some(Ok(
-        read_property(webview_id, target).unwrap_or(JSValue::Null)
+    Some(SoliloquyJavascriptEvaluation::ok(
+        read_property(webview_id, target).unwrap_or(JSValue::Null),
     ))
 }
 
 fn evaluate_live_dom_assignment(
     webview_id: WebViewId,
     script: &str,
-) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
+) -> Option<SoliloquyJavascriptEvaluation> {
     let (lhs, rhs) = split_assignment(script)?;
     let write = SoliloquyBridgeWrite::parse(lhs, &parse_string_literal(rhs)?)?;
-    Some(Ok(write_property(webview_id, write)))
+    let write = match resolve_write(webview_id, write) {
+        Ok(write) => write,
+        Err(error) => return Some(SoliloquyJavascriptEvaluation::bridge_result(error)),
+    };
+
+    let (value, mutation) = write_property(webview_id, write).into_parts();
+    Some(match mutation {
+        Some(mutation) => SoliloquyJavascriptEvaluation::with_mutation(value, mutation),
+        None => SoliloquyJavascriptEvaluation::ok(value),
+    })
 }
 
-fn evaluate_command(
-    webview_id: WebViewId,
-    script: &str,
-) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
+fn evaluate_command(webview_id: WebViewId, script: &str) -> Option<SoliloquyJavascriptEvaluation> {
     let command = parse_soliloquy_command(script)?;
-    dispatch_command(webview_id, &command).map(Ok)
+    let (result, mutation) = dispatch_command(webview_id, command);
+    Some(match mutation {
+        Some(mutation) => SoliloquyJavascriptEvaluation {
+            result: Ok(result.into_js_value()),
+            mutations: vec![mutation],
+        },
+        None => SoliloquyJavascriptEvaluation::bridge_result(result),
+    })
 }
 
-fn evaluate_literal(script: &str) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
+fn evaluate_literal(script: &str) -> Option<SoliloquyJavascriptEvaluation> {
     match script {
-        "undefined" => Some(Ok(JSValue::Undefined)),
-        "null" => Some(Ok(JSValue::Null)),
-        "true" => Some(Ok(JSValue::Boolean(true))),
-        "false" => Some(Ok(JSValue::Boolean(false))),
+        "undefined" => Some(SoliloquyJavascriptEvaluation::ok(JSValue::Undefined)),
+        "null" => Some(SoliloquyJavascriptEvaluation::ok(JSValue::Null)),
+        "true" => Some(SoliloquyJavascriptEvaluation::ok(JSValue::Boolean(true))),
+        "false" => Some(SoliloquyJavascriptEvaluation::ok(JSValue::Boolean(false))),
         _ => parse_number(script)
             .map(JSValue::Number)
-            .map(Ok)
-            .or_else(|| parse_string_literal(script).map(JSValue::String).map(Ok)),
+            .map(SoliloquyJavascriptEvaluation::ok)
+            .or_else(|| {
+                parse_string_literal(script)
+                    .map(JSValue::String)
+                    .map(SoliloquyJavascriptEvaluation::ok)
+            }),
     }
 }
 
-fn evaluate_binary_plus(script: &str) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
+fn evaluate_binary_plus(script: &str) -> Option<SoliloquyJavascriptEvaluation> {
     let (lhs, rhs) = split_binary_plus(script)?;
-    let lhs = evaluate_literal(lhs)?.ok()?;
-    let rhs = evaluate_literal(rhs)?.ok()?;
+    let lhs = evaluate_literal(lhs)?.result.ok()?;
+    let rhs = evaluate_literal(rhs)?.result.ok()?;
 
     match (lhs, rhs) {
-        (JSValue::Number(lhs), JSValue::Number(rhs)) => Some(Ok(JSValue::Number(lhs + rhs))),
-        (JSValue::String(lhs), JSValue::String(rhs)) => Some(Ok(JSValue::String(lhs + &rhs))),
-        (JSValue::String(lhs), JSValue::Number(rhs)) => {
-            Some(Ok(JSValue::String(format!("{lhs}{rhs}"))))
-        },
-        (JSValue::Number(lhs), JSValue::String(rhs)) => {
-            Some(Ok(JSValue::String(format!("{lhs}{rhs}"))))
-        },
+        (JSValue::Number(lhs), JSValue::Number(rhs)) => Some(SoliloquyJavascriptEvaluation::ok(
+            JSValue::Number(lhs + rhs),
+        )),
+        (JSValue::String(lhs), JSValue::String(rhs)) => Some(SoliloquyJavascriptEvaluation::ok(
+            JSValue::String(lhs + &rhs),
+        )),
+        (JSValue::String(lhs), JSValue::Number(rhs)) => Some(SoliloquyJavascriptEvaluation::ok(
+            JSValue::String(format!("{lhs}{rhs}")),
+        )),
+        (JSValue::Number(lhs), JSValue::String(rhs)) => Some(SoliloquyJavascriptEvaluation::ok(
+            JSValue::String(format!("{lhs}{rhs}")),
+        )),
         _ => None,
     }
 }
@@ -127,29 +181,35 @@ fn evaluate_binary_plus(script: &str) -> Option<Result<JSValue, JavaScriptEvalua
 fn evaluate_engine_probe(
     webview_id: WebViewId,
     script: &str,
-) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
+) -> Option<SoliloquyJavascriptEvaluation> {
     match script {
         "window.__soliloquyEngineBackend" | "globalThis.__soliloquyEngineBackend" => {
-            Some(Ok(JSValue::String(
+            Some(SoliloquyJavascriptEvaluation::ok(JSValue::String(
                 SoliloquyJavascriptBackend::from_environment()
                     .as_str()
                     .to_string(),
             )))
         },
         "window.__soliloquyEngineBridgeReady" | "globalThis.__soliloquyEngineBridgeReady" => {
-            Some(Ok(JSValue::Boolean(false)))
+            Some(SoliloquyJavascriptEvaluation::ok(JSValue::Boolean(false)))
         },
-        "window.__soliloquyWebViewId" | "globalThis.__soliloquyWebViewId" => {
-            Some(Ok(JSValue::Number(webview_id.0 as f64)))
-        },
+        "window.__soliloquyWebViewId" | "globalThis.__soliloquyWebViewId" => Some(
+            SoliloquyJavascriptEvaluation::ok(JSValue::Number(webview_id.0 as f64)),
+        ),
         _ => None,
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct SoliloquyCommand {
-    name: String,
-    args: Vec<String>,
+enum SoliloquyCommand {
+    EngineBackend,
+    EngineStatus,
+    WebViewId,
+    WebViewDescribe,
+    DomCapabilities,
+    DomInspect(SoliloquyBridgeReadTarget),
+    DomSet(SoliloquyBridgeWrite),
+    Unsupported(String),
 }
 
 fn parse_soliloquy_command(script: &str) -> Option<SoliloquyCommand> {
@@ -158,13 +218,27 @@ fn parse_soliloquy_command(script: &str) -> Option<SoliloquyCommand> {
         if let Some(rest) = script.strip_prefix(prefix) {
             let tokens = parse_quoted_arguments(rest.strip_suffix(')')?.trim())?;
             let (name, args) = tokens.split_first()?;
-            return Some(SoliloquyCommand {
-                name: name.clone(),
-                args: args.to_vec(),
-            });
+            return Some(parse_bridge_command(name, args));
         }
     }
     None
+}
+
+fn parse_bridge_command(name: &str, args: &[String]) -> SoliloquyCommand {
+    match name {
+        "engine.backend" if args.is_empty() => SoliloquyCommand::EngineBackend,
+        "engine.status" if args.is_empty() => SoliloquyCommand::EngineStatus,
+        "webview.id" if args.is_empty() => SoliloquyCommand::WebViewId,
+        "webview.describe" if args.is_empty() => SoliloquyCommand::WebViewDescribe,
+        "dom.capabilities" if args.is_empty() => SoliloquyCommand::DomCapabilities,
+        "dom.inspect" => parse_dom_inspect(args)
+            .map(SoliloquyCommand::DomInspect)
+            .unwrap_or_else(|| SoliloquyCommand::Unsupported(name.to_string())),
+        "dom.set" => parse_dom_set(args)
+            .map(SoliloquyCommand::DomSet)
+            .unwrap_or_else(|| SoliloquyCommand::Unsupported(name.to_string())),
+        _ => SoliloquyCommand::Unsupported(name.to_string()),
+    }
 }
 
 fn parse_quoted_arguments(payload: &str) -> Option<Vec<String>> {
@@ -199,49 +273,77 @@ fn parse_quoted_arguments(payload: &str) -> Option<Vec<String>> {
     }
 }
 
-fn dispatch_command(webview_id: WebViewId, command: &SoliloquyCommand) -> Option<JSValue> {
-    match command.name.as_str() {
-        "engine.backend" => Some(JSValue::String(
-            SoliloquyJavascriptBackend::from_environment()
-                .as_str()
-                .to_string(),
-        )),
-        "engine.status" => Some(JSValue::Object(HashMap::from([
-            (
-                "requestedEngine".to_string(),
-                JSValue::String("v8-experimental".to_string()),
-            ),
-            (
-                "activeEngine".to_string(),
-                JSValue::String("soliloquy-dispatch".to_string()),
-            ),
-            ("bridgeReady".to_string(), JSValue::Boolean(false)),
-            ("controlsDom".to_string(), JSValue::Boolean(false)),
-            ("commandChannel".to_string(), JSValue::Boolean(true)),
-        ]))),
-        "webview.id" => Some(JSValue::Number(webview_id.0 as f64)),
-        "webview.describe" => Some(describe_webview(
-            webview_id,
-            SoliloquyJavascriptBackend::from_environment().as_str(),
-        )),
-        "dom.capabilities" => Some(capabilities()),
-        "dom.inspect" => dispatch_dom_inspect(webview_id, command.args.first()?),
-        "dom.set" => dispatch_dom_set(webview_id, &command.args),
-        _ => None,
+fn dispatch_command(
+    webview_id: WebViewId,
+    command: SoliloquyCommand,
+) -> (SoliloquyBridgeResult, Option<SoliloquyBridgeMutation>) {
+    match command {
+        SoliloquyCommand::EngineBackend => (
+            SoliloquyBridgeResult::value(JSValue::String(
+                SoliloquyJavascriptBackend::from_environment()
+                    .as_str()
+                    .to_string(),
+            )),
+            None,
+        ),
+        SoliloquyCommand::EngineStatus => (
+            SoliloquyBridgeResult::value(JSValue::Object(HashMap::from([
+                (
+                    "requestedEngine".to_string(),
+                    JSValue::String("v8-experimental".to_string()),
+                ),
+                (
+                    "activeEngine".to_string(),
+                    JSValue::String("soliloquy-dispatch".to_string()),
+                ),
+                ("bridgeReady".to_string(), JSValue::Boolean(false)),
+                ("controlsDom".to_string(), JSValue::Boolean(false)),
+                ("commandChannel".to_string(), JSValue::Boolean(true)),
+            ]))),
+            None,
+        ),
+        SoliloquyCommand::WebViewId => (
+            SoliloquyBridgeResult::value(JSValue::Number(webview_id.0 as f64)),
+            None,
+        ),
+        SoliloquyCommand::WebViewDescribe => (
+            SoliloquyBridgeResult::value(describe_webview(
+                webview_id,
+                SoliloquyJavascriptBackend::from_environment().as_str(),
+            )),
+            None,
+        ),
+        SoliloquyCommand::DomCapabilities => (SoliloquyBridgeResult::value(capabilities()), None),
+        SoliloquyCommand::DomInspect(target) => (
+            SoliloquyBridgeResult::value(inspect_property(webview_id, target)),
+            None,
+        ),
+        SoliloquyCommand::DomSet(write) => {
+            let write = match resolve_write(webview_id, write) {
+                Ok(write) => write,
+                Err(error) => return (error, None),
+            };
+            let (value, mutation) = write_property(webview_id, write).into_parts();
+            (SoliloquyBridgeResult::value(value), mutation)
+        },
+        SoliloquyCommand::Unsupported(operation) => {
+            (SoliloquyBridgeResult::unsupported(operation), None)
+        },
     }
 }
 
-fn dispatch_dom_inspect(webview_id: WebViewId, target: &str) -> Option<JSValue> {
-    let target = SoliloquyBridgeReadTarget::parse(target)?;
-    Some(inspect_property(webview_id, target))
+fn parse_dom_inspect(args: &[String]) -> Option<SoliloquyBridgeReadTarget> {
+    let [target] = args else {
+        return None;
+    };
+    SoliloquyBridgeReadTarget::parse(target)
 }
 
-fn dispatch_dom_set(webview_id: WebViewId, args: &[String]) -> Option<JSValue> {
+fn parse_dom_set(args: &[String]) -> Option<SoliloquyBridgeWrite> {
     let [target, value] = args else {
         return None;
     };
-    let write = SoliloquyBridgeWrite::parse(target, value)?;
-    Some(write_property(webview_id, write))
+    SoliloquyBridgeWrite::parse(target, value)
 }
 
 fn parse_number(script: &str) -> Option<f64> {
@@ -308,6 +410,7 @@ fn split_assignment(script: &str) -> Option<(&str, &str)> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Mutex;
 
     use embedder_traits::{JSValue, LoadStatus};
@@ -318,8 +421,8 @@ mod tests {
         SoliloquyJavascriptDispatcher, parse_soliloquy_command,
     };
     use crate::soliloquy_bridge::{
-        record_webview_history_change, record_webview_load_status, record_webview_page_title,
-        reset_webview_snapshots,
+        SoliloquyBridgeMutation, record_webview_history_change, record_webview_load_status,
+        record_webview_page_title, reset_webview_snapshots,
     };
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -373,7 +476,7 @@ mod tests {
                 WebViewId(42),
                 "window.__soliloquyEval('webview.id')"
             ),
-            Some(Ok(JSValue::Number(42.0)))
+            Some(Ok(bridge_envelope(JSValue::Number(42.0))))
         );
 
         let result = SoliloquyJavascriptDispatcher::maybe_evaluate(
@@ -398,14 +501,23 @@ mod tests {
             WebViewId(42),
             "window.__soliloquyEval('dom.inspect', 'document.body.innerHTML')",
         );
-        assert!(dom_inspect_unknown.is_none());
+        assert_eq!(
+            dom_inspect_unknown,
+            Some(Ok(bridge_detail_envelope(
+                "unsupported",
+                JSValue::String("dom.inspect".to_string())
+            )))
+        );
 
-        assert!(
+        assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
                 WebViewId(42),
                 "window.__soliloquyEval('not.supported')",
-            )
-            .is_none()
+            ),
+            Some(Ok(bridge_detail_envelope(
+                "unsupported",
+                JSValue::String("not.supported".to_string())
+            )))
         );
 
         std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
@@ -461,7 +573,7 @@ mod tests {
                 WebViewId(30),
                 "window.__soliloquyEval('dom.set', 'document.title', 'Command Title')"
             ),
-            Some(Ok(JSValue::String("Command Title".into())))
+            Some(Ok(bridge_envelope(JSValue::String("Command Title".into()))))
         );
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(30), "document.title"),
@@ -475,10 +587,9 @@ mod tests {
     fn parser_supports_multiple_quoted_arguments() {
         assert_eq!(
             parse_soliloquy_command("window.__soliloquyEval('dom.inspect', 'location.href')"),
-            Some(SoliloquyCommand {
-                name: "dom.inspect".to_string(),
-                args: vec!["location.href".to_string()],
-            })
+            Some(SoliloquyCommand::DomInspect(
+                crate::soliloquy_bridge::SoliloquyBridgeReadTarget::LocationHref
+            ))
         );
     }
 
@@ -497,9 +608,19 @@ mod tests {
             "window.__soliloquyEval('dom.inspect', 'location.href')",
         );
 
-        let object = match result {
+        let envelope = match result {
             Some(Ok(JSValue::Object(object))) => object,
             other => panic!("unexpected dom.inspect result: {other:?}"),
+        };
+        assert_eq!(envelope.get("ok"), Some(&JSValue::Boolean(true)));
+        assert_eq!(
+            envelope.get("status"),
+            Some(&JSValue::String("ok".to_string()))
+        );
+
+        let object = match envelope.get("value") {
+            Some(JSValue::Object(object)) => object,
+            other => panic!("unexpected dom.inspect envelope value: {other:?}"),
         };
 
         assert_eq!(
@@ -521,5 +642,125 @@ mod tests {
         );
 
         std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+    }
+
+    #[test]
+    fn dispatcher_writes_live_location_href() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        reset_webview_snapshots();
+        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(
+                WebViewId(31),
+                "location.href = 'https://soliloquy.test/next'"
+            ),
+            Some(Ok(JSValue::String(
+                "https://soliloquy.test/next".to_string()
+            )))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(31), "location.href"),
+            Some(Ok(JSValue::String(
+                "https://soliloquy.test/next".to_string()
+            )))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(31), "document.readyState"),
+            Some(Ok(JSValue::String("loading".to_string())))
+        );
+
+        let evaluation = SoliloquyJavascriptDispatcher::maybe_evaluate_with_mutations(
+            WebViewId(31),
+            "location.href = 'https://soliloquy.test/queued'",
+        )
+        .expect("location.href write should be handled");
+        assert_eq!(
+            evaluation.result,
+            Ok(JSValue::String("https://soliloquy.test/queued".to_string()))
+        );
+        assert_eq!(
+            evaluation.mutations,
+            vec![SoliloquyBridgeMutation::Navigate {
+                url: "https://soliloquy.test/queued".to_string()
+            }]
+        );
+
+        let relative_evaluation = SoliloquyJavascriptDispatcher::maybe_evaluate_with_mutations(
+            WebViewId(31),
+            "location.href = 'relative/page'",
+        )
+        .expect("relative location.href write should be handled");
+        assert_eq!(
+            relative_evaluation.result,
+            Ok(JSValue::String(
+                "https://soliloquy.test/relative/page".to_string()
+            ))
+        );
+        assert_eq!(
+            relative_evaluation.mutations,
+            vec![SoliloquyBridgeMutation::Navigate {
+                url: "https://soliloquy.test/relative/page".to_string()
+            }]
+        );
+
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(
+                WebViewId(32),
+                "location.href = 'not a url'"
+            ),
+            Some(Ok(bridge_detail_envelope(
+                "error",
+                JSValue::String("invalid location.href: relative URL without a base".to_string())
+            )))
+        );
+
+        let command_result = SoliloquyJavascriptDispatcher::maybe_evaluate(
+            WebViewId(31),
+            "window.__soliloquyEval('dom.set', 'location.href', 'https://soliloquy.test/final')",
+        );
+        assert_eq!(
+            command_result,
+            Some(Ok(bridge_envelope(JSValue::String(
+                "https://soliloquy.test/final".to_string()
+            ))))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(31), "location.href"),
+            Some(Ok(JSValue::String(
+                "https://soliloquy.test/final".to_string()
+            )))
+        );
+
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(
+                WebViewId(31),
+                "window.__soliloquyEval('dom.set', 'location.href', '')"
+            ),
+            Some(Ok(bridge_detail_envelope(
+                "error",
+                JSValue::String("location.href cannot be empty".to_string())
+            )))
+        );
+
+        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+    }
+
+    fn bridge_envelope(value: JSValue) -> JSValue {
+        JSValue::Object(HashMap::from([
+            ("ok".to_string(), JSValue::Boolean(true)),
+            ("status".to_string(), JSValue::String("ok".to_string())),
+            ("value".to_string(), value),
+            ("detail".to_string(), JSValue::Null),
+        ]))
+    }
+
+    fn bridge_detail_envelope(status: &str, detail: JSValue) -> JSValue {
+        JSValue::Object(HashMap::from([
+            ("ok".to_string(), JSValue::Boolean(false)),
+            ("status".to_string(), JSValue::String(status.to_string())),
+            ("value".to_string(), JSValue::Null),
+            ("detail".to_string(), detail),
+        ]))
     }
 }

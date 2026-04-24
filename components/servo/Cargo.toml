@@ -48,6 +48,7 @@ native-bluetooth = ["servo-bluetooth/native-bluetooth"]
 no-wgl = ["mozangle/egl", "mozangle/build_dlls", "surfman/sm-angle-default", "paint_api/no-wgl"]
 profilemozjs = ["script/profilemozjs"]
 refcell_backtrace = ["script/refcell_backtrace"]
+soliloquy_v8 = ["dep:rusty_v8"]
 testbinding = ["script/testbinding"]
 tracing = [
     "dep:tracing",
@@ -109,6 +110,7 @@ parking_lot = { workspace = true }
 profile = { workspace = true }
 profile_traits = { workspace = true }
 rustc-hash = { workspace = true }
+rusty_v8 = { workspace = true, optional = true }
 script = { workspace = true }
 script_traits = { workspace = true }
 serde = { workspace = true }

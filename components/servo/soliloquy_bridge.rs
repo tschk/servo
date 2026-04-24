@@ -71,6 +71,37 @@ impl SoliloquyBridgeWrite {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SoliloquyBridgeCommand {
+    EngineBackend,
+    EngineStatus,
+    WebViewId,
+    WebViewDescribe,
+    DomCapabilities,
+    DomInspect(SoliloquyBridgeReadTarget),
+    DomSet(SoliloquyBridgeWrite),
+    Unsupported(String),
+}
+
+impl SoliloquyBridgeCommand {
+    pub(crate) fn parse(name: &str, args: &[String]) -> Self {
+        match name {
+            "engine.backend" if args.is_empty() => Self::EngineBackend,
+            "engine.status" if args.is_empty() => Self::EngineStatus,
+            "webview.id" if args.is_empty() => Self::WebViewId,
+            "webview.describe" if args.is_empty() => Self::WebViewDescribe,
+            "dom.capabilities" if args.is_empty() => Self::DomCapabilities,
+            "dom.inspect" => parse_dom_inspect(args)
+                .map(Self::DomInspect)
+                .unwrap_or_else(|| Self::Unsupported(name.to_string())),
+            "dom.set" => parse_dom_set(args)
+                .map(Self::DomSet)
+                .unwrap_or_else(|| Self::Unsupported(name.to_string())),
+            _ => Self::Unsupported(name.to_string()),
+        }
+    }
+}
+
 pub(crate) fn resolve_write(
     webview_id: WebViewId,
     write: SoliloquyBridgeWrite,
@@ -320,6 +351,20 @@ fn bridge_result_object(status: &str, value: JSValue, detail: JSValue) -> JSValu
         ("value".to_string(), value),
         ("detail".to_string(), detail),
     ]))
+}
+
+fn parse_dom_inspect(args: &[String]) -> Option<SoliloquyBridgeReadTarget> {
+    let [target] = args else {
+        return None;
+    };
+    SoliloquyBridgeReadTarget::parse(target)
+}
+
+fn parse_dom_set(args: &[String]) -> Option<SoliloquyBridgeWrite> {
+    let [target, value] = args else {
+        return None;
+    };
+    SoliloquyBridgeWrite::parse(target, value)
 }
 
 fn resolve_location_href(

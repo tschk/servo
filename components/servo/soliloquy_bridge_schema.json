@@ -1,0 +1,54 @@
+{
+  "schema": "soliloquy.rv8.bridge",
+  "version": "rv8-bridge-v1",
+  "commands": [
+    {
+      "name": "engine.backend",
+      "args": []
+    },
+    {
+      "name": "engine.status",
+      "args": []
+    },
+    {
+      "name": "webview.id",
+      "args": []
+    },
+    {
+      "name": "webview.describe",
+      "args": []
+    },
+    {
+      "name": "dom.capabilities",
+      "args": []
+    },
+    {
+      "name": "dom.inspect",
+      "args": ["target"]
+    },
+    {
+      "name": "dom.set",
+      "args": ["target", "value"]
+    }
+  ],
+  "targets": {
+    "read": [
+      "document.title",
+      "location.href",
+      "window.location.href",
+      "document.readyState"
+    ],
+    "write": [
+      "document.title",
+      "location.href",
+      "window.location.href"
+    ]
+  },
+  "resultEnvelope": ["ok", "status", "value", "detail"],
+  "mutations": [
+    {
+      "name": "navigate",
+      "fields": ["url"]
+    }
+  ]
+}

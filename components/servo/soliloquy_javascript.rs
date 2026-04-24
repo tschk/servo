@@ -3,11 +3,21 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
-use embedder_traits::{JSValue, JavaScriptEvaluationError};
+use embedder_traits::{JSValue, JavaScriptEvaluationError, LoadStatus};
 use servo_base::id::WebViewId;
 
 const SOLILOQUY_JS_ENGINE_ENV: &str = "SOLILOQUY_JS_ENGINE";
+static WEBVIEW_SNAPSHOTS: LazyLock<Mutex<HashMap<WebViewId, SoliloquyWebViewSnapshot>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Clone, Debug, Default)]
+struct SoliloquyWebViewSnapshot {
+    page_title: Option<String>,
+    current_url: Option<String>,
+    ready_state: Option<String>,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SoliloquyJavascriptBackend {
@@ -52,11 +62,90 @@ impl SoliloquyJavascriptDispatcher {
             return Some(Ok(JSValue::Undefined));
         }
 
-        evaluate_command(webview_id, trimmed)
+        evaluate_live_dom_assignment(webview_id, trimmed)
+            .or_else(|| evaluate_live_dom_property(webview_id, trimmed))
+            .or_else(|| evaluate_command(webview_id, trimmed))
             .or_else(|| evaluate_literal(trimmed))
             .or_else(|| evaluate_binary_plus(trimmed))
             .or_else(|| evaluate_engine_probe(webview_id, trimmed))
     }
+}
+
+pub(crate) fn record_webview_page_title(webview_id: WebViewId, title: Option<String>) {
+    webview_snapshot_mut(webview_id).page_title = title;
+}
+
+pub(crate) fn record_webview_navigation_request(webview_id: WebViewId, url: String) {
+    webview_snapshot_mut(webview_id).current_url = Some(url);
+}
+
+pub(crate) fn record_webview_history_change(webview_id: WebViewId, current_url: Option<String>) {
+    webview_snapshot_mut(webview_id).current_url = current_url;
+}
+
+pub(crate) fn record_webview_load_status(webview_id: WebViewId, load_status: LoadStatus) {
+    webview_snapshot_mut(webview_id).ready_state = Some(match load_status {
+        LoadStatus::Started => "loading".to_string(),
+        LoadStatus::HeadParsed => "interactive".to_string(),
+        LoadStatus::Complete => "complete".to_string(),
+    });
+}
+
+pub(crate) fn clear_webview_snapshot(webview_id: WebViewId) {
+    WEBVIEW_SNAPSHOTS.lock().unwrap().remove(&webview_id);
+}
+
+#[cfg(test)]
+pub(crate) fn reset_webview_snapshots() {
+    WEBVIEW_SNAPSHOTS.lock().unwrap().clear();
+}
+
+fn webview_snapshot_mut(
+    webview_id: WebViewId,
+) -> std::sync::MutexGuard<'static, HashMap<WebViewId, SoliloquyWebViewSnapshot>> {
+    let mut snapshots = WEBVIEW_SNAPSHOTS.lock().unwrap();
+    snapshots.entry(webview_id).or_default();
+    snapshots
+}
+
+fn webview_snapshot(webview_id: WebViewId) -> Option<SoliloquyWebViewSnapshot> {
+    WEBVIEW_SNAPSHOTS.lock().unwrap().get(&webview_id).cloned()
+}
+
+fn evaluate_live_dom_property(
+    webview_id: WebViewId,
+    script: &str,
+) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
+    let snapshot = webview_snapshot(webview_id)?;
+    match script {
+        "document.title" => Some(Ok(match snapshot.page_title {
+            Some(title) => JSValue::String(title),
+            None => JSValue::Null,
+        })),
+        "location.href" | "window.location.href" => Some(Ok(match snapshot.current_url {
+            Some(url) => JSValue::String(url),
+            None => JSValue::Null,
+        })),
+        "document.readyState" => Some(Ok(match snapshot.ready_state {
+            Some(ready_state) => JSValue::String(ready_state),
+            None => JSValue::Null,
+        })),
+        _ => None,
+    }
+}
+
+fn evaluate_live_dom_assignment(
+    webview_id: WebViewId,
+    script: &str,
+) -> Option<Result<JSValue, JavaScriptEvaluationError>> {
+    let (lhs, rhs) = split_assignment(script)?;
+    let value = match lhs {
+        "document.title" => JSValue::String(parse_string_literal(rhs)?),
+        _ => return None,
+    };
+
+    apply_live_dom_write(webview_id, lhs, value.clone())?;
+    Some(Ok(value))
 }
 
 fn evaluate_command(
@@ -174,6 +263,7 @@ fn parse_quoted_arguments(payload: &str) -> Option<Vec<String>> {
 }
 
 fn dispatch_command(webview_id: WebViewId, command: &SoliloquyCommand) -> Option<JSValue> {
+    let snapshot = webview_snapshot(webview_id);
     match command.name.as_str() {
         "engine.backend" => Some(JSValue::String(
             SoliloquyJavascriptBackend::from_environment()
@@ -204,30 +294,64 @@ fn dispatch_command(webview_id: WebViewId, command: &SoliloquyCommand) -> Option
                         .to_string(),
                 ),
             ),
-            ("controlsDom".to_string(), JSValue::Boolean(false)),
+            (
+                "url".to_string(),
+                snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.current_url.clone())
+                    .map(JSValue::String)
+                    .unwrap_or(JSValue::Null),
+            ),
+            (
+                "title".to_string(),
+                snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.page_title.clone())
+                    .map(JSValue::String)
+                    .unwrap_or(JSValue::Null),
+            ),
+            (
+                "readyState".to_string(),
+                snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.ready_state.clone())
+                    .map(JSValue::String)
+                    .unwrap_or(JSValue::Null),
+            ),
+            (
+                "controlsDom".to_string(),
+                JSValue::Boolean(snapshot.is_some()),
+            ),
         ]))),
         "dom.capabilities" => Some(JSValue::Object(HashMap::from([
             ("simpleEval".to_string(), JSValue::Boolean(true)),
             ("structuredCommands".to_string(), JSValue::Boolean(true)),
-            ("controlsDom".to_string(), JSValue::Boolean(false)),
+            ("liveDomProperties".to_string(), JSValue::Boolean(true)),
+            ("liveDomWrites".to_string(), JSValue::Boolean(true)),
+            ("controlsDom".to_string(), JSValue::Boolean(true)),
             (
                 "fallbackEngine".to_string(),
                 JSValue::String("mozjs".to_string()),
             ),
         ]))),
-        "dom.inspect" => dispatch_dom_inspect(command.args.first()?),
+        "dom.inspect" => dispatch_dom_inspect(webview_id, command.args.first()?),
+        "dom.set" => dispatch_dom_set(webview_id, &command.args),
         _ => None,
     }
 }
 
-fn dispatch_dom_inspect(target: &str) -> Option<JSValue> {
+fn dispatch_dom_inspect(webview_id: WebViewId, target: &str) -> Option<JSValue> {
     let (kind, writable) = match target {
         "document.title" => ("string", true),
         "location.href" => ("string", false),
-        "navigator.userAgent" => ("string", false),
         "document.readyState" => ("string", false),
         _ => return None,
     };
+
+    let live_value = evaluate_live_dom_property(webview_id, target)
+        .and_then(Result::ok)
+        .unwrap_or(JSValue::Null);
+    let value_available = live_value != JSValue::Null;
 
     Some(JSValue::Object(HashMap::from([
         ("target".to_string(), JSValue::String(target.to_string())),
@@ -235,14 +359,43 @@ fn dispatch_dom_inspect(target: &str) -> Option<JSValue> {
         ("writable".to_string(), JSValue::Boolean(writable)),
         (
             "status".to_string(),
-            JSValue::String("fallback-required".to_string()),
+            JSValue::String(if value_available {
+                "live-snapshot".to_string()
+            } else {
+                "fallback-required".to_string()
+            }),
         ),
         (
             "fallbackEngine".to_string(),
             JSValue::String("mozjs".to_string()),
         ),
-        ("valueAvailable".to_string(), JSValue::Boolean(false)),
+        (
+            "valueAvailable".to_string(),
+            JSValue::Boolean(value_available),
+        ),
+        ("value".to_string(), live_value),
     ])))
+}
+
+fn dispatch_dom_set(webview_id: WebViewId, args: &[String]) -> Option<JSValue> {
+    let [target, value] = args else {
+        return None;
+    };
+    let value = JSValue::String(value.clone());
+    apply_live_dom_write(webview_id, target, value.clone())?;
+    Some(value)
+}
+
+fn apply_live_dom_write(webview_id: WebViewId, target: &str, value: JSValue) -> Option<()> {
+    let mut snapshots = webview_snapshot_mut(webview_id);
+    let snapshot = snapshots.get_mut(&webview_id)?;
+    match (target, value) {
+        ("document.title", JSValue::String(title)) => {
+            snapshot.page_title = Some(title);
+            Some(())
+        },
+        _ => None,
+    }
 }
 
 fn parse_number(script: &str) -> Option<f64> {
@@ -286,16 +439,38 @@ fn split_binary_plus(script: &str) -> Option<(&str, &str)> {
     None
 }
 
+fn split_assignment(script: &str) -> Option<(&str, &str)> {
+    let mut in_quote: Option<char> = None;
+    for (index, ch) in script.char_indices() {
+        match in_quote {
+            Some(quote) if ch == quote => in_quote = None,
+            Some(_) => {},
+            None if ch == '\'' || ch == '"' => in_quote = Some(ch),
+            None if ch == '=' => {
+                let lhs = script[..index].trim();
+                let rhs = script[index + 1..].trim();
+                if !lhs.is_empty() && !rhs.is_empty() {
+                    return Some((lhs, rhs));
+                }
+            },
+            None => {},
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
 
-    use embedder_traits::JSValue;
+    use embedder_traits::{JSValue, LoadStatus};
     use servo_base::id::WebViewId;
 
     use super::{
         SOLILOQUY_JS_ENGINE_ENV, SoliloquyCommand, SoliloquyJavascriptBackend,
-        SoliloquyJavascriptDispatcher, parse_soliloquy_command,
+        SoliloquyJavascriptDispatcher, parse_soliloquy_command, record_webview_history_change,
+        record_webview_load_status, record_webview_page_title, reset_webview_snapshots,
     };
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -303,6 +478,7 @@ mod tests {
     #[test]
     fn dispatcher_is_disabled_without_v8_experimental() {
         let _guard = ENV_LOCK.lock().unwrap();
+        reset_webview_snapshots();
         std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
         assert_eq!(
             SoliloquyJavascriptBackend::from_environment(),
@@ -314,6 +490,7 @@ mod tests {
     #[test]
     fn dispatcher_handles_literals_and_simple_addition() {
         let _guard = ENV_LOCK.lock().unwrap();
+        reset_webview_snapshots();
         std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(1), "1 + 1"),
@@ -336,7 +513,11 @@ mod tests {
     #[test]
     fn dispatcher_handles_structured_commands() {
         let _guard = ENV_LOCK.lock().unwrap();
+        reset_webview_snapshots();
         std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+        record_webview_page_title(WebViewId(42), Some("Soliloquy".to_string()));
+        record_webview_history_change(WebViewId(42), Some("https://example.test/".to_string()));
+        record_webview_load_status(WebViewId(42), LoadStatus::Complete);
 
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
@@ -382,6 +563,66 @@ mod tests {
     }
 
     #[test]
+    fn dispatcher_reads_live_dom_properties_from_snapshot() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        reset_webview_snapshots();
+        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+        record_webview_page_title(WebViewId(21), Some("Snapshot Title".to_string()));
+        record_webview_history_change(
+            WebViewId(21),
+            Some("https://soliloquy.test/current".to_string()),
+        );
+        record_webview_load_status(WebViewId(21), LoadStatus::HeadParsed);
+
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(21), "document.title"),
+            Some(Ok(JSValue::String("Snapshot Title".into())))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(21), "location.href"),
+            Some(Ok(JSValue::String("https://soliloquy.test/current".into())))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(21), "document.readyState"),
+            Some(Ok(JSValue::String("interactive".into())))
+        );
+
+        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+    }
+
+    #[test]
+    fn dispatcher_writes_live_dom_title() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        reset_webview_snapshots();
+        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(
+                WebViewId(30),
+                "document.title = 'Updated Title'"
+            ),
+            Some(Ok(JSValue::String("Updated Title".into())))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(30), "document.title"),
+            Some(Ok(JSValue::String("Updated Title".into())))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(
+                WebViewId(30),
+                "window.__soliloquyEval('dom.set', 'document.title', 'Command Title')"
+            ),
+            Some(Ok(JSValue::String("Command Title".into())))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(30), "document.title"),
+            Some(Ok(JSValue::String("Command Title".into())))
+        );
+
+        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+    }
+
+    #[test]
     fn parser_supports_multiple_quoted_arguments() {
         assert_eq!(
             parse_soliloquy_command("window.__soliloquyEval('dom.inspect', 'location.href')"),
@@ -395,7 +636,12 @@ mod tests {
     #[test]
     fn dom_inspect_returns_fallback_metadata() {
         let _guard = ENV_LOCK.lock().unwrap();
+        reset_webview_snapshots();
         std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+        record_webview_history_change(
+            WebViewId(13),
+            Some("https://soliloquy.test/dom".to_string()),
+        );
 
         let result = SoliloquyJavascriptDispatcher::maybe_evaluate(
             WebViewId(13),
@@ -413,13 +659,17 @@ mod tests {
         );
         assert_eq!(
             object.get("status"),
-            Some(&JSValue::String("fallback-required".to_string()))
+            Some(&JSValue::String("live-snapshot".to_string()))
         );
         assert_eq!(
             object.get("fallbackEngine"),
             Some(&JSValue::String("mozjs".to_string()))
         );
-        assert_eq!(object.get("valueAvailable"), Some(&JSValue::Boolean(false)));
+        assert_eq!(object.get("valueAvailable"), Some(&JSValue::Boolean(true)));
+        assert_eq!(
+            object.get("value"),
+            Some(&JSValue::String("https://soliloquy.test/dom".to_string()))
+        );
 
         std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
     }

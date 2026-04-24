@@ -87,6 +87,10 @@ use crate::proxies::ConstellationProxy;
 use crate::responders::ServoErrorChannel;
 use crate::servo_delegate::{DefaultServoDelegate, ServoDelegate, ServoError};
 use crate::site_data_manager::{CookieOperationResponse, SiteDataManager};
+use crate::soliloquy_javascript::{
+    clear_webview_snapshot, record_webview_history_change, record_webview_load_status,
+    record_webview_navigation_request, record_webview_page_title,
+};
 use crate::webview::{MINIMUM_WEBVIEW_SIZE, WebView, WebViewInner};
 use crate::webview_delegate::{
     AllowOrDenyRequest, AuthenticationRequest, BluetoothDeviceSelectionRequest, EmbedderControl,
@@ -451,6 +455,7 @@ impl ServoInner {
                 }
             },
             EmbedderMsg::ChangePageTitle(webview_id, title) => {
+                record_webview_page_title(webview_id, title.clone());
                 if let Some(webview) = self.get_webview_handle(webview_id) {
                     webview.set_page_title(title);
                 }
@@ -562,6 +567,7 @@ impl ServoInner {
                 }
             },
             EmbedderMsg::NotifyLoadStatusChanged(webview_id, load_status) => {
+                record_webview_load_status(webview_id, load_status);
                 if let Some(webview) = self.get_webview_handle(webview_id) {
                     webview.set_load_status(load_status);
                 }
@@ -753,6 +759,7 @@ impl ServoInner {
                 pipeline_id,
                 servo_url,
             ) => {
+                record_webview_navigation_request(webview_id, servo_url.to_string());
                 if let Some(webview) = self.get_webview_handle(webview_id) {
                     let request = NavigationRequest {
                         url: servo_url.into_url(),
@@ -769,6 +776,7 @@ impl ServoInner {
                 }
             },
             ConstellationToEmbedderMsg::WebViewClosed(webview_id) => {
+                clear_webview_snapshot(webview_id);
                 if let Some(webview) = self.get_webview_handle(webview_id) {
                     webview.delegate().notify_closed(webview);
                 }
@@ -830,6 +838,10 @@ impl ServoInner {
             ) => {
                 if let Some(webview) = self.get_webview_handle(webview_id) {
                     webview.set_history(new_back_forward_list, current_list_index);
+                    record_webview_history_change(
+                        webview_id,
+                        webview.url().map(|url| url.to_string()),
+                    );
                 }
             },
             ConstellationToEmbedderMsg::Panic(webview_id, reason, backtrace) => {

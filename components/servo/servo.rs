@@ -87,7 +87,7 @@ use crate::proxies::ConstellationProxy;
 use crate::responders::ServoErrorChannel;
 use crate::servo_delegate::{DefaultServoDelegate, ServoDelegate, ServoError};
 use crate::site_data_manager::{CookieOperationResponse, SiteDataManager};
-use crate::soliloquy_javascript::{
+use crate::soliloquy_bridge::{
     clear_webview_snapshot, record_webview_history_change, record_webview_load_status,
     record_webview_navigation_request, record_webview_page_title,
 };

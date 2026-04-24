@@ -24,6 +24,7 @@ mod responders;
 mod servo;
 mod servo_delegate;
 mod site_data_manager;
+mod soliloquy_bridge;
 mod soliloquy_javascript;
 mod user_content_manager;
 mod webview;

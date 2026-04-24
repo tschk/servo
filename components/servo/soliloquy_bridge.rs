@@ -12,6 +12,9 @@ use url::{ParseError, Url};
 static WEBVIEW_SNAPSHOTS: LazyLock<Mutex<HashMap<WebViewId, SoliloquyWebViewSnapshot>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+pub(crate) const SOLILOQUY_BRIDGE_SCHEMA: &str = include_str!("soliloquy_bridge_schema.json");
+pub(crate) const SOLILOQUY_BRIDGE_SCHEMA_VERSION: &str = "rv8-bridge-v1";
+
 #[derive(Clone, Debug, Default)]
 struct SoliloquyWebViewSnapshot {
     page_title: Option<String>,
@@ -340,6 +343,14 @@ pub(crate) fn capabilities() -> JSValue {
             "fallbackEngine".to_string(),
             JSValue::String("mozjs".to_string()),
         ),
+        (
+            "schemaVersion".to_string(),
+            JSValue::String(SOLILOQUY_BRIDGE_SCHEMA_VERSION.to_string()),
+        ),
+        (
+            "schema".to_string(),
+            JSValue::String(SOLILOQUY_BRIDGE_SCHEMA.to_string()),
+        ),
     ]))
 }
 
@@ -409,4 +420,51 @@ fn webview_snapshot_mut(
 
 fn webview_snapshot(webview_id: WebViewId) -> Option<SoliloquyWebViewSnapshot> {
     WEBVIEW_SNAPSHOTS.lock().unwrap().get(&webview_id).cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capabilities_expose_bridge_schema() {
+        let JSValue::Object(capabilities) = capabilities() else {
+            panic!("expected capabilities object");
+        };
+
+        assert_eq!(
+            capabilities.get("schemaVersion"),
+            Some(&JSValue::String(
+                SOLILOQUY_BRIDGE_SCHEMA_VERSION.to_string()
+            ))
+        );
+        assert_eq!(
+            capabilities.get("schema"),
+            Some(&JSValue::String(SOLILOQUY_BRIDGE_SCHEMA.to_string()))
+        );
+    }
+
+    #[test]
+    fn bridge_schema_lists_supported_commands_and_targets() {
+        for command in [
+            "engine.backend",
+            "engine.status",
+            "webview.id",
+            "webview.describe",
+            "dom.capabilities",
+            "dom.inspect",
+            "dom.set",
+        ] {
+            assert!(SOLILOQUY_BRIDGE_SCHEMA.contains(command));
+        }
+
+        for target in [
+            "document.title",
+            "location.href",
+            "window.location.href",
+            "document.readyState",
+        ] {
+            assert!(SOLILOQUY_BRIDGE_SCHEMA.contains(target));
+        }
+    }
 }

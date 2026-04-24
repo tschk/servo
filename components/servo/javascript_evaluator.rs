@@ -86,7 +86,7 @@ mod tests {
 
     use super::JavaScriptEvaluator;
     use crate::proxies::ConstellationProxy;
-    use crate::soliloquy_javascript::{
+    use crate::soliloquy_bridge::{
         record_webview_history_change, record_webview_page_title, reset_webview_snapshots,
     };
 

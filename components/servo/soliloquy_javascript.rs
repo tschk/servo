@@ -8,9 +8,9 @@ use embedder_traits::{JSValue, JavaScriptEvaluationError};
 use servo_base::id::WebViewId;
 
 use crate::soliloquy_bridge::{
-    SoliloquyBridgeMutation, SoliloquyBridgeReadTarget, SoliloquyBridgeResult,
-    SoliloquyBridgeWrite, capabilities, describe_webview, inspect_property, read_property,
-    resolve_write, write_property,
+    SoliloquyBridgeCommand, SoliloquyBridgeMutation, SoliloquyBridgeReadTarget,
+    SoliloquyBridgeResult, SoliloquyBridgeWrite, capabilities, describe_webview, inspect_property,
+    read_property, resolve_write, write_property,
 };
 
 const SOLILOQUY_JS_ENGINE_ENV: &str = "SOLILOQUY_JS_ENGINE";
@@ -200,45 +200,16 @@ fn evaluate_engine_probe(
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum SoliloquyCommand {
-    EngineBackend,
-    EngineStatus,
-    WebViewId,
-    WebViewDescribe,
-    DomCapabilities,
-    DomInspect(SoliloquyBridgeReadTarget),
-    DomSet(SoliloquyBridgeWrite),
-    Unsupported(String),
-}
-
-fn parse_soliloquy_command(script: &str) -> Option<SoliloquyCommand> {
+fn parse_soliloquy_command(script: &str) -> Option<SoliloquyBridgeCommand> {
     const PREFIXES: [&str; 2] = ["window.__soliloquyEval(", "globalThis.__soliloquyEval("];
     for prefix in PREFIXES {
         if let Some(rest) = script.strip_prefix(prefix) {
             let tokens = parse_quoted_arguments(rest.strip_suffix(')')?.trim())?;
             let (name, args) = tokens.split_first()?;
-            return Some(parse_bridge_command(name, args));
+            return Some(SoliloquyBridgeCommand::parse(name, args));
         }
     }
     None
-}
-
-fn parse_bridge_command(name: &str, args: &[String]) -> SoliloquyCommand {
-    match name {
-        "engine.backend" if args.is_empty() => SoliloquyCommand::EngineBackend,
-        "engine.status" if args.is_empty() => SoliloquyCommand::EngineStatus,
-        "webview.id" if args.is_empty() => SoliloquyCommand::WebViewId,
-        "webview.describe" if args.is_empty() => SoliloquyCommand::WebViewDescribe,
-        "dom.capabilities" if args.is_empty() => SoliloquyCommand::DomCapabilities,
-        "dom.inspect" => parse_dom_inspect(args)
-            .map(SoliloquyCommand::DomInspect)
-            .unwrap_or_else(|| SoliloquyCommand::Unsupported(name.to_string())),
-        "dom.set" => parse_dom_set(args)
-            .map(SoliloquyCommand::DomSet)
-            .unwrap_or_else(|| SoliloquyCommand::Unsupported(name.to_string())),
-        _ => SoliloquyCommand::Unsupported(name.to_string()),
-    }
 }
 
 fn parse_quoted_arguments(payload: &str) -> Option<Vec<String>> {
@@ -275,10 +246,10 @@ fn parse_quoted_arguments(payload: &str) -> Option<Vec<String>> {
 
 fn dispatch_command(
     webview_id: WebViewId,
-    command: SoliloquyCommand,
+    command: SoliloquyBridgeCommand,
 ) -> (SoliloquyBridgeResult, Option<SoliloquyBridgeMutation>) {
     match command {
-        SoliloquyCommand::EngineBackend => (
+        SoliloquyBridgeCommand::EngineBackend => (
             SoliloquyBridgeResult::value(JSValue::String(
                 SoliloquyJavascriptBackend::from_environment()
                     .as_str()
@@ -286,7 +257,7 @@ fn dispatch_command(
             )),
             None,
         ),
-        SoliloquyCommand::EngineStatus => (
+        SoliloquyBridgeCommand::EngineStatus => (
             SoliloquyBridgeResult::value(JSValue::Object(HashMap::from([
                 (
                     "requestedEngine".to_string(),
@@ -302,23 +273,25 @@ fn dispatch_command(
             ]))),
             None,
         ),
-        SoliloquyCommand::WebViewId => (
+        SoliloquyBridgeCommand::WebViewId => (
             SoliloquyBridgeResult::value(JSValue::Number(webview_id.0 as f64)),
             None,
         ),
-        SoliloquyCommand::WebViewDescribe => (
+        SoliloquyBridgeCommand::WebViewDescribe => (
             SoliloquyBridgeResult::value(describe_webview(
                 webview_id,
                 SoliloquyJavascriptBackend::from_environment().as_str(),
             )),
             None,
         ),
-        SoliloquyCommand::DomCapabilities => (SoliloquyBridgeResult::value(capabilities()), None),
-        SoliloquyCommand::DomInspect(target) => (
+        SoliloquyBridgeCommand::DomCapabilities => {
+            (SoliloquyBridgeResult::value(capabilities()), None)
+        },
+        SoliloquyBridgeCommand::DomInspect(target) => (
             SoliloquyBridgeResult::value(inspect_property(webview_id, target)),
             None,
         ),
-        SoliloquyCommand::DomSet(write) => {
+        SoliloquyBridgeCommand::DomSet(write) => {
             let write = match resolve_write(webview_id, write) {
                 Ok(write) => write,
                 Err(error) => return (error, None),
@@ -326,24 +299,10 @@ fn dispatch_command(
             let (value, mutation) = write_property(webview_id, write).into_parts();
             (SoliloquyBridgeResult::value(value), mutation)
         },
-        SoliloquyCommand::Unsupported(operation) => {
+        SoliloquyBridgeCommand::Unsupported(operation) => {
             (SoliloquyBridgeResult::unsupported(operation), None)
         },
     }
-}
-
-fn parse_dom_inspect(args: &[String]) -> Option<SoliloquyBridgeReadTarget> {
-    let [target] = args else {
-        return None;
-    };
-    SoliloquyBridgeReadTarget::parse(target)
-}
-
-fn parse_dom_set(args: &[String]) -> Option<SoliloquyBridgeWrite> {
-    let [target, value] = args else {
-        return None;
-    };
-    SoliloquyBridgeWrite::parse(target, value)
 }
 
 fn parse_number(script: &str) -> Option<f64> {
@@ -417,12 +376,12 @@ mod tests {
     use servo_base::id::WebViewId;
 
     use super::{
-        SOLILOQUY_JS_ENGINE_ENV, SoliloquyCommand, SoliloquyJavascriptBackend,
-        SoliloquyJavascriptDispatcher, parse_soliloquy_command,
+        SOLILOQUY_JS_ENGINE_ENV, SoliloquyJavascriptBackend, SoliloquyJavascriptDispatcher,
+        parse_soliloquy_command,
     };
     use crate::soliloquy_bridge::{
-        SoliloquyBridgeMutation, record_webview_history_change, record_webview_load_status,
-        record_webview_page_title, reset_webview_snapshots,
+        SoliloquyBridgeCommand, SoliloquyBridgeMutation, record_webview_history_change,
+        record_webview_load_status, record_webview_page_title, reset_webview_snapshots,
     };
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -587,7 +546,7 @@ mod tests {
     fn parser_supports_multiple_quoted_arguments() {
         assert_eq!(
             parse_soliloquy_command("window.__soliloquyEval('dom.inspect', 'location.href')"),
-            Some(SoliloquyCommand::DomInspect(
+            Some(SoliloquyBridgeCommand::DomInspect(
                 crate::soliloquy_bridge::SoliloquyBridgeReadTarget::LocationHref
             ))
         );

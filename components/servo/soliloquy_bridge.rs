@@ -440,7 +440,27 @@ fn webview_snapshot(webview_id: WebViewId) -> Option<SoliloquyWebViewSnapshot> {
 
 #[cfg(test)]
 mod tests {
+    use serde::Deserialize;
+
     use super::*;
+
+    #[derive(Deserialize)]
+    struct BridgeSchema {
+        commands: Vec<BridgeSchemaCommand>,
+        targets: BridgeSchemaTargets,
+    }
+
+    #[derive(Deserialize)]
+    struct BridgeSchemaCommand {
+        name: String,
+        args: Vec<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct BridgeSchemaTargets {
+        read: Vec<String>,
+        write: Vec<String>,
+    }
 
     #[test]
     fn capabilities_expose_bridge_schema() {
@@ -462,25 +482,43 @@ mod tests {
 
     #[test]
     fn bridge_schema_lists_supported_commands_and_targets() {
-        for command in [
-            "engine.backend",
-            "engine.status",
-            "webview.id",
-            "webview.describe",
-            "dom.capabilities",
-            "dom.inspect",
-            "dom.set",
-        ] {
-            assert!(SOLILOQUY_BRIDGE_SCHEMA.contains(command));
+        let schema = bridge_schema();
+
+        for command in schema.commands {
+            let args = example_command_args(&command);
+            assert_eq!(args.len(), command.args.len());
+            let parsed = SoliloquyBridgeCommand::parse(&command.name, &args);
+            assert!(
+                !matches!(parsed, SoliloquyBridgeCommand::Unsupported(_)),
+                "schema command should parse: {}",
+                command.name
+            );
         }
 
-        for target in [
-            "document.title",
-            "location.href",
-            "window.location.href",
-            "document.readyState",
-        ] {
-            assert!(SOLILOQUY_BRIDGE_SCHEMA.contains(target));
+        for target in schema.targets.read {
+            assert!(
+                SoliloquyBridgeReadTarget::parse(&target).is_some(),
+                "schema read target should parse: {target}"
+            );
+        }
+
+        for target in schema.targets.write {
+            assert!(
+                SoliloquyBridgeWrite::parse(&target, "value").is_some(),
+                "schema write target should parse: {target}"
+            );
+        }
+    }
+
+    fn bridge_schema() -> BridgeSchema {
+        serde_json::from_str(SOLILOQUY_BRIDGE_SCHEMA).expect("bridge schema should be valid JSON")
+    }
+
+    fn example_command_args(command: &BridgeSchemaCommand) -> Vec<String> {
+        match command.name.as_str() {
+            "dom.inspect" => vec!["document.title".to_string()],
+            "dom.set" => vec!["document.title".to_string(), "value".to_string()],
+            _ => Vec::new(),
         }
     }
 }

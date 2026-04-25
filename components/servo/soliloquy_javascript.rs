@@ -16,7 +16,7 @@ use servo_base::id::WebViewId;
 use crate::soliloquy_bridge::{
     SoliloquyBridgeCommand, SoliloquyBridgeMutation, SoliloquyBridgeReadTarget,
     SoliloquyBridgeResult, SoliloquyBridgeWrite, capabilities, describe_webview, inspect_property,
-    read_property, resolve_write, write_property,
+    read_property, resolve_write, webview_bridge_id, write_property,
 };
 
 const SOLILOQUY_JS_ENGINE_ENV: &str = "SOLILOQUY_JS_ENGINE";
@@ -99,6 +99,7 @@ impl SoliloquyScriptBackend for MozjsScriptBackend {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SoliloquyV8IsolateState {
+    #[cfg(not(feature = "soliloquy_v8"))]
     DispatchOnly,
     #[cfg(feature = "soliloquy_v8")]
     RustyV8Ready,
@@ -107,6 +108,7 @@ enum SoliloquyV8IsolateState {
 impl SoliloquyV8IsolateState {
     fn as_str(self) -> &'static str {
         match self {
+            #[cfg(not(feature = "soliloquy_v8"))]
             Self::DispatchOnly => "dispatch-only",
             #[cfg(feature = "soliloquy_v8")]
             Self::RustyV8Ready => "rusty_v8-ready",
@@ -116,6 +118,7 @@ impl SoliloquyV8IsolateState {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SoliloquyV8OwnerLifetime {
+    #[cfg(not(feature = "soliloquy_v8"))]
     None,
     #[cfg(feature = "soliloquy_v8")]
     ThreadLocal,
@@ -124,6 +127,7 @@ enum SoliloquyV8OwnerLifetime {
 impl SoliloquyV8OwnerLifetime {
     fn as_str(self) -> &'static str {
         match self {
+            #[cfg(not(feature = "soliloquy_v8"))]
             Self::None => "none",
             #[cfg(feature = "soliloquy_v8")]
             Self::ThreadLocal => "thread-local",
@@ -149,6 +153,7 @@ impl SoliloquyV8IsolateOwner {
         }
     }
 
+    #[cfg(not(feature = "soliloquy_v8"))]
     fn dispatch_only() -> Self {
         Self {
             state: SoliloquyV8IsolateState::DispatchOnly,
@@ -354,7 +359,7 @@ fn evaluate_engine_probe(
             Some(SoliloquyJavascriptEvaluation::ok(JSValue::Boolean(false)))
         },
         "window.__soliloquyWebViewId" | "globalThis.__soliloquyWebViewId" => Some(
-            SoliloquyJavascriptEvaluation::ok(JSValue::Number(webview_id.0 as f64)),
+            SoliloquyJavascriptEvaluation::ok(JSValue::Number(webview_bridge_id(webview_id))),
         ),
         _ => None,
     }
@@ -447,7 +452,7 @@ fn dispatch_command(
             None,
         ),
         SoliloquyBridgeCommand::WebViewId => (
-            SoliloquyBridgeResult::value(JSValue::Number(webview_id.0 as f64)),
+            SoliloquyBridgeResult::value(JSValue::Number(webview_bridge_id(webview_id))),
             None,
         ),
         SoliloquyBridgeCommand::WebViewDescribe => (
@@ -546,7 +551,7 @@ mod tests {
     use std::sync::Mutex;
 
     use embedder_traits::{JSValue, LoadStatus};
-    use servo_base::id::WebViewId;
+    use servo_base::id::{BrowsingContextId, WebViewId};
 
     use super::{
         SOLILOQUY_JS_ENGINE_ENV, SoliloquyJavascriptBackend, SoliloquyJavascriptDispatcher,
@@ -559,78 +564,106 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    fn set_engine_env(_guard: &std::sync::MutexGuard<'_, ()>, value: &str) {
+        // SAFETY: Tests in this module hold ENV_LOCK while mutating and reading this
+        // process-wide variable, so the dispatcher sees a serialized test value.
+        unsafe {
+            std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, value);
+        }
+    }
+
+    fn clear_engine_env(_guard: &std::sync::MutexGuard<'_, ()>) {
+        // SAFETY: Tests in this module hold ENV_LOCK while mutating and reading this
+        // process-wide variable, so the dispatcher sees a serialized test value.
+        unsafe {
+            std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+        }
+    }
+
+    fn test_webview_id(index: u32) -> WebViewId {
+        let browsing_context_id =
+            BrowsingContextId::from_string(&format!("BrowsingContext(1234,{index})"))
+                .expect("test browsing context id should parse");
+        WebViewId::mock_for_testing(browsing_context_id)
+    }
+
     #[test]
     fn dispatcher_is_disabled_without_v8_experimental() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
-        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+        clear_engine_env(&_guard);
         assert_eq!(
             SoliloquyJavascriptBackend::from_environment(),
             SoliloquyJavascriptBackend::Mozjs
         );
-        assert!(SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(1), "1 + 1").is_none());
+        assert!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(1), "1 + 1").is_none()
+        );
     }
 
     #[test]
     fn dispatcher_handles_literals_and_simple_addition() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
-        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+        set_engine_env(&_guard, "v8-experimental");
         assert_eq!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(1), "1 + 1"),
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(1), "1 + 1"),
             Some(Ok(JSValue::Number(2.0)))
         );
         assert_eq!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(1), "'abc' + 'def'"),
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(1), "'abc' + 'def'"),
             Some(Ok(JSValue::String("abcdef".into())))
         );
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
-                WebViewId(1),
+                test_webview_id(1),
                 "window.__soliloquyEngineBackend"
             ),
             Some(Ok(JSValue::String("v8-experimental".into())))
         );
-        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+        clear_engine_env(&_guard);
     }
 
     #[test]
     fn dispatcher_handles_structured_commands() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
-        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
-        record_webview_page_title(WebViewId(42), Some("Soliloquy".to_string()));
-        record_webview_history_change(WebViewId(42), Some("https://example.test/".to_string()));
-        record_webview_load_status(WebViewId(42), LoadStatus::Complete);
+        set_engine_env(&_guard, "v8-experimental");
+        record_webview_page_title(test_webview_id(42), Some("Soliloquy".to_string()));
+        record_webview_history_change(
+            test_webview_id(42),
+            Some("https://example.test/".to_string()),
+        );
+        record_webview_load_status(test_webview_id(42), LoadStatus::Complete);
 
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
-                WebViewId(42),
+                test_webview_id(42),
                 "window.__soliloquyEval('webview.id')"
             ),
             Some(Ok(bridge_envelope(JSValue::Number(42.0))))
         );
 
         let result = SoliloquyJavascriptDispatcher::maybe_evaluate(
-            WebViewId(42),
+            test_webview_id(42),
             "globalThis.__soliloquyEval('engine.status')",
         );
         assert!(matches!(result, Some(Ok(JSValue::Object(_)))));
 
         let dom_capabilities = SoliloquyJavascriptDispatcher::maybe_evaluate(
-            WebViewId(42),
+            test_webview_id(42),
             "window.__soliloquyEval('dom.capabilities')",
         );
         assert!(matches!(dom_capabilities, Some(Ok(JSValue::Object(_)))));
 
         let dom_inspect = SoliloquyJavascriptDispatcher::maybe_evaluate(
-            WebViewId(42),
+            test_webview_id(42),
             "window.__soliloquyEval('dom.inspect', 'document.title')",
         );
         assert!(matches!(dom_inspect, Some(Ok(JSValue::Object(_)))));
 
         let dom_inspect_unknown = SoliloquyJavascriptDispatcher::maybe_evaluate(
-            WebViewId(42),
+            test_webview_id(42),
             "window.__soliloquyEval('dom.inspect', 'document.body.innerHTML')",
         );
         assert_eq!(
@@ -643,7 +676,7 @@ mod tests {
 
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
-                WebViewId(42),
+                test_webview_id(42),
                 "window.__soliloquyEval('not.supported')",
             ),
             Some(Ok(bridge_detail_envelope(
@@ -652,17 +685,17 @@ mod tests {
             )))
         );
 
-        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+        clear_engine_env(&_guard);
     }
 
     #[test]
     fn v8_dispatch_backend_reports_isolate_owner_status() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
-        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+        set_engine_env(&_guard, "v8-experimental");
 
         let result = SoliloquyJavascriptDispatcher::maybe_evaluate(
-            WebViewId(7),
+            test_webview_id(7),
             "window.__soliloquyEval('engine.status')",
         );
 
@@ -705,67 +738,70 @@ mod tests {
             );
         }
 
-        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+        clear_engine_env(&_guard);
     }
 
     #[test]
     fn dispatcher_reads_live_dom_properties_from_snapshot() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
-        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
-        record_webview_page_title(WebViewId(21), Some("Snapshot Title".to_string()));
+        set_engine_env(&_guard, "v8-experimental");
+        record_webview_page_title(test_webview_id(21), Some("Snapshot Title".to_string()));
         record_webview_history_change(
-            WebViewId(21),
+            test_webview_id(21),
             Some("https://soliloquy.test/current".to_string()),
         );
-        record_webview_load_status(WebViewId(21), LoadStatus::HeadParsed);
+        record_webview_load_status(test_webview_id(21), LoadStatus::HeadParsed);
 
         assert_eq!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(21), "document.title"),
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(21), "document.title"),
             Some(Ok(JSValue::String("Snapshot Title".into())))
         );
         assert_eq!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(21), "location.href"),
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(21), "location.href"),
             Some(Ok(JSValue::String("https://soliloquy.test/current".into())))
         );
         assert_eq!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(21), "document.readyState"),
+            SoliloquyJavascriptDispatcher::maybe_evaluate(
+                test_webview_id(21),
+                "document.readyState"
+            ),
             Some(Ok(JSValue::String("interactive".into())))
         );
 
-        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+        clear_engine_env(&_guard);
     }
 
     #[test]
     fn dispatcher_writes_live_dom_title() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
-        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+        set_engine_env(&_guard, "v8-experimental");
 
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
-                WebViewId(30),
+                test_webview_id(30),
                 "document.title = 'Updated Title'"
             ),
             Some(Ok(JSValue::String("Updated Title".into())))
         );
         assert_eq!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(30), "document.title"),
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(30), "document.title"),
             Some(Ok(JSValue::String("Updated Title".into())))
         );
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
-                WebViewId(30),
+                test_webview_id(30),
                 "window.__soliloquyEval('dom.set', 'document.title', 'Command Title')"
             ),
             Some(Ok(bridge_envelope(JSValue::String("Command Title".into()))))
         );
         assert_eq!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(30), "document.title"),
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(30), "document.title"),
             Some(Ok(JSValue::String("Command Title".into())))
         );
 
-        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+        clear_engine_env(&_guard);
     }
 
     #[test]
@@ -782,14 +818,14 @@ mod tests {
     fn dom_inspect_returns_fallback_metadata() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
-        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+        set_engine_env(&_guard, "v8-experimental");
         record_webview_history_change(
-            WebViewId(13),
+            test_webview_id(13),
             Some("https://soliloquy.test/dom".to_string()),
         );
 
         let result = SoliloquyJavascriptDispatcher::maybe_evaluate(
-            WebViewId(13),
+            test_webview_id(13),
             "window.__soliloquyEval('dom.inspect', 'location.href')",
         );
 
@@ -826,18 +862,18 @@ mod tests {
             Some(&JSValue::String("https://soliloquy.test/dom".to_string()))
         );
 
-        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+        clear_engine_env(&_guard);
     }
 
     #[test]
     fn dispatcher_writes_live_location_href() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
-        std::env::set_var(SOLILOQUY_JS_ENGINE_ENV, "v8-experimental");
+        set_engine_env(&_guard, "v8-experimental");
 
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
-                WebViewId(31),
+                test_webview_id(31),
                 "location.href = 'https://soliloquy.test/next'"
             ),
             Some(Ok(JSValue::String(
@@ -845,18 +881,21 @@ mod tests {
             )))
         );
         assert_eq!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(31), "location.href"),
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(31), "location.href"),
             Some(Ok(JSValue::String(
                 "https://soliloquy.test/next".to_string()
             )))
         );
         assert_eq!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(31), "document.readyState"),
+            SoliloquyJavascriptDispatcher::maybe_evaluate(
+                test_webview_id(31),
+                "document.readyState"
+            ),
             Some(Ok(JSValue::String("loading".to_string())))
         );
 
         let evaluation = SoliloquyJavascriptDispatcher::maybe_evaluate_with_mutations(
-            WebViewId(31),
+            test_webview_id(31),
             "location.href = 'https://soliloquy.test/queued'",
         )
         .expect("location.href write should be handled");
@@ -872,7 +911,7 @@ mod tests {
         );
 
         let relative_evaluation = SoliloquyJavascriptDispatcher::maybe_evaluate_with_mutations(
-            WebViewId(31),
+            test_webview_id(31),
             "location.href = 'relative/page'",
         )
         .expect("relative location.href write should be handled");
@@ -891,7 +930,7 @@ mod tests {
 
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
-                WebViewId(32),
+                test_webview_id(32),
                 "location.href = 'not a url'"
             ),
             Some(Ok(bridge_detail_envelope(
@@ -901,7 +940,7 @@ mod tests {
         );
 
         let command_result = SoliloquyJavascriptDispatcher::maybe_evaluate(
-            WebViewId(31),
+            test_webview_id(31),
             "window.__soliloquyEval('dom.set', 'location.href', 'https://soliloquy.test/final')",
         );
         assert_eq!(
@@ -911,7 +950,7 @@ mod tests {
             ))))
         );
         assert_eq!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(WebViewId(31), "location.href"),
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(31), "location.href"),
             Some(Ok(JSValue::String(
                 "https://soliloquy.test/final".to_string()
             )))
@@ -919,7 +958,7 @@ mod tests {
 
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(
-                WebViewId(31),
+                test_webview_id(31),
                 "window.__soliloquyEval('dom.set', 'location.href', '')"
             ),
             Some(Ok(bridge_detail_envelope(
@@ -928,7 +967,7 @@ mod tests {
             )))
         );
 
-        std::env::remove_var(SOLILOQUY_JS_ENGINE_ENV);
+        clear_engine_env(&_guard);
     }
 
     fn bridge_envelope(value: JSValue) -> JSValue {

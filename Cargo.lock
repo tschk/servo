@@ -8210,6 +8210,7 @@ dependencies = [
  "rustls",
  "rusty_v8",
  "serde",
+ "serde_json",
  "servo",
  "servo-background-hang-monitor",
  "servo-base",

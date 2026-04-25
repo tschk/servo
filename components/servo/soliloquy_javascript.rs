@@ -201,6 +201,66 @@ impl SoliloquyV8IsolateOwner {
             false
         }
     }
+
+    #[cfg(feature = "soliloquy_v8")]
+    fn evaluate_smoke_script(&self, script: &str) -> Option<SoliloquyJavascriptEvaluation> {
+        is_v8_smoke_script(script).then(|| SoliloquyJavascriptEvaluation {
+            result: self.evaluate_script(script),
+            mutations: Vec::new(),
+        })
+    }
+
+    #[cfg(not(feature = "soliloquy_v8"))]
+    fn evaluate_smoke_script(&self, _script: &str) -> Option<SoliloquyJavascriptEvaluation> {
+        None
+    }
+
+    #[cfg(feature = "soliloquy_v8")]
+    fn evaluate_script(&self, script: &str) -> Result<JSValue, JavaScriptEvaluationError> {
+        if !self.real_isolate_ready() {
+            return Err(JavaScriptEvaluationError::InternalError);
+        }
+
+        SOLILOQUY_V8_ISOLATE.with(|isolate| {
+            let mut isolate = isolate.borrow_mut();
+            let isolate = isolate
+                .as_mut()
+                .ok_or(JavaScriptEvaluationError::InternalError)?;
+            let handle_scope = &mut v8::HandleScope::new(isolate);
+            let context = v8::Context::new(handle_scope);
+            let scope = &mut v8::ContextScope::new(handle_scope, context);
+            let source = v8::String::new(scope, script)
+                .ok_or(JavaScriptEvaluationError::CompilationFailure)?;
+            let script = v8::Script::compile(scope, source, None)
+                .ok_or(JavaScriptEvaluationError::CompilationFailure)?;
+            let value = script
+                .run(scope)
+                .ok_or(JavaScriptEvaluationError::EvaluationFailure(None))?;
+            Ok(v8_value_to_js_value(scope, value))
+        })
+    }
+}
+
+#[cfg(feature = "soliloquy_v8")]
+fn v8_value_to_js_value(scope: &mut v8::HandleScope, value: v8::Local<v8::Value>) -> JSValue {
+    if value.is_undefined() {
+        JSValue::Undefined
+    } else if value.is_null() {
+        JSValue::Null
+    } else if value.is_boolean() {
+        JSValue::Boolean(value.boolean_value(scope))
+    } else if value.is_number() {
+        JSValue::Number(value.number_value(scope).unwrap_or(f64::NAN))
+    } else if value.is_string() {
+        JSValue::String(
+            value
+                .to_string(scope)
+                .map(|value| value.to_rust_string_lossy(scope))
+                .unwrap_or_default(),
+        )
+    } else {
+        JSValue::Undefined
+    }
 }
 
 struct V8DispatchScriptBackend {
@@ -229,9 +289,10 @@ impl SoliloquyScriptBackend for V8DispatchScriptBackend {
         evaluate_live_dom_assignment(webview_id, trimmed)
             .or_else(|| evaluate_live_dom_property(webview_id, trimmed))
             .or_else(|| evaluate_command(webview_id, trimmed, &self.isolate_owner))
-            .or_else(|| evaluate_literal(trimmed))
-            .or_else(|| evaluate_binary_plus(trimmed))
             .or_else(|| evaluate_engine_probe(webview_id, trimmed))
+            .or_else(|| self.isolate_owner.evaluate_smoke_script(trimmed))
+            .or_else(|| evaluate_binary_plus(trimmed))
+            .or_else(|| evaluate_literal(trimmed))
     }
 }
 
@@ -341,6 +402,19 @@ fn evaluate_binary_plus(script: &str) -> Option<SoliloquyJavascriptEvaluation> {
         )),
         _ => None,
     }
+}
+
+#[cfg(feature = "soliloquy_v8")]
+fn is_v8_smoke_script(script: &str) -> bool {
+    if evaluate_literal(script).is_some() {
+        return true;
+    }
+
+    let Some((lhs, rhs)) = split_binary_plus(script) else {
+        return false;
+    };
+
+    evaluate_literal(lhs).is_some() && evaluate_literal(rhs).is_some()
 }
 
 fn evaluate_engine_probe(
@@ -737,6 +811,21 @@ mod tests {
                 Some(&JSValue::String("none".to_string()))
             );
         }
+
+        clear_engine_env(&_guard);
+    }
+
+    #[cfg(feature = "soliloquy_v8")]
+    #[test]
+    fn v8_dispatch_backend_executes_smoke_scripts_in_rusty_v8() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        reset_webview_snapshots();
+        set_engine_env(&_guard, "v8-experimental");
+
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(8), "1 + true"),
+            Some(Ok(JSValue::Number(2.0)))
+        );
 
         clear_engine_env(&_guard);
     }

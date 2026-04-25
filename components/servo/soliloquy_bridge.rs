@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use embedder_traits::{JSValue, LoadStatus};
-use servo_base::id::WebViewId;
+use servo_base::id::{BrowsingContextId, WebViewId};
 use url::{ParseError, Url};
 
 static WEBVIEW_SNAPSHOTS: LazyLock<Mutex<HashMap<WebViewId, SoliloquyWebViewSnapshot>>> =
@@ -188,22 +188,30 @@ impl SoliloquyBridgeResult {
 }
 
 pub(crate) fn record_webview_page_title(webview_id: WebViewId, title: Option<String>) {
-    webview_snapshot_mut(webview_id).page_title = title;
+    update_webview_snapshot(webview_id, |snapshot| {
+        snapshot.page_title = title;
+    });
 }
 
 pub(crate) fn record_webview_navigation_request(webview_id: WebViewId, url: String) {
-    webview_snapshot_mut(webview_id).current_url = Some(url);
+    update_webview_snapshot(webview_id, |snapshot| {
+        snapshot.current_url = Some(url);
+    });
 }
 
 pub(crate) fn record_webview_history_change(webview_id: WebViewId, current_url: Option<String>) {
-    webview_snapshot_mut(webview_id).current_url = current_url;
+    update_webview_snapshot(webview_id, |snapshot| {
+        snapshot.current_url = current_url;
+    });
 }
 
 pub(crate) fn record_webview_load_status(webview_id: WebViewId, load_status: LoadStatus) {
-    webview_snapshot_mut(webview_id).ready_state = Some(match load_status {
-        LoadStatus::Started => "loading".to_string(),
-        LoadStatus::HeadParsed => "interactive".to_string(),
-        LoadStatus::Complete => "complete".to_string(),
+    update_webview_snapshot(webview_id, |snapshot| {
+        snapshot.ready_state = Some(match load_status {
+            LoadStatus::Started => "loading".to_string(),
+            LoadStatus::HeadParsed => "interactive".to_string(),
+            LoadStatus::Complete => "complete".to_string(),
+        });
     });
 }
 
@@ -241,8 +249,8 @@ pub(crate) fn write_property(
     webview_id: WebViewId,
     write: SoliloquyBridgeWrite,
 ) -> SoliloquyBridgeWriteOutcome {
-    let mut snapshots = webview_snapshot_mut(webview_id);
-    let snapshot = snapshots.get_mut(&webview_id).expect("snapshot must exist");
+    let mut snapshots = WEBVIEW_SNAPSHOTS.lock().unwrap();
+    let snapshot = snapshots.entry(webview_id).or_default();
     match write {
         SoliloquyBridgeWrite::SetDocumentTitle(title) => {
             snapshot.page_title = Some(title.clone());
@@ -298,7 +306,10 @@ pub(crate) fn inspect_property(
 pub(crate) fn describe_webview(webview_id: WebViewId, backend: &str) -> JSValue {
     let snapshot = webview_snapshot(webview_id);
     JSValue::Object(HashMap::from([
-        ("id".to_string(), JSValue::Number(webview_id.0 as f64)),
+        (
+            "id".to_string(),
+            JSValue::Number(webview_bridge_id(webview_id)),
+        ),
         ("backend".to_string(), JSValue::String(backend.to_string())),
         (
             "url".to_string(),
@@ -329,6 +340,11 @@ pub(crate) fn describe_webview(webview_id: WebViewId, backend: &str) -> JSValue 
             JSValue::Boolean(snapshot.is_some()),
         ),
     ]))
+}
+
+pub(crate) fn webview_bridge_id(webview_id: WebViewId) -> f64 {
+    let browsing_context_id = BrowsingContextId::from(webview_id);
+    browsing_context_id.index.0.get() as f64
 }
 
 pub(crate) fn capabilities() -> JSValue {
@@ -410,12 +426,12 @@ fn resolve_location_href(
     }
 }
 
-fn webview_snapshot_mut(
+fn update_webview_snapshot(
     webview_id: WebViewId,
-) -> std::sync::MutexGuard<'static, HashMap<WebViewId, SoliloquyWebViewSnapshot>> {
+    update: impl FnOnce(&mut SoliloquyWebViewSnapshot),
+) {
     let mut snapshots = WEBVIEW_SNAPSHOTS.lock().unwrap();
-    snapshots.entry(webview_id).or_default();
-    snapshots
+    update(snapshots.entry(webview_id).or_default());
 }
 
 fn webview_snapshot(webview_id: WebViewId) -> Option<SoliloquyWebViewSnapshot> {

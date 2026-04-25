@@ -24,7 +24,7 @@ use gaol::sandbox::{ChildSandbox, ChildSandboxMethods};
 use ipc_channel::ipc::{self, IpcSender};
 use layout::LayoutFactoryImpl;
 use layout_api::ScriptThreadFactory;
-use log::{Log, Metadata, Record, debug, warn};
+use log::{Log, Metadata, Record, debug, info, warn};
 use media::{GlApi, NativeDisplay, WindowGLContext};
 use net::embedder::NetToEmbedderMsg;
 use net::image_cache::ImageCacheFactoryImpl;
@@ -771,11 +771,9 @@ impl ServoInner {
                 current_list_index,
             ) => {
                 if let Some(webview) = self.get_webview_handle(webview_id) {
+                    let current_url = webview.url().map(|url| url.to_string());
                     webview.set_history(new_back_forward_list, current_list_index);
-                    record_webview_history_change(
-                        webview_id,
-                        webview.url().map(|url| url.to_string()),
-                    );
+                    record_webview_history_change(webview_id, current_url);
                 }
             },
             ConstellationToEmbedderMsg::Panic(webview_id, reason, backtrace) => {

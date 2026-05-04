@@ -178,6 +178,7 @@ fn configured_js_backend() -> ScriptJsBackend {
 }
 
 #[expect(unsafe_code)]
+#[servo_tracing::instrument(name = "script::init")]
 pub fn init() -> JSEngineSetup {
     if pref!(js_disable_jit) || jit_forbidden() {
         let reason = if pref!(js_disable_jit) {

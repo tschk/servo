@@ -122,11 +122,11 @@ impl ExtendableMessageEvent {
 #[expect(non_snake_case)]
 impl ExtendableMessageEvent {
     pub(crate) fn dispatch_jsval(
+        cx: &mut js::context::JSContext,
         target: &EventTarget,
         scope: &GlobalScope,
         message: HandleValue,
         ports: Vec<DomRoot<MessagePort>>,
-        can_gc: CanGc,
     ) {
         let Extendablemessageevent = ExtendableMessageEvent::new(
             scope,
@@ -137,14 +137,18 @@ impl ExtendableMessageEvent {
             DOMString::new(),
             DOMString::new(),
             ports,
-            can_gc,
+            CanGc::from_cx(cx),
         );
         Extendablemessageevent
             .upcast::<Event>()
-            .fire(target, can_gc);
+            .fire(target, CanGc::from_cx(cx));
     }
 
-    pub(crate) fn dispatch_error(target: &EventTarget, scope: &GlobalScope, can_gc: CanGc) {
+    pub(crate) fn dispatch_error(
+        cx: &mut js::context::JSContext,
+        target: &EventTarget,
+        scope: &GlobalScope,
+    ) {
         let init = ExtendableMessageEventBinding::ExtendableMessageEventInit::empty();
         let ExtendableMsgEvent = ExtendableMessageEvent::new(
             scope,
@@ -155,9 +159,11 @@ impl ExtendableMessageEvent {
             init.origin.clone(),
             init.lastEventId.clone(),
             init.ports.clone(),
-            can_gc,
+            CanGc::from_cx(cx),
         );
-        ExtendableMsgEvent.upcast::<Event>().fire(target, can_gc);
+        ExtendableMsgEvent
+            .upcast::<Event>()
+            .fire(target, CanGc::from_cx(cx));
     }
 }
 

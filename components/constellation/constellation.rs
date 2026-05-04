@@ -111,8 +111,8 @@ use embedder_traits::{
     GenericEmbedderProxy, InputEvent, InputEventAndId, InputEventOutcome, JSValue,
     JavaScriptEvaluationError, JavaScriptEvaluationId, KeyboardEvent, MediaSessionActionType,
     MediaSessionEvent, MediaSessionPlaybackState, MouseButton, MouseButtonAction, MouseButtonEvent,
-    NewWebViewDetails, PaintHitTestResult, Theme, ViewportDetails, WebDriverCommandMsg,
-    WebDriverLoadStatus, WebDriverScriptCommand,
+    NewWebViewDetails, PaintHitTestResult, Theme, ViewportDetails, WakeLockDelegate, WakeLockType,
+    WebDriverCommandMsg, WebDriverLoadStatus, WebDriverScriptCommand,
 };
 use euclid::Size2D;
 use euclid::default::Size2D as UntypedSize2D;
@@ -159,13 +159,13 @@ use servo_canvas_traits::canvas::{CanvasId, CanvasMsg};
 use servo_canvas_traits::webgl::WebGLThreads;
 use servo_config::{opts, pref};
 use servo_constellation_traits::{
-    AuxiliaryWebViewCreationRequest, AuxiliaryWebViewCreationResponse, DocumentState,
-    EmbedderToConstellationMessage, IFrameLoadInfo, IFrameLoadInfoWithData, IFrameSizeMsg, Job,
-    LoadData, LogEntry, MessagePortMsg, NavigationHistoryBehavior, PaintMetricEvent,
-    PortMessageTask, PortTransferInfo, SWManagerMsg, SWManagerSenders, ScreenshotReadinessResponse,
-    ScriptToConstellationMessage, ScrollStateUpdate, ServiceWorkerManagerFactory, ServiceWorkerMsg,
-    StructuredSerializedData, TargetSnapshotParams, TraversalDirection, UserContentManagerAction,
-    WindowSizeType,
+    AuxiliaryWebViewCreationRequest, AuxiliaryWebViewCreationResponse, ConstellationInterest,
+    DocumentState, EmbedderToConstellationMessage, IFrameLoadInfo, IFrameLoadInfoWithData,
+    IFrameSizeMsg, Job, LoadData, LogEntry, MessagePortMsg, NavigationHistoryBehavior,
+    PaintMetricEvent, PortMessageTask, PortTransferInfo, RemoteFocusOperation, SWManagerMsg,
+    SWManagerSenders, ScreenshotReadinessResponse, ScriptToConstellationMessage, ScrollStateUpdate,
+    ServiceWorkerManagerFactory, ServiceWorkerMsg, StructuredSerializedData, TargetSnapshotParams,
+    TraversalDirection, UserContentManagerAction, WindowSizeType,
 };
 use servo_url::{Host, ImmutableOrigin, ServoUrl};
 use storage_traits::StorageThreads;
@@ -413,6 +413,9 @@ pub struct Constellation<STF, SWF> {
     /// Bookkeeping for BroadcastChannel functionnality.
     broadcast_channels: BroadcastChannels,
 
+    /// Tracks which pipelines have registered interest in each notification category.
+    pipeline_interests: FxHashMap<ConstellationInterest, FxHashSet<PipelineId>>,
+
     /// The set of all the pipelines in the browser.  (See the `pipeline` module
     /// for more details.)
     pipelines: FxHashMap<PipelineId, Pipeline>,
@@ -483,6 +486,13 @@ pub struct Constellation<STF, SWF> {
 
     /// Pipeline ID of the active media session.
     active_media_session: Option<PipelineId>,
+
+    /// Aggregate screen wake lock count across all webviews. The provider is notified
+    /// only when this transitions 0→1 (acquire) or N→0 (release).
+    screen_wake_lock_count: u32,
+
+    /// Provider for OS-level screen wake lock acquisition and release.
+    wake_lock_provider: Box<dyn WakeLockDelegate>,
 
     /// The image bytes associated with the BrokenImageIcon embedder resource.
     /// Read during startup and provided to image caches that are created
@@ -581,6 +591,9 @@ pub struct InitialConstellationState {
 
     /// The async runtime.
     pub async_runtime: Box<dyn AsyncRuntime>,
+
+    /// The wake lock provider for acquiring and releasing OS-level screen wake locks.
+    pub wake_lock_provider: Box<dyn WakeLockDelegate>,
 }
 
 /// When we are exiting a pipeline, we can either force exiting or not. A normal exit
@@ -703,6 +716,7 @@ where
                     message_ports: Default::default(),
                     message_port_routers: Default::default(),
                     broadcast_channels: Default::default(),
+                    pipeline_interests: Default::default(),
                     pipelines: Default::default(),
                     browsing_contexts: Default::default(),
                     pending_changes: vec![],
@@ -731,6 +745,8 @@ where
                     active_keyboard_modifiers: Modifiers::empty(),
                     hard_fail,
                     active_media_session: None,
+                    screen_wake_lock_count: 0,
+                    wake_lock_provider: state.wake_lock_provider,
                     broken_image_icon_data: broken_image_icon_data.clone(),
                     process_manager: ProcessManager::new(state.mem_profiler_chan),
                     async_runtime: state.async_runtime,
@@ -858,16 +874,11 @@ where
             },
             None => self
                 .browsing_context_group_set
-                .iter()
-                .filter_map(|(_, bc_group)| {
-                    if bc_group
+                .values()
+                .filter(|bc_group| {
+                    bc_group
                         .top_level_browsing_context_set
                         .contains(webview_id)
-                    {
-                        Some(bc_group)
-                    } else {
-                        None
-                    }
                 })
                 .last()
                 .ok_or(
@@ -1164,7 +1175,7 @@ where
         inherited_secure_context: Option<bool>,
         throttled: bool,
     ) {
-        debug!("{}: Creating new browsing context", browsing_context_id);
+        debug!("{browsing_context_id}: Creating new browsing context");
         let bc_group_id = match self
             .browsing_context_group_set
             .iter_mut()
@@ -1260,10 +1271,12 @@ where
         self.process_manager.register(&mut sel);
 
         let request = {
-            let oper = sel.select();
+            let oper = {
+                let _span = profile_traits::trace_span!("handle_request::select").entered();
+                sel.select()
+            };
             let index = oper.index();
 
-            let _span = profile_traits::trace_span!("handle_request::select").entered();
             match index {
                 0 => oper
                     .recv(&self.namespace_receiver)
@@ -1337,6 +1350,7 @@ where
         }
     }
 
+    #[servo_tracing::instrument(skip_all)]
     fn handle_request_from_swmanager(&mut self, message: SWManagerMsg) {
         match message {
             SWManagerMsg::PostMessageToClient => {
@@ -1920,8 +1934,12 @@ where
             },
             ScriptToConstellationMessage::FocusRemoteBrowsingContext(
                 focused_browsing_context_id,
+                remote_focus_operation,
             ) => {
-                self.handle_focus_remote_browsing_context(focused_browsing_context_id);
+                self.handle_focus_remote_browsing_context(
+                    focused_browsing_context_id,
+                    remote_focus_operation,
+                );
             },
             ScriptToConstellationMessage::SetThrottledComplete(throttled) => {
                 self.handle_set_throttled_complete(source_pipeline_id, throttled);
@@ -2002,6 +2020,20 @@ where
                     let _ = mgr.send(ServiceWorkerMsg::ForwardDOMMessage(msg_vec, scope_url));
                 } else {
                     warn!("Unable to forward DOMMessage for postMessage call");
+                }
+            },
+            ScriptToConstellationMessage::RegisterInterest(interest) => {
+                self.pipeline_interests
+                    .entry(interest)
+                    .or_default()
+                    .insert(source_pipeline_id);
+            },
+            ScriptToConstellationMessage::UnregisterInterest(interest) => {
+                if let Some(set) = self.pipeline_interests.get_mut(&interest) {
+                    set.remove(&source_pipeline_id);
+                    if set.is_empty() {
+                        self.pipeline_interests.remove(&interest);
+                    }
                 }
             },
             ScriptToConstellationMessage::BroadcastStorageEvent(
@@ -2093,6 +2125,26 @@ where
                 for event_loop in self.event_loops() {
                     let _ = event_loop.send(ScriptThreadMessage::TriggerGarbageCollection);
                 }
+            },
+            ScriptToConstellationMessage::AcquireWakeLock(type_) => match type_ {
+                WakeLockType::Screen => {
+                    self.screen_wake_lock_count += 1;
+                    if self.screen_wake_lock_count == 1 {
+                        if let Err(e) = self.wake_lock_provider.acquire(type_) {
+                            warn!("Failed to acquire screen wake lock: {e}");
+                        }
+                    }
+                },
+            },
+            ScriptToConstellationMessage::ReleaseWakeLock(type_) => match type_ {
+                WakeLockType::Screen => {
+                    self.screen_wake_lock_count = self.screen_wake_lock_count.saturating_sub(1);
+                    if self.screen_wake_lock_count == 0 {
+                        if let Err(e) = self.wake_lock_provider.release(type_) {
+                            warn!("Failed to release screen wake lock: {e}");
+                        }
+                    }
+                },
             },
         }
     }
@@ -2618,7 +2670,17 @@ where
             );
         }
 
-        for pipeline in self.pipelines.values() {
+        let interested = match self
+            .pipeline_interests
+            .get(&ConstellationInterest::StorageEvent)
+        {
+            Some(set) => set,
+            None => return,
+        }
+        .iter()
+        .filter_map(|interested_id| self.pipelines.get(interested_id));
+
+        for pipeline in interested {
             if pipeline.id == pipeline_id || pipeline.url.origin() != origin {
                 continue;
             }
@@ -2926,6 +2988,12 @@ where
             return;
         };
 
+        // Clean up any registered interests for this pipeline.
+        self.pipeline_interests.retain(|_, set| {
+            set.remove(&pipeline_id);
+            !set.is_empty()
+        });
+
         // Now that the Script and Constellation parts of Servo no longer have a reference to
         // this pipeline, tell `Paint` that it has shut down. This is delayed until the
         // last moment.
@@ -3160,23 +3228,19 @@ where
         };
 
         webview.accessibility_active = active;
-        self.constellation_to_embedder_proxy.send(
-            ConstellationToEmbedderMsg::DocumentAccessibilityTreeIdChanged(
-                webview_id,
-                webview.active_top_level_pipeline_id.into(),
-            ),
+        let Some(pipeline_id) = webview.active_top_level_pipeline_id else {
+            return;
+        };
+        let epoch = webview.active_top_level_pipeline_epoch;
+        // Forward the activation to the webview’s active top-level pipeline, if any. For inactive
+        // pipelines (documents in bfcache), we only need to forward the activation if and when they
+        // become active (see set_frame_tree_for_webview()).
+        // There are two sites like this; this is the a11y activation site.
+        self.send_message_to_pipeline(
+            pipeline_id,
+            ScriptThreadMessage::SetAccessibilityActive(pipeline_id, active, epoch),
+            "Set accessibility active after closure",
         );
-
-        // Forward the activation to the webview’s active pipelines (of those that represent
-        // documents). For inactive pipelines (documents in bfcache), we only need to forward the
-        // activation if and when they become active (see set_frame_tree_for_webview()).
-        for pipeline_id in self.active_pipelines_for_webview(webview_id) {
-            self.send_message_to_pipeline(
-                pipeline_id,
-                ScriptThreadMessage::SetAccessibilityActive(pipeline_id, active),
-                "Set accessibility active after closure",
-            );
-        }
     }
 
     fn forward_input_event(
@@ -3253,13 +3317,7 @@ where
         // its focused browsing context to be itself.
         self.webviews.insert(
             webview_id,
-            ConstellationWebView::new(
-                &self.constellation_to_embedder_proxy,
-                webview_id,
-                pipeline_id,
-                browsing_context_id,
-                user_content_manager_id,
-            ),
+            ConstellationWebView::new(webview_id, browsing_context_id, user_content_manager_id),
         );
 
         // https://html.spec.whatwg.org/multipage/#creating-a-new-browsing-context-group
@@ -3649,9 +3707,7 @@ where
         self.webviews.insert(
             new_webview_id,
             ConstellationWebView::new(
-                &self.constellation_to_embedder_proxy,
                 new_webview_id,
-                new_pipeline_id,
                 new_browsing_context_id,
                 user_content_manager_id,
             ),
@@ -4498,7 +4554,11 @@ where
         self.focus_browsing_context(Some(pipeline_id), focused_browsing_context_id);
     }
 
-    fn handle_focus_remote_browsing_context(&mut self, target: BrowsingContextId) {
+    fn handle_focus_remote_browsing_context(
+        &mut self,
+        target: BrowsingContextId,
+        operation: RemoteFocusOperation,
+    ) {
         let Some(browsing_context) = self.browsing_contexts.get(&target) else {
             return warn!("{target:?} not found for focus message");
         };
@@ -4508,7 +4568,7 @@ where
         };
         if let Err(error) = pipeline
             .event_loop
-            .send(ScriptThreadMessage::FocusDocument(pipeline_id))
+            .send(ScriptThreadMessage::FocusDocument(pipeline_id, operation))
         {
             self.handle_send_error(pipeline_id, error);
         }
@@ -4744,7 +4804,10 @@ where
                 let _ = response_sender.send(is_open);
             },
             WebDriverCommandMsg::FocusBrowsingContext(browsing_context_id) => {
-                self.handle_focus_remote_browsing_context(browsing_context_id);
+                self.handle_focus_remote_browsing_context(
+                    browsing_context_id,
+                    RemoteFocusOperation::Viewport,
+                );
             },
             // TODO: This should use the ScriptThreadMessage::EvaluateJavaScript command
             WebDriverCommandMsg::ScriptCommand(browsing_context_id, cmd) => {
@@ -5773,23 +5836,6 @@ where
             })
     }
 
-    /// Convert a webview to a flat list of active pipeline ids, for activating accessibility.
-    fn active_pipelines_for_webview(&self, webview_id: WebViewId) -> Vec<PipelineId> {
-        let mut result = vec![];
-        let mut browsing_context_ids = vec![BrowsingContextId::from(webview_id)];
-        while let Some(browsing_context_id) = browsing_context_ids.pop() {
-            let Some(browsing_context) = self.browsing_contexts.get(&browsing_context_id) else {
-                continue;
-            };
-            let Some(pipeline) = self.pipelines.get(&browsing_context.pipeline_id) else {
-                continue;
-            };
-            result.push(browsing_context.pipeline_id);
-            browsing_context_ids.extend(pipeline.children.iter().copied());
-        }
-        result
-    }
-
     /// Send the frame tree for the given webview to `Paint`.
     #[servo_tracing::instrument(skip_all)]
     fn set_frame_tree_for_webview(&mut self, webview_id: WebViewId) {
@@ -5797,35 +5843,55 @@ where
         // avoiding this panic would require a mechanism for dealing
         // with low-resource scenarios.
         let browsing_context_id = BrowsingContextId::from(webview_id);
-        if let Some(frame_tree) = self.browsing_context_to_sendable(browsing_context_id) {
-            if let Some(webview) = self.webviews.get_mut(&webview_id) {
-                if frame_tree.pipeline.id != webview.active_top_level_pipeline_id {
-                    webview.active_top_level_pipeline_id = frame_tree.pipeline.id;
-                    self.constellation_to_embedder_proxy.send(
-                        ConstellationToEmbedderMsg::DocumentAccessibilityTreeIdChanged(
-                            webview_id,
-                            webview.active_top_level_pipeline_id.into(),
-                        ),
-                    );
-                }
-            }
-
-            debug!("{}: Sending frame tree", browsing_context_id);
-            self.paint_proxy
-                .send(PaintMessage::SetFrameTreeForWebView(webview_id, frame_tree));
-        }
-
-        let Some(webview) = self.webviews.get(&webview_id) else {
+        let Some(frame_tree) = self.browsing_context_to_sendable(browsing_context_id) else {
             return;
         };
-        let active = webview.accessibility_active;
-        for pipeline_id in self.active_pipelines_for_webview(webview_id) {
+
+        let new_pipeline_id = frame_tree.pipeline.id;
+
+        debug!("{}: Sending frame tree", browsing_context_id);
+        self.paint_proxy
+            .send(PaintMessage::SetFrameTreeForWebView(webview_id, frame_tree));
+
+        let Some(webview) = self.webviews.get_mut(&webview_id) else {
+            return;
+        };
+        if webview.active_top_level_pipeline_id == Some(new_pipeline_id) {
+            return;
+        }
+
+        let old_pipeline_id = webview.active_top_level_pipeline_id;
+        let old_epoch = webview.active_top_level_pipeline_epoch;
+        let new_epoch = old_epoch.next();
+
+        let accessibility_active = webview.accessibility_active;
+
+        webview.active_top_level_pipeline_id = Some(new_pipeline_id);
+        webview.active_top_level_pipeline_epoch = new_epoch;
+
+        // Deactivate accessibility in the now-inactive top-level document in the WebView.
+        // This ensures that the document stops sending tree updates, since they will be
+        // discarded in libservo anyway, and also ensures that when accessibility is
+        // reactivated, the document sends the whole accessibility tree from scratch.
+        if let Some(old_pipeline_id) = old_pipeline_id {
             self.send_message_to_pipeline(
-                pipeline_id,
-                ScriptThreadMessage::SetAccessibilityActive(pipeline_id, active),
+                old_pipeline_id,
+                ScriptThreadMessage::SetAccessibilityActive(old_pipeline_id, false, old_epoch),
                 "Set accessibility active after closure",
             );
         }
+
+        // Forward activation to layout for the active top-level document in the WebView.
+        // There are two sites like this; this is the navigation (or bfcache traversal) site.
+        self.send_message_to_pipeline(
+            new_pipeline_id,
+            ScriptThreadMessage::SetAccessibilityActive(
+                new_pipeline_id,
+                accessibility_active,
+                new_epoch,
+            ),
+            "Set accessibility active after closure",
+        );
     }
 
     #[servo_tracing::instrument(skip_all)]

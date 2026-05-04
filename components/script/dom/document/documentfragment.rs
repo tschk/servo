@@ -24,7 +24,6 @@ use crate::dom::node::{Node, NodeTraits};
 use crate::dom::nodelist::NodeList;
 use crate::dom::virtualmethods::VirtualMethods;
 use crate::dom::window::Window;
-use crate::script_runtime::CanGc;
 
 // https://dom.spec.whatwg.org/#documentfragment
 #[dom_struct]
@@ -82,13 +81,9 @@ impl DocumentFragment {
     }
 }
 
-pub(crate) trait LayoutDocumentFragmentHelpers<'dom> {
-    fn shadowroot_host_for_layout(self) -> LayoutDom<'dom, Element>;
-}
-
-impl<'dom> LayoutDocumentFragmentHelpers<'dom> for LayoutDom<'dom, DocumentFragment> {
+impl<'dom> LayoutDom<'dom, DocumentFragment> {
     #[inline]
-    fn shadowroot_host_for_layout(self) -> LayoutDom<'dom, Element> {
+    pub(crate) fn shadowroot_host_for_layout(self) -> LayoutDom<'dom, Element> {
         #[expect(unsafe_code)]
         unsafe {
             // https://dom.spec.whatwg.org/#shadowroot
@@ -114,9 +109,9 @@ impl DocumentFragmentMethods<crate::DomTypeHolder> for DocumentFragment {
     }
 
     /// <https://dom.spec.whatwg.org/#dom-parentnode-children>
-    fn Children(&self, can_gc: CanGc) -> DomRoot<HTMLCollection> {
+    fn Children(&self, cx: &mut js::context::JSContext) -> DomRoot<HTMLCollection> {
         let window = self.owner_window();
-        HTMLCollection::children(&window, self.upcast(), can_gc)
+        HTMLCollection::children(cx, &window, self.upcast())
     }
 
     /// <https://dom.spec.whatwg.org/#dom-nonelementparentnode-getelementbyid>

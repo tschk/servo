@@ -486,7 +486,7 @@ impl ServoParser {
 
         // Step 2.
         self.document
-            .set_ready_state(DocumentReadyState::Interactive, CanGc::from_cx(cx));
+            .set_ready_state(cx, DocumentReadyState::Interactive);
 
         // Step 3.
         self.tokenizer.end(cx);
@@ -494,7 +494,7 @@ impl ServoParser {
 
         // Step 4.
         self.document
-            .set_ready_state(DocumentReadyState::Complete, CanGc::from_cx(cx));
+            .set_ready_state(cx, DocumentReadyState::Complete);
     }
 
     // https://html.spec.whatwg.org/multipage/#active-parser
@@ -756,7 +756,7 @@ impl ServoParser {
 
         // Step 1.
         self.document
-            .set_ready_state(DocumentReadyState::Interactive, CanGc::from_cx(cx));
+            .set_ready_state(cx, DocumentReadyState::Interactive);
 
         // Step 2.
         self.tokenizer.end(cx);
@@ -1169,7 +1169,7 @@ impl ParserContext {
                 None,
             );
             let img = DomRoot::downcast::<HTMLImageElement>(img).unwrap();
-            img.SetSrc(USVString(self.url.to_string()));
+            img.SetSrc(cx, USVString(self.url.to_string()));
             DomRoot::upcast::<Node>(img)
         } else if mime_type.type_() == mime::AUDIO {
             let audio = Element::create(
@@ -1182,8 +1182,8 @@ impl ParserContext {
                 None,
             );
             let audio = DomRoot::downcast::<HTMLMediaElement>(audio).unwrap();
-            audio.SetControls(true);
-            audio.SetSrc(USVString(self.url.to_string()));
+            audio.SetControls(cx, true);
+            audio.SetSrc(cx, USVString(self.url.to_string()));
             DomRoot::upcast::<Node>(audio)
         } else {
             let video = Element::create(
@@ -1196,8 +1196,8 @@ impl ParserContext {
                 None,
             );
             let video = DomRoot::downcast::<HTMLMediaElement>(video).unwrap();
-            video.SetControls(true);
-            video.SetSrc(USVString(self.url.to_string()));
+            video.SetControls(cx, true);
+            video.SetSrc(cx, USVString(self.url.to_string()));
             DomRoot::upcast::<Node>(video)
         };
         // Step 4. Append an element host element for the media, as described below, to the body element.
@@ -1542,6 +1542,8 @@ impl FetchResponseListener for ParserContext {
 
         if status.is_ok() {
             parser.document.set_redirect_count(timing.redirect_count);
+            parser.document.set_redirect_start(timing.redirect_start);
+            parser.document.set_redirect_end(timing.redirect_end);
         }
 
         parser.last_chunk_received.set(true);
@@ -1648,6 +1650,7 @@ impl Sink {
 
 impl TreeSink for Sink {
     type Output = Self;
+
     #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     fn finish(self) -> Self {
         self
@@ -1659,13 +1662,11 @@ impl TreeSink for Sink {
     where
         Self: 'a;
 
-    #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     fn get_document(&self) -> Dom<Node> {
         Dom::from_ref(self.document.upcast())
     }
 
     #[expect(unsafe_code)]
-    #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     fn get_template_contents(&self, target: &Dom<Node>) -> Dom<Node> {
         // TODO: https://github.com/servo/servo/issues/42839
         let mut cx = unsafe { temp_cx() };
@@ -1691,7 +1692,6 @@ impl TreeSink for Sink {
     }
 
     #[expect(unsafe_code)]
-    #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     fn create_element(
         &self,
         name: QualName,
@@ -1724,7 +1724,6 @@ impl TreeSink for Sink {
     }
 
     #[expect(unsafe_code)]
-    #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     fn create_comment(&self, text: StrTendril) -> Dom<Node> {
         // TODO: https://github.com/servo/servo/issues/42839
         let mut cx = unsafe { temp_cx() };
@@ -1739,7 +1738,6 @@ impl TreeSink for Sink {
     }
 
     #[expect(unsafe_code)]
-    #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     fn create_pi(&self, target: StrTendril, data: StrTendril) -> Dom<Node> {
         // TODO: https://github.com/servo/servo/issues/42839
         let mut cx = unsafe { temp_cx() };
@@ -1873,16 +1871,21 @@ impl TreeSink for Sink {
             .expect("Appending failed");
     }
 
+    #[expect(unsafe_code)]
     fn add_attrs_if_missing(&self, target: &Dom<Node>, attrs: Vec<Attribute>) {
+        // TODO: https://github.com/servo/servo/issues/42839
+        let mut cx = unsafe { temp_cx() };
+        let cx = &mut cx;
+
         let elem = target
             .downcast::<Element>()
             .expect("tried to set attrs on non-Element in HTML parsing");
         for attr in attrs {
             elem.set_attribute_from_parser(
+                cx,
                 attr.name,
                 DOMString::from(String::from(attr.value)),
                 None,
-                CanGc::deprecated_note(),
             );
         }
     }
@@ -2048,7 +2051,7 @@ fn create_element_for_token(
 
     // Step 11. Append each attribute in the given token to element.
     for attr in attrs {
-        element.set_attribute_from_parser(attr.name, attr.value, None, CanGc::from_cx(cx));
+        element.set_attribute_from_parser(cx, attr.name, attr.value, None);
     }
 
     // Record if the tokenizer saw duplicate attributes on this element,
@@ -2109,34 +2112,28 @@ fn attach_declarative_shadow_inner(
 
     let template_element = template.downcast::<HTMLTemplateElement>().unwrap();
 
-    // Step 3. Let mode be template start tag's shadowrootmode attribute's value.
-    // Step 4. Let clonable be true if template start tag has a shadowrootclonable attribute; otherwise false.
-    // Step 5. Let delegatesfocus be true if template start tag
-    // has a shadowrootdelegatesfocus attribute; otherwise false.
-    // Step 6. Let serializable be true if template start tag
-    // has a shadowrootserializable attribute; otherwise false.
+    // Step 3. Let mode be templateStartTag's shadowrootmode attribute's value.
+    // Step 4. Let slotAssignment be "named".
+    // Step 5. If templateStartTag's shadowrootslotassignment attribute is in
+    // the Manual state, then set slotAssignment to "manual".
+    // Step 6. Let clonable be true if templateStartTag has a shadowrootclonable attribute; otherwise false.
+    // Step 7. Let serializable be true if templateStartTag has a shadowrootserializable
+    // attribute; otherwise false.
+    // Step 8. Let delegatesFocus be true if templateStartTag has a shadowrootdelegatesfocus
+    // attribute; otherwise false.
     let mut shadow_root_mode = ShadowRootMode::Open;
+    let mut slot_assignment_mode = SlotAssignmentMode::Named;
     let mut clonable = false;
     let mut delegatesfocus = false;
     let mut serializable = false;
 
-    let attributes: Vec<ElementAttribute> = attributes
-        .iter()
-        .map(|attr| {
-            ElementAttribute::new(
-                attr.name.clone(),
-                DOMString::from(String::from(attr.value.clone())),
-            )
-        })
-        .collect();
-
     attributes
         .iter()
-        .for_each(|attr: &ElementAttribute| match attr.name.local {
+        .for_each(|attr: &Attribute| match attr.name.local {
             local_name!("shadowrootmode") => {
-                if attr.value.str().eq_ignore_ascii_case("open") {
+                if attr.value.eq_ignore_ascii_case("open") {
                     shadow_root_mode = ShadowRootMode::Open;
-                } else if attr.value.str().eq_ignore_ascii_case("closed") {
+                } else if attr.value.eq_ignore_ascii_case("closed") {
                     shadow_root_mode = ShadowRootMode::Closed;
                 } else {
                     unreachable!("shadowrootmode value is not open nor closed");
@@ -2151,6 +2148,11 @@ fn attach_declarative_shadow_inner(
             local_name!("shadowrootserializable") => {
                 serializable = true;
             },
+            local_name!("shadowrootslotassignment") => {
+                if attr.value.eq_ignore_ascii_case("manual") {
+                    slot_assignment_mode = SlotAssignmentMode::Manual;
+                }
+            },
             _ => {},
         });
 
@@ -2163,7 +2165,7 @@ fn attach_declarative_shadow_inner(
         clonable,
         serializable,
         delegatesfocus,
-        SlotAssignmentMode::Named,
+        slot_assignment_mode,
     ) {
         Ok(shadow_root) => {
             // Step 8.3. Set shadow's declarative to true.

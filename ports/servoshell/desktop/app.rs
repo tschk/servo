@@ -138,6 +138,7 @@ impl App {
         eprintln!("[sol-servo] app.init complete");
     }
 
+    #[servo::servo_tracing::instrument(level = "debug", skip_all)]
     fn create_platform_window(
         &self,
         url: Url,

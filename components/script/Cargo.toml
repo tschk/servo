@@ -49,7 +49,6 @@ app_units = { workspace = true }
 argon2 = { workspace = true }
 arrayvec = { workspace = true }
 atomic_refcell = { workspace = true }
-ring = { workspace = true }
 backtrace = { workspace = true }
 base64 = { workspace = true }
 base64ct = { workspace = true }
@@ -140,7 +139,9 @@ servo-config = { workspace = true }
 servo-constellation-traits = { workspace = true }
 servo-geometry = { workspace = true }
 servo-media = { workspace = true }
+servo-tracing = { workspace = true }
 servo-url = { workspace = true }
+servo-wakelock = { workspace = true }
 servo_arc = { workspace = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
@@ -164,6 +165,7 @@ unicode-script = { workspace = true }
 url = { workspace = true }
 urlpattern = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
+web_atoms = "0.2.4"
 webdriver = { workspace = true }
 webgpu_traits = { workspace = true, optional = true }
 webrender_api = { workspace = true }
@@ -173,6 +175,7 @@ wgpu-types = { workspace = true, optional = true }
 x25519-dalek = { workspace = true }
 xml5ever = { workspace = true }
 xpath = { workspace = true }
+zeroize = { workspace = true }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 mozangle = { workspace = true }

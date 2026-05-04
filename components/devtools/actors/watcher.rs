@@ -25,9 +25,11 @@ use super::breakpoint::BreakpointListActor;
 use super::thread::ThreadActor;
 use super::worker::WorkerTargetActorMsg;
 use crate::actor::{Actor, ActorEncode, ActorError, ActorRegistry};
+use crate::actors::blackboxing::BlackboxingActor;
 use crate::actors::browsing_context::{BrowsingContextActor, BrowsingContextActorMsg};
 use crate::actors::console::ConsoleActor;
 use crate::actors::root::RootActor;
+use crate::actors::stylesheets::StyleSheetsActor;
 use crate::actors::watcher::target_configuration::{
     TargetConfigurationActor, TargetConfigurationActorMsg,
 };
@@ -83,7 +85,7 @@ impl SessionContext {
                 ("network-event", true),
                 ("network-event-stacktrace", false),
                 ("reflow", true),
-                ("stylesheet", false),
+                ("stylesheet", true),
                 ("source", true),
                 ("thread-state", false),
                 ("server-sent-event", false),
@@ -148,6 +150,13 @@ struct GetThreadConfigurationActorReply {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct GetBlackboxingActorReply {
+    from: String,
+    blackboxing: ActorMsg,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct GetBreakpointListActorReply {
     from: String,
     breakpoint_list: ActorMsg,
@@ -187,6 +196,7 @@ pub(crate) struct WatcherActor {
     target_configuration_name: String,
     thread_configuration_name: String,
     breakpoint_list_name: String,
+    blackboxing_name: String,
     session_context: SessionContext,
 }
 
@@ -377,6 +387,17 @@ impl Actor for WatcherActor {
                                 );
                             }
                         },
+                        "stylesheet" => {
+                            let style_sheets_actor = registry.find::<StyleSheetsActor>(
+                                &browsing_context_actor.style_sheets_name,
+                            );
+                            browsing_context_actor.resources_array(
+                                style_sheets_actor.get_stylesheets_data(&browsing_context_actor),
+                                resource.into(),
+                                ResourceArrayType::Available,
+                                &mut request,
+                            );
+                        },
                         "network-event" => {},
                         _ => warn!("resource {} not handled yet", resource),
                     }
@@ -426,6 +447,13 @@ impl Actor for WatcherActor {
                 };
                 request.reply_final(&msg)?
             },
+            "getBlackboxingActor" => {
+                let msg = GetBlackboxingActorReply {
+                    from: self.name(),
+                    blackboxing: registry.encode::<BlackboxingActor, _>(&self.blackboxing_name),
+                };
+                request.reply_final(&msg)?
+            },
             _ => return Err(ActorError::UnrecognizedPacketType),
         };
         Ok(())
@@ -449,6 +477,7 @@ impl WatcherActor {
         let thread_configuration_name = ThreadConfigurationActor::register(registry);
         let breakpoint_list_name =
             BreakpointListActor::register(registry, browsing_context_name.clone());
+        let blackboxing_name = BlackboxingActor::register(registry);
 
         let name = registry.new_name::<Self>();
         let actor = Self {
@@ -458,6 +487,7 @@ impl WatcherActor {
             target_configuration_name,
             thread_configuration_name,
             breakpoint_list_name,
+            blackboxing_name,
             session_context,
         };
 

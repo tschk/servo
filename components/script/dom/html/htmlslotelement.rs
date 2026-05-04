@@ -12,7 +12,6 @@ use js::rust::HandleObject;
 use script_bindings::codegen::InheritTypes::{CharacterDataTypeId, NodeTypeId};
 
 use crate::ScriptThread;
-use crate::dom::attr::Attr;
 use crate::dom::bindings::codegen::Bindings::HTMLSlotElementBinding::{
     AssignedNodesOptions, HTMLSlotElementMethods,
 };
@@ -26,6 +25,7 @@ use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::root::{Dom, DomRoot};
 use crate::dom::bindings::str::DOMString;
 use crate::dom::document::Document;
+use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::element::{AttributeMutation, Element};
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::html::htmlelement::HTMLElement;
@@ -34,7 +34,6 @@ use crate::dom::node::{
     ShadowIncluding, UnbindContext,
 };
 use crate::dom::virtualmethods::VirtualMethods;
-use crate::script_runtime::CanGc;
 
 /// <https://html.spec.whatwg.org/multipage/#the-slot-element>
 #[dom_struct]
@@ -469,7 +468,7 @@ impl VirtualMethods for HTMLSlotElement {
     fn attribute_mutated(
         &self,
         cx: &mut js::context::JSContext,
-        attr: &Attr,
+        attr: AttrRef<'_>,
         mutation: AttributeMutation,
     ) {
         self.super_type()
@@ -511,9 +510,9 @@ impl VirtualMethods for HTMLSlotElement {
         }
     }
 
-    fn unbind_from_tree(&self, context: &UnbindContext, can_gc: CanGc) {
+    fn unbind_from_tree(&self, cx: &mut js::context::JSContext, context: &UnbindContext) {
         if let Some(s) = self.super_type() {
-            s.unbind_from_tree(context, can_gc);
+            s.unbind_from_tree(cx, context);
         }
 
         if !self.upcast::<Node>().is_in_a_shadow_tree() {
@@ -529,7 +528,6 @@ impl js::gc::Rootable for Slottable {}
 
 impl js::gc::Initialize for Slottable {
     #[expect(unsafe_code)]
-    #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     unsafe fn initial() -> Option<Self> {
         None
     }

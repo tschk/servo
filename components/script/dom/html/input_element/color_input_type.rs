@@ -20,11 +20,11 @@ use style::values::specified::Color;
 use style_traits::{ParsingMode, ToCss};
 use url::Url;
 
-use crate::dom::attr::Attr;
 use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::str::{DOMString, FromInputValueString};
 use crate::dom::document_embedder_controls::ControlElement;
+use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::element::{AttributeMutation, CustomElementCreationMode, Element, ElementCreator};
 use crate::dom::event::Event;
 use crate::dom::eventtarget::EventTarget;
@@ -42,9 +42,9 @@ pub(crate) struct ColorInputType {
 impl ColorInputType {
     pub(crate) fn handle_color_picker_response(
         &self,
+        cx: &mut js::context::JSContext,
         input: &HTMLInputElement,
         response: Option<RgbColor>,
-        can_gc: CanGc,
     ) {
         let Some(selected_color) = response else {
             return;
@@ -54,7 +54,7 @@ impl ColorInputType {
             "#{:0>2x}{:0>2x}{:0>2x}",
             selected_color.red, selected_color.green, selected_color.blue
         );
-        let _ = input.SetValue(formatted_color.into(), can_gc);
+        let _ = input.SetValue(cx, formatted_color.into());
     }
 
     /// Get the shadow tree for this [`HTMLInputElement`], if it is created and valid, otherwise
@@ -198,10 +198,10 @@ impl SpecificInputType for ColorInputType {
     /// <https://html.spec.whatwg.org/multipage/#color-state-(type=color):input-activation-behavior>
     fn activation_behavior(
         &self,
+        _cx: &mut js::context::JSContext,
         input: &HTMLInputElement,
         _event: &Event,
         _target: &EventTarget,
-        _can_gc: CanGc,
     ) {
         input.show_the_picker_if_applicable();
     }
@@ -234,7 +234,7 @@ impl SpecificInputType for ColorInputType {
         &self,
         _cx: &mut JSContext,
         input: &HTMLInputElement,
-        attr: &Attr,
+        attr: AttrRef<'_>,
         _mutation: AttributeMutation,
     ) {
         match *attr.local_name() {
@@ -321,10 +321,7 @@ impl ColorInputShadowTree {
     pub(crate) fn update(&self, cx: &mut JSContext, input_element: &HTMLInputElement) {
         let value = input_element.Value();
         let style = format!("background-color: {value}");
-        self.color_value.set_string_attribute(
-            &local_name!("style"),
-            style.into(),
-            CanGc::from_cx(cx),
-        );
+        self.color_value
+            .set_string_attribute(cx, &local_name!("style"), style.into());
     }
 }

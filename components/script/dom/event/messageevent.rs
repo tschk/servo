@@ -37,7 +37,6 @@ enum SrcObject {
 }
 
 impl From<&WindowProxyOrMessagePortOrServiceWorker> for SrcObject {
-    #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     fn from(src_object: &WindowProxyOrMessagePortOrServiceWorker) -> SrcObject {
         match src_object {
             WindowProxyOrMessagePortOrServiceWorker::WindowProxy(blob) => {
@@ -222,7 +221,11 @@ impl MessageEvent {
         messageevent.upcast::<Event>().fire(target, can_gc);
     }
 
-    pub(crate) fn dispatch_error(target: &EventTarget, scope: &GlobalScope, can_gc: CanGc) {
+    pub(crate) fn dispatch_error(
+        cx: &mut js::context::JSContext,
+        target: &EventTarget,
+        scope: &GlobalScope,
+    ) {
         let init = MessageEventBinding::MessageEventInit::empty();
         let messageevent = MessageEvent::new(
             scope,
@@ -234,9 +237,11 @@ impl MessageEvent {
             init.source.as_ref(),
             init.lastEventId.clone(),
             init.ports.clone(),
-            can_gc,
+            CanGc::from_cx(cx),
         );
-        messageevent.upcast::<Event>().fire(target, can_gc);
+        messageevent
+            .upcast::<Event>()
+            .fire(target, CanGc::from_cx(cx));
     }
 }
 

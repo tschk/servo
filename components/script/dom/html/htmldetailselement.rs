@@ -13,7 +13,6 @@ use js::rust::HandleObject;
 use script_bindings::domstring::DOMString;
 use style::selector_parser::PseudoElement;
 
-use crate::dom::attr::Attr;
 use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::HTMLDetailsElementBinding::HTMLDetailsElementMethods;
 use crate::dom::bindings::codegen::Bindings::HTMLSlotElementBinding::HTMLSlotElement_Binding::HTMLSlotElementMethods;
@@ -25,6 +24,7 @@ use crate::dom::bindings::refcounted::Trusted;
 use crate::dom::bindings::reflector::DomGlobal;
 use crate::dom::bindings::root::{Dom, DomRoot};
 use crate::dom::document::Document;
+use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::element::{AttributeMutation, CustomElementCreationMode, Element, ElementCreator};
 use crate::dom::event::{Event, EventBubbles, EventCancelable};
 use crate::dom::eventtarget::EventTarget;
@@ -159,8 +159,8 @@ impl HTMLDetailsElement {
         )
     }
 
-    pub(crate) fn toggle(&self) {
-        self.SetOpen(!self.Open());
+    pub(crate) fn toggle(&self, cx: &mut JSContext) {
+        self.SetOpen(cx, !self.Open());
     }
 
     fn shadow_tree(&self, cx: &mut JSContext) -> Ref<'_, ShadowTree> {
@@ -292,17 +292,14 @@ impl HTMLDetailsElement {
         shadow_tree
             .implicit_summary
             .upcast::<Element>()
-            .set_string_attribute(
-                &local_name!("style"),
-                implicit_summary_style.into(),
-                CanGc::from_cx(cx),
-            );
+            .set_string_attribute(cx, &local_name!("style"), implicit_summary_style.into());
     }
 
     /// <https://html.spec.whatwg.org/multipage/#ensure-details-exclusivity-by-closing-the-given-element-if-needed>
     /// <https://html.spec.whatwg.org/multipage/#ensure-details-exclusivity-by-closing-other-elements-if-needed>
     fn ensure_details_exclusivity(
         &self,
+        cx: &mut js::context::JSContext,
         conflict_resolution_behaviour: ExclusivityConflictResolution,
     ) {
         // NOTE: This method implements two spec algorithms that are very similar to each other, distinguished by the
@@ -370,9 +367,9 @@ impl HTMLDetailsElement {
             // Step 4.1.2 Break.
             // NOTE: We don't bother to assert here and don't need to "break" since we're not in a loop.
             match conflict_resolution_behaviour {
-                ExclusivityConflictResolution::CloseThisElement => self.SetOpen(false),
+                ExclusivityConflictResolution::CloseThisElement => self.SetOpen(cx, false),
                 ExclusivityConflictResolution::CloseExistingOpenElement => {
-                    other_open_member.SetOpen(false)
+                    other_open_member.SetOpen(cx, false)
                 },
             }
         }
@@ -402,7 +399,7 @@ impl VirtualMethods for HTMLDetailsElement {
     fn attribute_mutated(
         &self,
         cx: &mut js::context::JSContext,
-        attr: &Attr,
+        attr: AttrRef<'_>,
         mutation: AttributeMutation,
     ) {
         self.super_type()
@@ -447,7 +444,7 @@ impl VirtualMethods for HTMLDetailsElement {
                 }
             }
 
-            self.ensure_details_exclusivity(ExclusivityConflictResolution::CloseThisElement);
+            self.ensure_details_exclusivity(cx, ExclusivityConflictResolution::CloseThisElement);
         }
         // Step 3. If localName is open, then:
         else if attr.local_name() == &local_name!("open") {
@@ -465,7 +462,7 @@ impl VirtualMethods for HTMLDetailsElement {
             self.owner_global()
                 .task_manager()
                 .dom_manipulation_task_source()
-                .queue(task!(details_notification_task_steps: move || {
+                .queue(task!(details_notification_task_steps: move |cx| {
                     let this = this.root();
                     if counter == this.toggle_counter.get() {
                         let event = ToggleEvent::new(
@@ -476,10 +473,10 @@ impl VirtualMethods for HTMLDetailsElement {
                             DOMString::from(old_state),
                             DOMString::from(new_state),
                             None,
-                            CanGc::deprecated_note(),
+                            CanGc::from_cx(cx),
                         );
                         let event = event.upcast::<Event>();
-                        event.fire(this.upcast::<EventTarget>(), CanGc::deprecated_note());
+                        event.fire(this.upcast::<EventTarget>(), CanGc::from_cx(cx));
                     }
                 }));
             self.upcast::<Node>().dirty(NodeDamage::Other);
@@ -492,6 +489,7 @@ impl VirtualMethods for HTMLDetailsElement {
             };
             if was_previously_closed && self.Open() {
                 self.ensure_details_exclusivity(
+                    cx,
                     ExclusivityConflictResolution::CloseExistingOpenElement,
                 );
             }
@@ -531,11 +529,11 @@ impl VirtualMethods for HTMLDetailsElement {
         }
 
         // Step 1. Ensure details exclusivity by closing the given element if needed given insertedNode.
-        self.ensure_details_exclusivity(ExclusivityConflictResolution::CloseThisElement);
+        self.ensure_details_exclusivity(cx, ExclusivityConflictResolution::CloseThisElement);
     }
 
-    fn unbind_from_tree(&self, context: &UnbindContext, can_gc: CanGc) {
-        self.super_type().unwrap().unbind_from_tree(context, can_gc);
+    fn unbind_from_tree(&self, cx: &mut js::context::JSContext, context: &UnbindContext) {
+        self.super_type().unwrap().unbind_from_tree(cx, context);
 
         if context.tree_is_in_a_document_tree && !self.upcast::<Node>().is_in_a_document_tree() {
             self.owner_document()

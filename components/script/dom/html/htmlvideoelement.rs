@@ -25,7 +25,6 @@ use servo_url::ServoUrl;
 use style::attr::{AttrValue, LengthOrPercentageOrAuto};
 
 use crate::document_loader::{LoadBlocker, LoadType};
-use crate::dom::attr::Attr;
 use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::HTMLVideoElementBinding::HTMLVideoElementMethods;
 use crate::dom::bindings::inheritance::Castable;
@@ -35,7 +34,8 @@ use crate::dom::bindings::root::{DomRoot, LayoutDom};
 use crate::dom::bindings::str::{DOMString, USVString};
 use crate::dom::csp::{GlobalCspReporting, Violation};
 use crate::dom::document::Document;
-use crate::dom::element::{AttributeMutation, Element, LayoutElementHelpers};
+use crate::dom::element::attributes::storage::AttrRef;
+use crate::dom::element::{AttributeMutation, Element};
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::html::htmlmediaelement::{HTMLMediaElement, NetworkState, ReadyState};
 use crate::dom::node::{Node, NodeDamage, NodeTraits};
@@ -362,7 +362,7 @@ impl VirtualMethods for HTMLVideoElement {
     fn attribute_mutated(
         &self,
         cx: &mut js::context::JSContext,
-        attr: &Attr,
+        attr: AttrRef<'_>,
         mutation: AttributeMutation,
     ) {
         self.super_type()
@@ -378,7 +378,7 @@ impl VirtualMethods for HTMLVideoElement {
         };
     }
 
-    fn attribute_affects_presentational_hints(&self, attr: &Attr) -> bool {
+    fn attribute_affects_presentational_hints(&self, attr: AttrRef<'_>) -> bool {
         match attr.local_name() {
             &local_name!("width") | &local_name!("height") => true,
             _ => self
@@ -439,7 +439,7 @@ impl FetchResponseListener for PosterFrameFetchContext {
 
         let status_is_ok = metadata
             .as_ref()
-            .map_or(true, |m| m.status.in_range(200..300));
+            .is_none_or(|m| m.status.in_range(200..300));
 
         if !status_is_ok {
             self.cancelled = true;
@@ -521,14 +521,8 @@ impl PosterFrameFetchContext {
     }
 }
 
-pub(crate) trait LayoutHTMLVideoElementHelpers {
-    fn data(self) -> HTMLMediaData;
-    fn get_width(self) -> LengthOrPercentageOrAuto;
-    fn get_height(self) -> LengthOrPercentageOrAuto;
-}
-
-impl LayoutHTMLVideoElementHelpers for LayoutDom<'_, HTMLVideoElement> {
-    fn data(self) -> HTMLMediaData {
+impl LayoutDom<'_, HTMLVideoElement> {
+    pub(crate) fn data(self) -> HTMLMediaData {
         let video = self.unsafe_get();
 
         // Get the current frame being rendered.
@@ -548,7 +542,7 @@ impl LayoutHTMLVideoElementHelpers for LayoutDom<'_, HTMLVideoElement> {
         }
     }
 
-    fn get_width(self) -> LengthOrPercentageOrAuto {
+    pub(crate) fn get_width(self) -> LengthOrPercentageOrAuto {
         self.upcast::<Element>()
             .get_attr_for_layout(&ns!(), &local_name!("width"))
             .map(AttrValue::as_dimension)
@@ -556,7 +550,7 @@ impl LayoutHTMLVideoElementHelpers for LayoutDom<'_, HTMLVideoElement> {
             .unwrap_or(LengthOrPercentageOrAuto::Auto)
     }
 
-    fn get_height(self) -> LengthOrPercentageOrAuto {
+    pub(crate) fn get_height(self) -> LengthOrPercentageOrAuto {
         self.upcast::<Element>()
             .get_attr_for_layout(&ns!(), &local_name!("height"))
             .map(AttrValue::as_dimension)

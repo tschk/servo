@@ -9,12 +9,12 @@ use js::rust::HandleObject;
 use script_bindings::str::DOMString;
 use stylo_dom::ElementState;
 
-use crate::dom::attr::Attr;
 use crate::dom::bindings::codegen::Bindings::HTMLOptGroupElementBinding::HTMLOptGroupElementMethods;
 use crate::dom::bindings::codegen::GenericBindings::NodeBinding::Node_Binding::NodeMethods;
 use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::root::DomRoot;
 use crate::dom::document::Document;
+use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::element::{AttributeMutation, Element};
 use crate::dom::html::htmlelement::HTMLElement;
 use crate::dom::html::htmloptionelement::HTMLOptionElement;
@@ -101,7 +101,7 @@ impl VirtualMethods for HTMLOptGroupElement {
     fn attribute_mutated(
         &self,
         cx: &mut js::context::JSContext,
-        attr: &Attr,
+        attr: AttrRef<'_>,
         mutation: AttributeMutation,
     ) {
         self.super_type()
@@ -147,13 +147,13 @@ impl VirtualMethods for HTMLOptGroupElement {
         self.update_select_validity(CanGc::from_cx(cx));
     }
 
-    fn unbind_from_tree(&self, context: &UnbindContext, can_gc: CanGc) {
-        self.super_type().unwrap().unbind_from_tree(context, can_gc);
+    fn unbind_from_tree(&self, cx: &mut js::context::JSContext, context: &UnbindContext) {
+        self.super_type().unwrap().unbind_from_tree(cx, context);
 
         if let Some(select) = context.parent.downcast::<HTMLSelectElement>() {
             select
-                .validity_state(can_gc)
-                .perform_validation_and_update(ValidationFlags::all(), can_gc);
+                .validity_state(CanGc::from_cx(cx))
+                .perform_validation_and_update(ValidationFlags::all(), CanGc::from_cx(cx));
         }
     }
 }

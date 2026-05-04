@@ -15,7 +15,7 @@ use embedder_traits::{
     WebResourceRequest, WebResourceResponse, WebResourceResponseMsg,
 };
 use paint_api::rendering_context::RenderingContext;
-use servo_base::generic_channel::{GenericSender, SendError};
+use servo_base::generic_channel::{GenericCallback, GenericSender, SendError};
 use servo_base::id::PipelineId;
 use servo_constellation_traits::EmbedderToConstellationMessage;
 use tokio::sync::mpsc::UnboundedSender as TokioSender;
@@ -100,6 +100,17 @@ impl AllowOrDenyRequest {
     ) -> Self {
         Self(
             IpcResponder::new(response_sender, default_response),
+            error_sender,
+        )
+    }
+
+    pub(crate) fn new_from_callback(
+        callback: GenericCallback<AllowOrDeny>,
+        default_response: AllowOrDeny,
+        error_sender: ServoErrorSender,
+    ) -> Self {
+        Self(
+            IpcResponder::new_same_process(Box::new(callback), default_response),
             error_sender,
         )
     }
@@ -1161,6 +1172,8 @@ mod test {
             method: Method::GET,
             headers: HeaderMap::default(),
             url: Url::parse("https://example.com").expect("Guaranteed by argument"),
+            destination: content_security_policy::Destination::Document,
+            referrer_url: None,
             is_for_main_frame: false,
             is_redirect: false,
         };

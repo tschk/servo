@@ -6,8 +6,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use dom_struct::dom_struct;
+use js::context::JSContext;
 use js::jsapi::{HandleValueArray, Heap, NewArrayObject, Value};
-use js::jsval::{ObjectValue, UndefinedValue};
+use js::jsval::ObjectValue;
 use js::rust::HandleValue as SafeHandleValue;
 use js::typedarray::ArrayBufferViewU8;
 
@@ -23,7 +24,7 @@ use crate::dom::promise::Promise;
 use crate::dom::stream::byteteereadrequest::ByteTeeReadRequest;
 use crate::dom::stream::readablestreamdefaultreader::ReadRequest;
 use crate::dom::types::ReadableStream;
-use crate::script_runtime::{CanGc, JSContext as SafeJSContext};
+use crate::script_runtime::CanGc;
 
 #[derive(JSTraceable, MallocSizeOf)]
 pub(crate) enum ByteTeeCancelAlgorithm {
@@ -57,11 +58,9 @@ pub(crate) struct ByteTeeUnderlyingSource {
     #[conditional_malloc_size_of]
     canceled_2: Rc<Cell<bool>>,
     #[ignore_malloc_size_of = "Mozjs"]
-    #[allow(clippy::redundant_allocation)]
-    reason_1: Rc<Box<Heap<Value>>>,
+    reason_1: Rc<Heap<Value>>,
     #[ignore_malloc_size_of = "Mozjs"]
-    #[allow(clippy::redundant_allocation)]
-    reason_2: Rc<Box<Heap<Value>>>,
+    reason_2: Rc<Heap<Value>>,
     #[conditional_malloc_size_of]
     cancel_promise: Rc<Promise>,
     #[conditional_malloc_size_of]
@@ -72,7 +71,6 @@ pub(crate) struct ByteTeeUnderlyingSource {
 
 impl ByteTeeUnderlyingSource {
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::redundant_allocation)]
     #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     pub(crate) fn new(
         reader: Rc<RefCell<ReaderType>>,
@@ -82,8 +80,8 @@ impl ByteTeeUnderlyingSource {
         read_again_for_branch_2: Rc<Cell<bool>>,
         canceled_1: Rc<Cell<bool>>,
         canceled_2: Rc<Cell<bool>>,
-        reason_1: Rc<Box<Heap<Value>>>,
-        reason_2: Rc<Box<Heap<Value>>>,
+        reason_1: Rc<Heap<Value>>,
+        reason_2: Rc<Heap<Value>>,
         cancel_promise: Rc<Promise>,
         reader_version: Rc<Cell<u64>>,
         tee_cancel_algorithm: ByteTeeCancelAlgorithm,
@@ -163,12 +161,7 @@ impl ByteTeeUnderlyingSource {
         }
     }
 
-    pub(crate) fn pull_with_default_reader(
-        &self,
-        cx: SafeJSContext,
-        global: &GlobalScope,
-        can_gc: CanGc,
-    ) -> Fallible<()> {
+    fn pull_with_default_reader(&self, cx: &mut JSContext, global: &GlobalScope) -> Fallible<()> {
         let mut reader = self.reader.borrow_mut();
         match &*reader {
             ReaderType::BYOB(byte_reader) => {
@@ -185,12 +178,12 @@ impl ByteTeeUnderlyingSource {
                 byte_reader
                     .get()
                     .expect("Reader should be set.")
-                    .release(can_gc)?;
+                    .release(CanGc::from_cx(cx))?;
 
                 // Acquire default reader.
                 let default_reader = self
                     .stream
-                    .acquire_default_reader(can_gc)
+                    .acquire_default_reader(CanGc::from_cx(cx))
                     .expect("AcquireReadableStreamDefaultReader should not fail");
 
                 *reader = ReaderType::Default(MutNullableDom::new(Some(&default_reader)));
@@ -199,10 +192,10 @@ impl ByteTeeUnderlyingSource {
                 drop(reader);
 
                 // Attach error forwarding for the new reader.
-                self.forward_reader_error(self.reader.clone(), can_gc);
+                self.forward_reader_error(self.reader.clone(), CanGc::from_cx(cx));
 
                 // IMPORTANT: now actually perform the pull we were asked to do.
-                return self.pull_with_default_reader(cx, global, can_gc);
+                return self.pull_with_default_reader(cx, global);
             },
             ReaderType::Default(reader) => {
                 let byte_tee_read_request = ByteTeeReadRequest::new(
@@ -217,7 +210,7 @@ impl ByteTeeUnderlyingSource {
                     self.cancel_promise.clone(),
                     self,
                     global,
-                    can_gc,
+                    CanGc::from_cx(cx),
                 );
 
                 let read_request = ReadRequest::ByteTee {
@@ -227,20 +220,19 @@ impl ByteTeeUnderlyingSource {
                 reader
                     .get()
                     .expect("Reader should be set.")
-                    .read(cx, &read_request, can_gc);
+                    .read(cx, &read_request);
             },
         }
 
         Ok(())
     }
 
-    pub(crate) fn pull_with_byob_reader(
+    fn pull_with_byob_reader(
         &self,
+        cx: &mut JSContext,
         view: HeapBufferSource<ArrayBufferViewU8>,
         for_branch2: bool,
-        cx: SafeJSContext,
         global: &GlobalScope,
-        can_gc: CanGc,
     ) {
         let mut reader = self.reader.borrow_mut();
         match &*reader {
@@ -273,7 +265,7 @@ impl ByteTeeUnderlyingSource {
                     self.cancel_promise.clone(),
                     self,
                     global,
-                    can_gc,
+                    CanGc::from_cx(cx),
                 );
 
                 let read_into_request = ReadIntoRequest::ByteTee {
@@ -281,13 +273,10 @@ impl ByteTeeUnderlyingSource {
                 };
 
                 // Perform ! ReadableStreamBYOBReaderRead(reader, view, 1, readIntoRequest).
-                reader.get().expect("Reader should be set.").read(
-                    cx,
-                    view,
-                    1,
-                    &read_into_request,
-                    can_gc,
-                );
+                reader
+                    .get()
+                    .expect("Reader should be set.")
+                    .read(cx, view, 1, &read_into_request);
             },
             ReaderType::Default(default_reader) => {
                 // If reader implements ReadableStreamDefaultReader,
@@ -304,13 +293,13 @@ impl ByteTeeUnderlyingSource {
                 default_reader
                     .get()
                     .expect("Reader should be set.")
-                    .release(can_gc)
+                    .release(cx)
                     .expect("Release should be successful.");
 
                 // Set reader to ! AcquireReadableStreamBYOBReader(stream).
                 let byob_reader = self
                     .stream
-                    .acquire_byob_reader(can_gc)
+                    .acquire_byob_reader(CanGc::from_cx(cx))
                     .expect("Reader should be set.");
 
                 *reader = ReaderType::BYOB(MutNullableDom::new(Some(&byob_reader)));
@@ -320,10 +309,10 @@ impl ByteTeeUnderlyingSource {
                 drop(reader);
 
                 // Perform forwardReaderError, given reader.
-                self.forward_reader_error(self.reader.clone(), can_gc);
+                self.forward_reader_error(self.reader.clone(), CanGc::from_cx(cx));
 
                 // Retry the pull using the BYOB reader we just acquired.
-                self.pull_with_byob_reader(view, for_branch2, cx, global, can_gc);
+                self.pull_with_byob_reader(cx, view, for_branch2, global);
             },
         }
     }
@@ -331,11 +320,9 @@ impl ByteTeeUnderlyingSource {
     /// Let pullAlgorithm be the following steps:
     pub(crate) fn pull_algorithm(
         &self,
+        cx: &mut JSContext,
         byte_tee_pull_algorithm: Option<ByteTeePullAlgorithm>,
-        can_gc: CanGc,
     ) -> Rc<Promise> {
-        let cx = GlobalScope::get_cx();
-
         let pull_algorithm =
             byte_tee_pull_algorithm.unwrap_or(self.byte_tee_pull_algorithm.clone());
 
@@ -346,8 +333,12 @@ impl ByteTeeUnderlyingSource {
                     // Set readAgainForBranch1 to true.
                     self.read_again_for_branch_1.set(true);
                     // Return a promise resolved with undefined.
-                    rooted!(in(*cx) let mut rval = UndefinedValue());
-                    return Promise::new_resolved(&self.stream.global(), cx, rval.handle(), can_gc);
+                    return Promise::new_resolved(
+                        &self.stream.global(),
+                        cx.into(),
+                        (),
+                        CanGc::from_cx(cx),
+                    );
                 }
 
                 // Set reading to true.
@@ -360,26 +351,25 @@ impl ByteTeeUnderlyingSource {
                     .expect("Branch 1 should be set.")
                     .get_byte_controller();
                 let byob_request = byob_branch_controller
-                    .get_byob_request(cx, can_gc)
+                    .get_byob_request(cx)
                     .expect("Byob request should be set.");
 
                 match byob_request {
                     // If byobRequest is null, perform pullWithDefaultReader.
                     None => {
-                        self.pull_with_default_reader(cx, &self.stream.global(), can_gc)
+                        self.pull_with_default_reader(cx, &self.stream.global())
                             .expect("Pull with default reader should be successful.");
                     },
                     Some(request) => {
                         // Otherwise, perform pullWithBYOBReader, given byobRequest.[[view]] and false.
                         let view = request.get_view();
 
-                        self.pull_with_byob_reader(view, false, cx, &self.stream.global(), can_gc);
+                        self.pull_with_byob_reader(cx, view, false, &self.stream.global());
                     },
                 }
 
                 // Return a promise resolved with undefined.
-                rooted!(in(*cx) let mut rval = UndefinedValue());
-                Promise::new_resolved(&self.stream.global(), cx, rval.handle(), can_gc)
+                Promise::new_resolved(&self.stream.global(), cx.into(), (), CanGc::from_cx(cx))
             },
             ByteTeePullAlgorithm::Pull2Algorithm => {
                 // If reading is true,
@@ -388,8 +378,12 @@ impl ByteTeeUnderlyingSource {
                     self.read_again_for_branch_2.set(true);
 
                     // Return a promise resolved with undefined.
-                    rooted!(in(*cx) let mut rval = UndefinedValue());
-                    return Promise::new_resolved(&self.stream.global(), cx, rval.handle(), can_gc);
+                    return Promise::new_resolved(
+                        &self.stream.global(),
+                        cx.into(),
+                        (),
+                        CanGc::from_cx(cx),
+                    );
                 }
 
                 // Set reading to true.
@@ -402,25 +396,24 @@ impl ByteTeeUnderlyingSource {
                     .expect("Branch 2 should be set.")
                     .get_byte_controller();
                 let byob_request = byob_branch_controller
-                    .get_byob_request(cx, can_gc)
+                    .get_byob_request(cx)
                     .expect("Byob request should be set.");
 
                 match byob_request {
                     None => {
-                        self.pull_with_default_reader(cx, &self.stream.global(), can_gc)
+                        self.pull_with_default_reader(cx, &self.stream.global())
                             .expect("Pull with default reader should be successful.");
                     },
                     Some(request) => {
                         // Otherwise, perform pullWithBYOBReader, given byobRequest.[[view]] and true.
                         let view = request.get_view();
 
-                        self.pull_with_byob_reader(view, true, cx, &self.stream.global(), can_gc);
+                        self.pull_with_byob_reader(cx, view, true, &self.stream.global());
                     },
                 }
 
                 // Return a promise resolved with undefined.
-                rooted!(in(*cx) let mut rval = UndefinedValue());
-                Promise::new_resolved(&self.stream.global(), cx, rval.handle(), can_gc)
+                Promise::new_resolved(&self.stream.global(), cx.into(), (), CanGc::from_cx(cx))
             },
         }
     }
@@ -431,7 +424,7 @@ impl ByteTeeUnderlyingSource {
     /// Let cancel2Algorithm be the following steps, taking a reason argument
     pub(crate) fn cancel_algorithm(
         &self,
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         reason: SafeHandleValue,
     ) -> Option<Result<Rc<Promise>, Error>> {
         match self.tee_cancel_algorithm {
@@ -468,7 +461,7 @@ impl ByteTeeUnderlyingSource {
     }
 
     #[expect(unsafe_code)]
-    fn resolve_cancel_promise(&self, cx: &mut js::context::JSContext) {
+    fn resolve_cancel_promise(&self, cx: &mut JSContext) {
         // Let compositeReason be ! CreateArrayFromList(« reason_1, reason_2 »).
         rooted_vec!(let mut reasons_values);
         reasons_values.push(self.reason_1.get());

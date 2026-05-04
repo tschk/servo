@@ -7,14 +7,15 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use app_units::Au;
-use fonts::{
-    FontContext, FontRef, GlyphStore, LAST_RESORT_GLYPH_ADVANCE, ShapingFlags, ShapingOptions,
-};
+use fonts::{FontContext, FontRef, ShapedText, ShapingFlags, ShapingOptions};
 use icu_locid::subtags::Language;
+use icu_properties::{self, LineBreak};
 use log::warn;
 use malloc_size_of_derive::MallocSizeOf;
 use servo_arc::Arc as ServoArc;
 use servo_base::text::is_bidi_control;
+use style::Zero;
+use style::computed_values::font_kerning::T as FontKerning;
 use style::computed_values::text_rendering::T as TextRendering;
 use style::computed_values::white_space_collapse::T as WhiteSpaceCollapse;
 use style::computed_values::word_break::T as WordBreak;
@@ -23,22 +24,14 @@ use style::str::char_is_whitespace;
 use style::values::computed::OverflowWrap;
 use unicode_bidi::{BidiInfo, Level};
 use unicode_script::Script;
-use xi_unicode::linebreak_property;
 
 use super::line_breaker::LineBreaker;
 use super::{InlineFormattingContextLayout, SharedInlineStyles};
 use crate::context::LayoutContext;
 use crate::dom::WeakLayoutBox;
 use crate::flow::inline::line::TextRunOffsets;
+use crate::flow::inline::{LineBlockSizes, LineItem, SegmentContentFlags};
 use crate::fragment_tree::BaseFragmentInfo;
-
-// These constants are the xi-unicode line breaking classes that are defined in
-// `table.rs`. Unfortunately, they are only identified by number.
-pub(crate) const XI_LINE_BREAKING_CLASS_CM: u8 = 9;
-pub(crate) const XI_LINE_BREAKING_CLASS_GL: u8 = 12;
-pub(crate) const XI_LINE_BREAKING_CLASS_ZW: u8 = 28;
-pub(crate) const XI_LINE_BREAKING_CLASS_WJ: u8 = 30;
-pub(crate) const XI_LINE_BREAKING_CLASS_ZWJ: u8 = 42;
 
 // There are two reasons why we might want to break at the start:
 //
@@ -75,6 +68,26 @@ pub(crate) struct FontAndScriptInfo {
     pub word_spacing: Option<Au>,
     /// The [`TextRendering`] value from the original style.
     pub text_rendering: TextRendering,
+    /// The value of the `font-kerning` property from the original style.
+    pub kerning: FontKerning,
+}
+
+impl FontAndScriptInfo {
+    /// Creates a minimal [`FontAndScriptInfo`] for a single font, with generic language settings
+    /// and the default shaping configuration. This is only used to generate placeholders for
+    /// text carets on otherwise empty lines.
+    pub(crate) fn simple_for_font(font: FontRef) -> Self {
+        Self {
+            font,
+            script: Script::Common,
+            bidi_level: Level::ltr(),
+            language: Language::UND,
+            letter_spacing: None,
+            word_spacing: None,
+            text_rendering: TextRendering::Auto,
+            kerning: FontKerning::Auto,
+        }
+    }
 }
 
 impl From<&FontAndScriptInfo> for ShapingOptions {
@@ -83,15 +96,28 @@ impl From<&FontAndScriptInfo> for ShapingOptions {
         if info.bidi_level.is_rtl() {
             flags.insert(ShapingFlags::RTL_FLAG);
         }
-        if info.letter_spacing.is_some() {
+
+        // From https://www.w3.org/TR/css-text-3/#cursive-script:
+        // Cursive scripts do not admit gaps between their letters for either
+        // justification or letter-spacing.
+        let letter_spacing = info
+            .letter_spacing
+            .filter(|_| !is_cursive_script(info.script));
+        if letter_spacing.is_some() {
             flags.insert(ShapingFlags::IGNORE_LIGATURES_SHAPING_FLAG);
         };
         if info.text_rendering == TextRendering::Optimizespeed {
             flags.insert(ShapingFlags::IGNORE_LIGATURES_SHAPING_FLAG);
             flags.insert(ShapingFlags::DISABLE_KERNING_SHAPING_FLAG)
         }
+
+        // We currently always leave kerning enabled for "font-kerning: auto".
+        if info.kerning == FontKerning::None {
+            flags.insert(ShapingFlags::DISABLE_KERNING_SHAPING_FLAG);
+        }
+
         Self {
-            letter_spacing: info.letter_spacing,
+            letter_spacing,
             word_spacing: info.word_spacing,
             script: info.script,
             language: info.language,
@@ -108,7 +134,7 @@ pub(crate) struct TextRunSegment {
     pub info: Arc<FontAndScriptInfo>,
 
     /// The range of bytes in the parent [`super::InlineFormattingContext`]'s text content.
-    pub range: Range<usize>,
+    pub byte_range: Range<usize>,
 
     /// The range of characters in the parent [`super::InlineFormattingContext`]'s text content.
     pub character_range: Range<usize>,
@@ -119,47 +145,58 @@ pub(crate) struct TextRunSegment {
 
     /// The shaped runs within this segment.
     #[conditional_malloc_size_of]
-    pub runs: Vec<Arc<GlyphStore>>,
+    pub runs: Vec<Arc<ShapedText>>,
 }
 
 impl TextRunSegment {
     fn new(
         info: Arc<FontAndScriptInfo>,
-        start_offset: usize,
-        start_character_offset: usize,
+        byte_range: Range<usize>,
+        character_range: Range<usize>,
     ) -> Self {
         Self {
             info,
-            range: start_offset..start_offset,
-            character_range: start_character_offset..start_character_offset,
+            byte_range,
+            character_range,
             runs: Vec::new(),
             break_at_start: false,
         }
     }
 
-    /// Update this segment if the Font and Script are compatible. The update will only
-    /// ever make the Script specific. Returns true if the new Font and Script are
-    /// compatible with this segment or false otherwise.
-    fn update_if_compatible(
-        &mut self,
-        new_font: &FontRef,
+    /// Returns true if the new `Font`, `Script` and BiDi `Level` are compatible with this segment
+    /// or false otherwise.
+    fn is_compatible(
+        &self,
+        new_font: &Option<FontRef>,
         new_script: Script,
         new_bidi_level: Level,
     ) -> bool {
-        if self.info.bidi_level != new_bidi_level || !Arc::ptr_eq(&self.info.font, new_font) {
+        if self.info.bidi_level != new_bidi_level {
+            return false;
+        }
+        if new_font
+            .as_ref()
+            .is_some_and(|new_font| !Arc::ptr_eq(&self.info.font, new_font))
+        {
             return false;
         }
 
-        fn is_specific(script: Script) -> bool {
-            script != Script::Common && script != Script::Inherited
-        }
-        if !is_specific(self.info.script) && is_specific(new_script) {
+        !script_is_specific(self.info.script) ||
+            !script_is_specific(new_script) ||
+            self.info.script == new_script
+    }
+
+    /// Update this segment to end at the given byte and character index. The update will only ever
+    /// make the Script specific and will not change it otherwise.
+    fn update(&mut self, next_byte_index: usize, next_character_index: usize, new_script: Script) {
+        if !script_is_specific(self.info.script) && script_is_specific(new_script) {
             self.info = Arc::new(FontAndScriptInfo {
                 script: new_script,
                 ..(*self.info).clone()
             });
         }
-        new_script == self.info.script || !is_specific(new_script)
+        self.character_range.end = next_character_index;
+        self.byte_range.end = next_byte_index;
     }
 
     fn layout_into_line_items(
@@ -175,8 +212,6 @@ impl TextRunSegment {
 
         let mut character_range_start = self.character_range.start;
         for (run_index, run) in self.runs.iter().enumerate() {
-            ifc.possibly_flush_deferred_forced_line_break();
-
             let new_character_range_end = character_range_start + run.character_count();
             let offsets = ifc
                 .ifc
@@ -186,18 +221,6 @@ impl TextRunSegment {
                     shared_selection,
                     character_range: character_range_start..new_character_range_end,
                 });
-
-            // If this whitespace forces a line break, queue up a hard line break the next time we
-            // see any content. We don't line break immediately, because we'd like to finish processing
-            // any ongoing inline boxes before ending the line.
-            if run.is_single_preserved_newline() {
-                ifc.possibly_push_empty_text_run_to_unbreakable_segment(
-                    text_run, &self.info, offsets,
-                );
-                character_range_start = new_character_range_end;
-                ifc.defer_forced_line_break();
-                continue;
-            }
 
             // Break before each unbreakable run in this TextRun, except the first unless the
             // linebreaker was set to break before the first run.
@@ -237,8 +260,8 @@ impl TextRunSegment {
         // Gather the linebreaks that apply to this segment from the inline formatting context's collection
         // of line breaks. Also add a simulated break at the end of the segment in order to ensure the final
         // piece of text is processed.
-        let range = self.range.clone();
-        let linebreaks = linebreaker.advance_to_linebreaks_in_range(self.range.clone());
+        let range = self.byte_range.clone();
+        let linebreaks = linebreaker.advance_to_linebreaks_in_range(self.byte_range.clone());
         let linebreak_iter = linebreaks.iter().chain(std::iter::once(&range.end));
 
         self.runs.clear();
@@ -250,10 +273,10 @@ impl TextRunSegment {
             text_style.overflow_wrap == OverflowWrap::Anywhere ||
             text_style.overflow_wrap == OverflowWrap::BreakWord;
 
-        let mut last_slice = self.range.start..self.range.start;
+        let mut last_slice = self.byte_range.start..self.byte_range.start;
         for break_index in linebreak_iter {
             let mut options = options;
-            if *break_index == self.range.start {
+            if *break_index == self.byte_range.start {
                 self.break_at_start = true;
                 continue;
             }
@@ -264,12 +287,9 @@ impl TextRunSegment {
 
             // Split off any trailing whitespace into a separate glyph run.
             let mut whitespace = slice.end..slice.end;
-            let mut rev_char_indices = word.char_indices().rev().peekable();
+            let rev_char_indices = word.char_indices().rev().peekable();
 
             let mut ends_with_whitespace = false;
-            let ends_with_newline = rev_char_indices
-                .peek()
-                .is_some_and(|&(_, character)| character == '\n');
             if let Some((first_white_space_index, first_white_space_character)) = rev_char_indices
                 .take_while(|&(_, character)| char_is_whitespace(character))
                 .last()
@@ -277,14 +297,12 @@ impl TextRunSegment {
                 ends_with_whitespace = true;
                 whitespace.start = slice.start + first_white_space_index;
 
-                // If line breaking for a piece of text that has `white-space-collapse: break-spaces` there
-                // is a line break opportunity *after* every preserved space, but not before. This means
-                // that we should not split off the first whitespace, unless that white-space is a preserved
-                // newline.
+                // If line breaking for a piece of text that has `white-space-collapse:
+                // break-spaces` there is a line break opportunity *after* every preserved space,
+                // but not before. This means that we should not split off the first whitespace.
                 //
                 // An exception to this is if the style tells us that we can break in the middle of words.
                 if text_style.white_space_collapse == WhiteSpaceCollapse::BreakSpaces &&
-                    first_white_space_character != '\n' &&
                     !can_break_anywhere
                 {
                     whitespace.start += first_white_space_character.len_utf8();
@@ -299,7 +317,7 @@ impl TextRunSegment {
             // If there's no whitespace and `word-break` is set to `keep-all`, try increasing the slice.
             // TODO: This should only happen for CJK text.
             if !ends_with_whitespace &&
-                *break_index != self.range.end &&
+                *break_index != self.byte_range.end &&
                 text_style.word_break == WordBreak::KeepAll &&
                 !can_break_anywhere
             {
@@ -338,27 +356,21 @@ impl TextRunSegment {
                 continue;
             }
 
-            // The breaker breaks after every newline, so either there is none,
-            // or there is exactly one at the very end. In the latter case,
-            // split it into a different run. That's because shaping considers
-            // a newline to have the same advance as a space, but during layout
-            // we want to treat the newline as having no advance.
-            if ends_with_newline && whitespace.len() > 1 {
-                self.shape_and_push_range(
-                    &(whitespace.start..whitespace.end - 1),
-                    formatting_context_text,
-                    &options,
-                );
-                self.shape_and_push_range(
-                    &(whitespace.end - 1..whitespace.end),
-                    formatting_context_text,
-                    &options,
-                );
-            } else {
-                self.shape_and_push_range(&whitespace, formatting_context_text, &options);
-            }
+            self.shape_and_push_range(&whitespace, formatting_context_text, &options);
         }
     }
+}
+
+/// A single item in a [`TextRun`].
+#[derive(Debug, MallocSizeOf)]
+pub(crate) enum TextRunItem {
+    /// A hard line break i.e. a "\n" as other types line breaks are normalized to "\n".
+    LineBreak { character_index: usize },
+    /// A preserved tab character that should advance the line to a tab stop.
+    Tab { bidi_level: Level },
+    /// Any other text for which a font can be matched. We store a `Box` here as [`TextRunSegment`]
+    /// is quite a bit larger than the other enum variants.
+    TextSegment(Box<TextRunSegment>),
 }
 
 /// A single [`TextRun`] for the box tree. These are all descendants of
@@ -391,9 +403,10 @@ pub(crate) struct TextRun {
     /// UTF-8 offsets.
     pub character_range: Range<usize>,
 
-    /// The text of this [`TextRun`] with a font selected, broken into unbreakable
+    /// The [`TextRunItem`]s of this text run. This is produced by segmenting the incoming text
+    /// by things such as font and script as well as separating out hard line breaks.
     /// segments, and shaped.
-    pub shaped_text: Vec<TextRunSegment>,
+    pub items: Vec<TextRunItem>,
 }
 
 impl TextRun {
@@ -409,7 +422,7 @@ impl TextRun {
             inline_styles,
             text_range,
             character_range,
-            shaped_text: Vec::new(),
+            items: Vec::new(),
         }
     }
 
@@ -421,16 +434,17 @@ impl TextRun {
         bidi_info: &BidiInfo,
     ) {
         let parent_style = self.inline_styles.style.borrow().clone();
-        let mut segments = self.segment_text_by_font(
+        self.items = self.segment_text_by_font(
             layout_context,
             formatting_context_text,
             bidi_info,
             &parent_style,
         );
-        for segment in segments.iter_mut() {
-            segment.shape_text(&parent_style, formatting_context_text, linebreaker);
+        for item in self.items.iter_mut() {
+            if let TextRunItem::TextSegment(text_segment) = item {
+                text_segment.shape_text(&parent_style, formatting_context_text, linebreaker)
+            }
         }
-        let _ = std::mem::replace(&mut self.shaped_text, segments);
     }
 
     /// Take the [`TextRun`]'s text and turn it into [`TextRunSegment`]s. Each segment has a matched
@@ -442,89 +456,87 @@ impl TextRun {
         formatting_context_text: &str,
         bidi_info: &BidiInfo,
         parent_style: &ServoArc<ComputedValues>,
-    ) -> Vec<TextRunSegment> {
-        let font_group = layout_context
-            .font_context
-            .font_group(parent_style.clone_font());
-        let mut current: Option<TextRunSegment> = None;
-        let mut results = Vec::new();
-
-        let x_lang = parent_style.get_font()._x_lang.clone();
-        let language = x_lang.0.parse().unwrap_or(Language::UND);
-        let text_run_text = &formatting_context_text[self.text_range.clone()];
-        let char_iterator = TwoCharsAtATimeIterator::new(text_run_text.chars());
-
-        let parent_style = self.inline_styles.style.borrow().clone();
-        let inherited_text_style = parent_style.get_inherited_text().clone();
+    ) -> Vec<TextRunItem> {
+        let font_style = parent_style.clone_font();
+        let language = font_style._x_lang.0.parse().unwrap_or(Language::UND);
+        let font_size = font_style.font_size.computed_size().into();
+        let kerning = font_style.font_kerning;
+        let font_group = layout_context.font_context.font_group(font_style);
+        let inherited_text_style = parent_style.get_inherited_text();
+        let word_spacing = Some(inherited_text_style.word_spacing.to_used_value(font_size));
         let letter_spacing = inherited_text_style
             .letter_spacing
             .0
-            .resolve(parent_style.clone_font().font_size.computed_size());
-        let letter_spacing = if letter_spacing.px() != 0. {
-            Some(app_units::Au::from(letter_spacing))
+            .to_used_value(font_size);
+        let letter_spacing = if !letter_spacing.is_zero() {
+            Some(letter_spacing)
         } else {
             None
         };
         let text_rendering = inherited_text_style.text_rendering;
-        let word_spacing = inherited_text_style.word_spacing.to_length().map(Au::from);
 
-        // The next current character index within the entire inline formatting context's text.
-        let mut next_character_index = self.character_range.start;
-        // The next bytes index of the charcter within the entire inline formatting context's text.
+        let mut current: Option<TextRunSegment> = None;
+        let mut results = Vec::new();
+        let finish_current_segment =
+            |current: &mut Option<TextRunSegment>, results: &mut Vec<TextRunItem>| {
+                if let Some(current) = current.take() {
+                    results.push(TextRunItem::TextSegment(Box::new(current)));
+                }
+            };
+
+        let text_run_text = &formatting_context_text[self.text_range.clone()];
+        let char_iterator = TwoCharsAtATimeIterator::new(text_run_text.chars());
+        // The next bytes index of the character within the entire inline formatting context's text.
         let mut next_byte_index = self.text_range.start;
-
-        let resolve_word_spacing_for_font = |font: &FontRef| {
-            word_spacing.unwrap_or_else(|| {
-                let space_width = font
-                    .glyph_index(' ')
-                    .map(|glyph_id| font.glyph_h_advance(glyph_id))
-                    .unwrap_or(LAST_RESORT_GLYPH_ADVANCE);
-                inherited_text_style
-                    .word_spacing
-                    .to_used_value(Au::from_f64_px(space_width))
-            })
-        };
-
-        for (character, next_character) in char_iterator {
-            let current_character_index = next_character_index;
-            next_character_index += 1;
+        for (relative_character_index, (character, next_character)) in char_iterator.enumerate() {
+            // The current character index within the entire inline formatting context's text.
+            let current_character_index = self.character_range.start + relative_character_index;
 
             let current_byte_index = next_byte_index;
             next_byte_index += character.len_utf8();
 
-            if char_does_not_change_font(character) {
+            if character == '\n' {
+                finish_current_segment(&mut current, &mut results);
+                results.push(TextRunItem::LineBreak {
+                    character_index: current_character_index,
+                });
                 continue;
             }
 
-            let Some(font) = font_group.find_by_codepoint(
-                &layout_context.font_context,
-                character,
-                next_character,
-                language,
-            ) else {
+            if character == '\t' {
+                finish_current_segment(&mut current, &mut results);
+                results.push(TextRunItem::Tab {
+                    bidi_level: bidi_info.levels[current_byte_index],
+                });
                 continue;
+            }
+
+            let (font, script, bidi_level) = if character_cannot_change_font(character) {
+                (None, Script::Common, bidi_info.levels[current_byte_index])
+            } else {
+                (
+                    font_group.find_by_codepoint(
+                        &layout_context.font_context,
+                        character,
+                        next_character,
+                        language,
+                    ),
+                    Script::from(character),
+                    bidi_info.levels[current_byte_index],
+                )
             };
 
-            let script = Script::from(character);
-            let bidi_level = bidi_info.levels[current_byte_index];
-
-            // If the existing segment is compatible with the character, keep going.
+            // If the existing segment is compatible with the character, just merge the character into it.
             if let Some(current) = current.as_mut() {
-                if current.update_if_compatible(&font, script, bidi_level) {
+                if current.is_compatible(&font, script, bidi_level) {
+                    current.update(next_byte_index, current_character_index + 1, script);
                     continue;
                 }
             }
 
-            // From https://www.w3.org/TR/css-text-3/#cursive-script:
-            // Cursive scripts do not admit gaps between their letters for either
-            // justification or letter-spacing.
-            let letter_spacing = if is_cursive_script(script) {
-                None
-            } else {
-                letter_spacing
+            let Some(font) = font.or_else(|| font_group.first(&layout_context.font_context)) else {
+                continue;
             };
-
-            let word_spacing = Some(resolve_word_spacing_for_font(&font));
             let info = FontAndScriptInfo {
                 font,
                 script,
@@ -533,53 +545,20 @@ impl TextRun {
                 word_spacing,
                 letter_spacing,
                 text_rendering,
+                kerning,
             };
 
-            // Add the new segment and finish the existing one, if we had one. If the first
-            // characters in the run were control characters we may be creating the first
-            // segment in the middle of the run (ie the start should be the start of this
-            // text run's text).
-            let (start_byte_index, start_character_index) = match current {
-                Some(_) => (current_byte_index, current_character_index),
-                None => (self.text_range.start, self.character_range.start),
-            };
-            let new = TextRunSegment::new(Arc::new(info), start_byte_index, start_character_index);
-            if let Some(mut finished) = current.replace(new) {
-                // The end of the previous segment is the start of the next one.
-                finished.range.end = current_byte_index;
-                finished.character_range.end = current_character_index;
-                results.push(finished);
-            }
+            finish_current_segment(&mut current, &mut results);
+            assert!(current.is_none());
+
+            current = Some(TextRunSegment::new(
+                Arc::new(info),
+                current_byte_index..next_byte_index,
+                current_character_index..current_character_index + 1,
+            ));
         }
 
-        // Either we have a current segment or we only had control characters and whitespace. In both
-        // of those cases, just use the first font.
-        if current.is_none() {
-            current = font_group.first(&layout_context.font_context).map(|font| {
-                let word_spacing = Some(resolve_word_spacing_for_font(&font));
-                TextRunSegment::new(
-                    Arc::new(FontAndScriptInfo {
-                        font,
-                        script: Script::Common,
-                        language,
-                        bidi_level: Level::ltr(),
-                        letter_spacing,
-                        word_spacing,
-                        text_rendering,
-                    }),
-                    self.text_range.start,
-                    self.character_range.start,
-                )
-            })
-        }
-
-        // Extend the last segment to the end of the string and add it to the results.
-        if let Some(mut last_segment) = current.take() {
-            last_segment.range.end = self.text_range.end;
-            last_segment.character_range.end = self.character_range.end;
-            results.push(last_segment);
-        }
-
+        finish_current_segment(&mut current, &mut results);
         results
     }
 
@@ -598,9 +577,56 @@ impl TextRun {
             false => SegmentStartSoftWrapPolicy::FollowLinebreaker,
         };
 
-        for segment in self.shaped_text.iter() {
-            segment.layout_into_line_items(self, soft_wrap_policy, ifc);
+        for item in self.items.iter() {
+            ifc.possibly_flush_deferred_forced_line_break();
+
+            match item {
+                // If this whitespace forces a line break, queue up a hard line break the next time we
+                // see any content. We don't line break immediately, because we'd like to finish processing
+                // any ongoing inline boxes before ending the line.
+                TextRunItem::LineBreak { character_index } => {
+                    ifc.defer_forced_line_break_at_character_offset(*character_index);
+                },
+                TextRunItem::Tab { bidi_level } => self.process_preserved_tab(ifc, *bidi_level),
+                TextRunItem::TextSegment(segment) => {
+                    segment.layout_into_line_items(self, soft_wrap_policy, ifc)
+                },
+            }
             soft_wrap_policy = SegmentStartSoftWrapPolicy::FollowLinebreaker;
+        }
+    }
+
+    fn process_preserved_tab(
+        &self,
+        ifc_layout: &mut InlineFormattingContextLayout,
+        bidi_level: Level,
+    ) {
+        let advance = ifc_layout
+            .ifc
+            .next_tab_stop_after_inline_advance(ifc_layout.potential_line_size().inline);
+        if advance.is_zero() {
+            return;
+        }
+
+        ifc_layout.update_unbreakable_segment_for_new_content(
+            &LineBlockSizes::zero(),
+            advance,
+            SegmentContentFlags::empty(),
+        );
+        ifc_layout.push_line_item_to_unbreakable_segment(LineItem::Tab {
+            inline_box_identifier: ifc_layout.current_inline_box_identifier(),
+            advance,
+            bidi_level,
+        });
+
+        if ifc_layout
+            .current_inline_container_state()
+            .style
+            .get_inherited_text()
+            .white_space_collapse ==
+            WhiteSpaceCollapse::BreakSpaces
+        {
+            ifc_layout.process_soft_wrap_opportunity();
         }
     }
 }
@@ -625,7 +651,7 @@ fn is_cursive_script(script: Script) -> bool {
 /// Whether or not this character should be able to change the font during segmentation.  Certain
 /// character are not rendered at all, so it doesn't matter what font we use to render them. They
 /// should just be added to the current segment.
-fn char_does_not_change_font(character: char) -> bool {
+fn character_cannot_change_font(character: char) -> bool {
     if character.is_control() {
         return true;
     }
@@ -636,12 +662,14 @@ fn char_does_not_change_font(character: char) -> bool {
         return false;
     }
 
-    let class = linebreak_property(character);
-    class == XI_LINE_BREAKING_CLASS_CM ||
-        class == XI_LINE_BREAKING_CLASS_GL ||
-        class == XI_LINE_BREAKING_CLASS_ZW ||
-        class == XI_LINE_BREAKING_CLASS_WJ ||
-        class == XI_LINE_BREAKING_CLASS_ZWJ
+    matches!(
+        icu_properties::maps::line_break().get(character),
+        LineBreak::CombiningMark |
+            LineBreak::Glue |
+            LineBreak::ZWSpace |
+            LineBreak::WordJoiner |
+            LineBreak::ZWJ
+    )
 }
 
 pub(super) fn get_font_for_first_font_for_style(
@@ -687,4 +715,8 @@ where
         self.next_character = self.iterator.next();
         Some((character, self.next_character))
     }
+}
+
+fn script_is_specific(script: Script) -> bool {
+    script != Script::Common && script != Script::Inherited
 }

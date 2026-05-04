@@ -30,7 +30,6 @@ use style::stylesheets::Stylesheet;
 use stylo_atoms::Atom;
 use webrender_api::units::DeviceIntSize;
 
-use crate::dom::attr::Attr;
 use crate::dom::bindings::cell::DomRefCell;
 use crate::dom::bindings::codegen::Bindings::DOMTokenListBinding::DOMTokenList_Binding::DOMTokenListMethods;
 use crate::dom::bindings::codegen::Bindings::HTMLLinkElementBinding::HTMLLinkElementMethods;
@@ -45,6 +44,7 @@ use crate::dom::css::stylesheet::StyleSheet as DOMStyleSheet;
 use crate::dom::document::Document;
 use crate::dom::documentorshadowroot::StylesheetSource;
 use crate::dom::domtokenlist::DOMTokenList;
+use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::element::{
     AttributeMutation, Element, ElementCreator, cors_setting_for_element,
     cors_settings_attribute_credential_mode, referrer_policy_for_element,
@@ -247,7 +247,7 @@ impl VirtualMethods for HTMLLinkElement {
     fn attribute_mutated(
         &self,
         cx: &mut js::context::JSContext,
-        attr: &Attr,
+        attr: AttrRef<'_>,
         mutation: AttributeMutation,
     ) {
         self.super_type()
@@ -256,12 +256,25 @@ impl VirtualMethods for HTMLLinkElement {
 
         let local_name = attr.local_name();
         let is_removal = mutation.is_removal();
-        if *local_name == local_name!("disabled") {
-            self.handle_disabled_attribute_change(is_removal);
-            return;
-        }
-        let node = self.upcast::<Node>();
+        match *local_name {
+            local_name!("disabled") => {
+                self.handle_disabled_attribute_change(is_removal);
+                return;
+            },
+            local_name!("rel") | local_name!("rev") => {
+                let previous_relations = self.relations.get();
+                self.relations
+                    .set(LinkRelations::for_element(self.upcast()));
 
+                // If relations haven't changed, we shouldn't do anything
+                if previous_relations == self.relations.get() {
+                    return;
+                }
+            },
+            _ => {},
+        }
+
+        let node = self.upcast::<Node>();
         if !node.is_connected() {
             return;
         }
@@ -278,15 +291,6 @@ impl VirtualMethods for HTMLLinkElement {
 
         match *local_name {
             local_name!("rel") | local_name!("rev") => {
-                let previous_relations = self.relations.get();
-                self.relations
-                    .set(LinkRelations::for_element(self.upcast()));
-
-                // If relations haven't changed, we shouldn't do anything
-                if previous_relations == self.relations.get() {
-                    return;
-                }
-
                 // https://html.spec.whatwg.org/multipage/#link-type-stylesheet:fetch-and-process-the-linked-resource
                 // > When the external resource link is created on a link element that is already browsing-context connected.
                 if self.relations.get().contains(LinkRelations::STYLESHEET) {
@@ -444,9 +448,6 @@ impl VirtualMethods for HTMLLinkElement {
             s.bind_to_tree(cx, context);
         }
 
-        self.relations
-            .set(LinkRelations::for_element(self.upcast()));
-
         if context.tree_connected {
             let element = self.upcast();
 
@@ -483,9 +484,9 @@ impl VirtualMethods for HTMLLinkElement {
         }
     }
 
-    fn unbind_from_tree(&self, context: &UnbindContext, can_gc: CanGc) {
+    fn unbind_from_tree(&self, cx: &mut js::context::JSContext, context: &UnbindContext) {
         if let Some(s) = self.super_type() {
-            s.unbind_from_tree(context, can_gc);
+            s.unbind_from_tree(cx, context);
         }
 
         self.remove_stylesheet();
@@ -934,17 +935,15 @@ impl HTMLLinkElement {
     /// <https://html.spec.whatwg.org/multipage/#link-type-preload:fetch-and-process-the-linked-resource-2>
     pub(crate) fn fire_event_after_response(
         &self,
+        cx: &mut JSContext,
         response: Result<(), NetworkError>,
-        can_gc: CanGc,
     ) {
         // Step 3.1 If response is a network error, fire an event named error at el.
         // Otherwise, fire an event named load at el.
         if response.is_err() {
-            self.upcast::<EventTarget>()
-                .fire_event(atom!("error"), can_gc);
+            self.upcast::<EventTarget>().fire_event(cx, atom!("error"));
         } else {
-            self.upcast::<EventTarget>()
-                .fire_event(atom!("load"), can_gc);
+            self.upcast::<EventTarget>().fire_event(cx, atom!("load"));
         }
     }
 
@@ -1053,8 +1052,7 @@ impl HTMLLinkElement {
                     false => atom!("load"),
                 };
 
-                link.upcast::<EventTarget>()
-                    .fire_event(event, CanGc::from_cx(cx));
+                link.upcast::<EventTarget>().fire_event(cx, event);
             },
         );
     }
@@ -1128,9 +1126,9 @@ impl HTMLLinkElementMethods<crate::DomTypeHolder> for HTMLLinkElement {
     make_getter!(Rel, "rel");
 
     /// <https://html.spec.whatwg.org/multipage/#dom-link-rel>
-    fn SetRel(&self, rel: DOMString, can_gc: CanGc) {
+    fn SetRel(&self, cx: &mut JSContext, rel: DOMString) {
         self.upcast::<Element>()
-            .set_tokenlist_attribute(&local_name!("rel"), rel, can_gc);
+            .set_tokenlist_attribute(cx, &local_name!("rel"), rel);
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-link-as

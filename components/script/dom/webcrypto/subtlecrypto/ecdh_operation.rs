@@ -2,9 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-use elliptic_curve::SecretKey;
+use elliptic_curve::generic_array::typenum::Unsigned;
 use elliptic_curve::rand_core::OsRng;
 use elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint, ValidatePublicKey};
+use elliptic_curve::{Curve, SecretKey};
 use js::context::JSContext;
 use p256::NistP256;
 use p384::NistP384;
@@ -1048,7 +1049,7 @@ pub(crate) fn export_key(format: KeyFormat, key: &CryptoKey) -> Result<ExportedK
             }
             .map_err(|_| create_public_key_export_error())?;
 
-            ExportedKey::Bytes(data.to_vec())
+            ExportedKey::new_bytes(data.to_vec())
         },
         KeyFormat::Pkcs8 => {
             // Step 3.1. If the [[type]] internal slot of key is not "private", then throw an
@@ -1108,15 +1109,14 @@ pub(crate) fn export_key(format: KeyFormat, key: &CryptoKey) -> Result<ExportedK
             }
             .map_err(|_| create_private_key_export_error())?;
 
-            ExportedKey::Bytes(data.as_bytes().to_vec())
+            ExportedKey::new_bytes(data.as_bytes().to_vec())
         },
         KeyFormat::Jwk => {
             // Step 3.1. Let jwk be a new JsonWebKey dictionary.
+            let mut jwk = JsonWebKey::default();
+
             // Step 3.2. Set the kty attribute of jwk to "EC".
-            let mut jwk = JsonWebKey {
-                kty: Some(DOMString::from("EC")),
-                ..Default::default()
-            };
+            jwk.kty = Some(DOMString::from("EC"));
 
             // Step 3.3.
             let named_curve =
@@ -1274,7 +1274,7 @@ pub(crate) fn export_key(format: KeyFormat, key: &CryptoKey) -> Result<ExportedK
             jwk.ext = Some(key.Extractable());
 
             // Step 3.4. Let result be jwk.
-            ExportedKey::Jwk(Box::new(jwk))
+            ExportedKey::new_jwk(jwk)
         },
         KeyFormat::Raw | KeyFormat::Raw_public => {
             // Step 3.1. If the [[type]] internal slot of key is not "public", then throw an
@@ -1325,7 +1325,7 @@ pub(crate) fn export_key(format: KeyFormat, key: &CryptoKey) -> Result<ExportedK
             };
 
             // Step 3.3. Let result be data.
-            ExportedKey::Bytes(data)
+            ExportedKey::new_bytes(data)
         },
         // Otherwise:
         _ => {
@@ -1350,4 +1350,32 @@ pub(crate) fn get_public_key(
     usages: Vec<KeyUsage>,
 ) -> Result<DomRoot<CryptoKey>, Error> {
     ec_common::get_public_key(cx, global, key, algorithm, usages)
+}
+
+/// Given a normalizedAlgorithm (an EcdhKeyDeriveParams dictionary), return the length of the secret
+/// derived by the named curve specified by the `named_curve` member of the `[[algorithm]]` slot of
+/// the `public` member of normalizedAlgorithm.
+pub(crate) fn secret_length(
+    normalized_algorithm: &SubtleEcdhKeyDeriveParams,
+) -> Result<u32, Error> {
+    let public_key = normalized_algorithm.public.root();
+    let KeyAlgorithmAndDerivatives::EcKeyAlgorithm(algorithm) = public_key.algorithm() else {
+        return Err(Error::Operation(Some(
+            "The key is not an elliptic curve algorithm key".to_string(),
+        )));
+    };
+
+    let secret_length_in_bits = match algorithm.named_curve.as_str() {
+        NAMED_CURVE_P256 => <NistP256 as Curve>::FieldBytesSize::to_u32(),
+        NAMED_CURVE_P384 => <NistP384 as Curve>::FieldBytesSize::to_u32(),
+        NAMED_CURVE_P521 => <NistP521 as Curve>::FieldBytesSize::to_u32(),
+        named_curve => {
+            return Err(Error::NotSupported(Some(format!(
+                "Unsupported namedCurve: {}",
+                named_curve
+            ))));
+        },
+    };
+
+    Ok(secret_length_in_bits)
 }

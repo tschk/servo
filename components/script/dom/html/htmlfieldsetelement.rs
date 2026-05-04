@@ -10,13 +10,13 @@ use js::context::JSContext;
 use js::rust::HandleObject;
 use stylo_dom::ElementState;
 
-use crate::dom::attr::Attr;
 use crate::dom::bindings::codegen::Bindings::HTMLFieldSetElementBinding::HTMLFieldSetElementMethods;
 use crate::dom::bindings::inheritance::{Castable, ElementTypeId, HTMLElementTypeId, NodeTypeId};
 use crate::dom::bindings::root::{DomRoot, MutNullableDom};
 use crate::dom::bindings::str::DOMString;
 use crate::dom::customelementregistry::CallbackReaction;
 use crate::dom::document::Document;
+use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::element::{AttributeMutation, Element};
 use crate::dom::html::htmlcollection::HTMLCollection;
 use crate::dom::html::htmlelement::HTMLElement;
@@ -87,17 +87,12 @@ impl HTMLFieldSetElement {
 
 impl HTMLFieldSetElementMethods<crate::DomTypeHolder> for HTMLFieldSetElement {
     /// <https://html.spec.whatwg.org/multipage/#dom-fieldset-elements>
-    fn Elements(&self, can_gc: CanGc) -> DomRoot<HTMLCollection> {
-        HTMLCollection::new_with_filter_fn(
-            &self.owner_window(),
-            self.upcast(),
-            |element, _| {
-                element
-                    .downcast::<HTMLElement>()
-                    .is_some_and(HTMLElement::is_listed_element)
-            },
-            can_gc,
-        )
+    fn Elements(&self, cx: &mut js::context::JSContext) -> DomRoot<HTMLCollection> {
+        HTMLCollection::new_with_filter_fn(cx, &self.owner_window(), self.upcast(), |element, _| {
+            element
+                .downcast::<HTMLElement>()
+                .is_some_and(HTMLElement::is_listed_element)
+        })
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-fieldset-disabled
@@ -161,7 +156,7 @@ impl VirtualMethods for HTMLFieldSetElement {
     fn attribute_mutated(
         &self,
         cx: &mut js::context::JSContext,
-        attr: &Attr,
+        attr: AttrRef<'_>,
         mutation: AttributeMutation,
     ) {
         self.super_type()
@@ -182,7 +177,7 @@ impl VirtualMethods for HTMLFieldSetElement {
                 element.set_disabled_state(disabled_state);
                 element.set_enabled_state(!disabled_state);
                 let mut found_legend = false;
-                let children = node.children().filter(|node| {
+                let children = node.children_unrooted(cx.no_gc()).filter(|node| {
                     if found_legend {
                         true
                     } else if node.is::<HTMLLegendElement>() {

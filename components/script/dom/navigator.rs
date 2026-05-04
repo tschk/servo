@@ -56,7 +56,9 @@ use crate::dom::permissions::Permissions;
 use crate::dom::pluginarray::PluginArray;
 use crate::dom::serviceworkercontainer::ServiceWorkerContainer;
 use crate::dom::servointernals::ServoInternals;
+use crate::dom::storagemanager::StorageManager;
 use crate::dom::types::UserActivation;
+use crate::dom::wakelock::WakeLock;
 #[cfg(feature = "webgpu")]
 use crate::dom::webgpu::gpu::GPU;
 use crate::dom::window::Window;
@@ -64,7 +66,7 @@ use crate::dom::window::Window;
 use crate::dom::xrsystem::XRSystem;
 use crate::fetch::RequestWithGlobalScope;
 use crate::network_listener::{FetchResponseListener, ResourceTimingListener, submit_timing};
-use crate::script_runtime::{CanGc, JSContext};
+use crate::script_runtime::CanGc;
 
 pub(super) fn hardware_concurrency() -> u64 {
     static CPUS: LazyLock<u64> = LazyLock::new(|| num_cpus::get().try_into().unwrap_or(1));
@@ -126,6 +128,7 @@ pub(crate) struct Navigator {
     permissions: MutNullableDom<Permissions>,
     mediasession: MutNullableDom<MediaSession>,
     clipboard: MutNullableDom<Clipboard>,
+    storage: MutNullableDom<StorageManager>,
     #[cfg(feature = "webgpu")]
     gpu: MutNullableDom<GPU>,
     /// <https://www.w3.org/TR/gamepad/#dfn-hasgamepadgesture>
@@ -133,6 +136,7 @@ pub(crate) struct Navigator {
     has_gamepad_gesture: Cell<bool>,
     servo_internals: MutNullableDom<ServoInternals>,
     user_activation: MutNullableDom<UserActivation>,
+    wake_lock: MutNullableDom<WakeLock>,
 }
 
 impl Navigator {
@@ -153,12 +157,14 @@ impl Navigator {
             permissions: Default::default(),
             mediasession: Default::default(),
             clipboard: Default::default(),
+            storage: Default::default(),
             #[cfg(feature = "webgpu")]
             gpu: Default::default(),
             #[cfg(feature = "gamepad")]
             has_gamepad_gesture: Cell::new(false),
             servo_internals: Default::default(),
             user_activation: Default::default(),
+            wake_lock: Default::default(),
         }
     }
 
@@ -366,8 +372,8 @@ impl NavigatorMethods<crate::DomTypeHolder> for Navigator {
     }
 
     // https://html.spec.whatwg.org/multipage/#dom-navigator-languages
-    fn Languages(&self, cx: JSContext, can_gc: CanGc, retval: MutableHandleValue) {
-        to_frozen_array(&[self.Language()], cx, retval, can_gc)
+    fn Languages(&self, cx: &mut js::context::JSContext, retval: MutableHandleValue) {
+        to_frozen_array(&[self.Language()], cx.into(), retval, CanGc::from_cx(cx))
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-navigator-online>
@@ -475,8 +481,19 @@ impl NavigatorMethods<crate::DomTypeHolder> for Navigator {
             .or_init(|| Clipboard::new(cx, &self.global()))
     }
 
+    /// <https://storage.spec.whatwg.org/#api>
+    fn Storage(&self, cx: &mut js::context::JSContext) -> DomRoot<StorageManager> {
+        self.storage
+            .or_init(|| StorageManager::new(&self.global(), CanGc::from_cx(cx)))
+    }
+
     /// <https://w3c.github.io/beacon/#sec-processing-model>
-    fn SendBeacon(&self, url: USVString, data: Option<BodyInit>, can_gc: CanGc) -> Fallible<bool> {
+    fn SendBeacon(
+        &self,
+        cx: &mut js::context::JSContext,
+        url: USVString,
+        data: Option<BodyInit>,
+    ) -> Fallible<bool> {
         let global = self.global();
         // Step 1. Set base to this's relevant settings object's API base URL.
         let base = global.api_base_url();
@@ -502,7 +519,7 @@ impl NavigatorMethods<crate::DomTypeHolder> for Navigator {
         if let Some(data) = data {
             // Step 6.1. Set transmittedData and contentType to the result of extracting data's byte stream
             // with the keepalive flag set.
-            let extracted_body = data.extract(&global, true, can_gc)?;
+            let extracted_body = data.extract(cx, &global, true)?;
             // Step 6.2. If the amount of data that can be queued to be sent by keepalive enabled requests
             // is exceeded by the size of transmittedData (as defined in HTTP-network-or-cache fetch),
             // set the return value to false and terminate these steps.
@@ -606,9 +623,14 @@ impl NavigatorMethods<crate::DomTypeHolder> for Navigator {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-navigator-useractivation>
-    fn UserActivation(&self, can_gc: CanGc) -> DomRoot<UserActivation> {
+    fn UserActivation(&self, cx: &mut js::context::JSContext) -> DomRoot<UserActivation> {
         self.user_activation
-            .or_init(|| UserActivation::new(&self.global(), can_gc))
+            .or_init(|| UserActivation::new(cx, &self.global()))
+    }
+
+    /// <https://w3c.github.io/screen-wake-lock/#dom-navigator-wakelock>
+    fn WakeLock(&self, cx: &mut js::context::JSContext) -> DomRoot<WakeLock> {
+        self.wake_lock.or_init(|| WakeLock::new(cx, &self.global()))
     }
 }
 

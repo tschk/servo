@@ -44,9 +44,8 @@ use net_traits::filemanager_thread::FileTokenCheck;
 use net_traits::request::Request;
 use net_traits::response::Response;
 use net_traits::{FetchTaskTarget, ResourceFetchTiming, ResourceTimingType};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
-use servo_arc::Arc as ServoArc;
 use servo_url::{ImmutableOrigin, ServoUrl};
 use tokio::sync::Mutex as TokioMutex;
 
@@ -107,7 +106,7 @@ fn receive_credential_prompt_msgs(
 }
 
 fn create_http_state(fc: Option<GenericEmbedderProxy<NetToEmbedderMsg>>) -> HttpState {
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let override_manager = net::connector::CertificateErrorOverrideManager::new();
     HttpState {
@@ -140,9 +139,7 @@ fn new_fetch_context(
         file_token: FileTokenCheck::NotRequired,
         request_interceptor: Arc::new(TokioMutex::new(RequestInterceptor::new(sender))),
         cancellation_listener: Arc::new(Default::default()),
-        timing: ServoArc::new(Mutex::new(ResourceFetchTiming::new(
-            ResourceTimingType::Navigation,
-        ))),
+        timing: ResourceFetchTiming::new(ResourceTimingType::Navigation).into(),
         protocols: Arc::new(ProtocolRegistry::with_internal_protocols()),
         websocket_chan: None,
         ca_certificates: CACertificates::Default,

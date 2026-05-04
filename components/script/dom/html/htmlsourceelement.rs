@@ -6,10 +6,8 @@ use dom_struct::dom_struct;
 use html5ever::{LocalName, Prefix, local_name};
 use js::context::JSContext;
 use js::rust::HandleObject;
-use script_bindings::script_runtime::temp_cx;
 use style::attr::AttrValue;
 
-use crate::dom::attr::Attr;
 use crate::dom::bindings::codegen::Bindings::HTMLSourceElementBinding::HTMLSourceElementMethods;
 use crate::dom::bindings::codegen::Bindings::NodeBinding::Node_Binding::NodeMethods;
 use crate::dom::bindings::inheritance::Castable;
@@ -17,13 +15,13 @@ use crate::dom::bindings::root::{Dom, DomRoot, Root};
 use crate::dom::bindings::str::{DOMString, USVString};
 use crate::dom::document::Document;
 use crate::dom::element::AttributeMutation;
+use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::html::htmlelement::HTMLElement;
 use crate::dom::html::htmlimageelement::HTMLImageElement;
 use crate::dom::html::htmlmediaelement::HTMLMediaElement;
 use crate::dom::html::htmlpictureelement::HTMLPictureElement;
 use crate::dom::node::{BindContext, Node, NodeDamage, UnbindContext};
 use crate::dom::virtualmethods::VirtualMethods;
-use crate::script_runtime::CanGc;
 
 #[dom_struct]
 pub(crate) struct HTMLSourceElement {
@@ -90,7 +88,7 @@ impl VirtualMethods for HTMLSourceElement {
     fn attribute_mutated(
         &self,
         cx: &mut js::context::JSContext,
-        attr: &Attr,
+        attr: AttrRef<'_>,
         mutation: AttributeMutation,
     ) {
         self.super_type()
@@ -175,15 +173,9 @@ impl VirtualMethods for HTMLSourceElement {
         }
     }
 
-    #[expect(unsafe_code)]
     /// <https://html.spec.whatwg.org/multipage/#the-source-element:html-element-removing-steps>
-    fn unbind_from_tree(&self, context: &UnbindContext, _can_gc: CanGc) {
-        // TODO: https://github.com/servo/servo/issues/42837
-        let mut cx = unsafe { temp_cx() };
-        let cx = &mut cx;
-        self.super_type()
-            .unwrap()
-            .unbind_from_tree(context, CanGc::from_cx(cx));
+    fn unbind_from_tree(&self, cx: &mut js::context::JSContext, context: &UnbindContext) {
+        self.super_type().unwrap().unbind_from_tree(cx, context);
 
         // Step 1. If oldParent is a picture element, then for each child of oldParent's children,
         // if child is an img element, then count this as a relevant mutation for child.

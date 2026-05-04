@@ -23,7 +23,6 @@ use crate::dom::document::Document;
 use crate::dom::element::Element;
 use crate::dom::node::{Node, NodeTraits};
 use crate::dom::trustedtypes::trustedtypepolicyfactory::TrustedTypePolicyFactory;
-use crate::script_runtime::CanGc;
 
 // https://dom.spec.whatwg.org/#interface-attr
 #[dom_struct]
@@ -129,7 +128,7 @@ impl AttrMethods<crate::DomTypeHolder> for Attr {
             if let Some(owner) = self.owner() {
                 // Step 2.4. Change attribute to verifiedValue.
                 let value = owner.parse_attribute(self.namespace(), self.local_name(), value);
-                owner.change_attribute(self, value, CanGc::from_cx(cx));
+                owner.change_attribute(cx, self, value);
             } else {
                 // Step 2.3. If attribute’s element is null, then set attribute’s value to verifiedValue, and return.
                 self.set_value(value);
@@ -233,26 +232,20 @@ impl Attr {
     }
 }
 
-pub(crate) trait AttrHelpersForLayout<'dom> {
-    fn value(self) -> &'dom AttrValue;
-    fn local_name(self) -> &'dom LocalName;
-    fn namespace(self) -> &'dom Namespace;
-}
-
 #[expect(unsafe_code)]
-impl<'dom> AttrHelpersForLayout<'dom> for LayoutDom<'dom, Attr> {
+impl<'dom> LayoutDom<'dom, Attr> {
     #[inline]
-    fn value(self) -> &'dom AttrValue {
+    pub(crate) fn value(self) -> &'dom AttrValue {
         unsafe { self.unsafe_get().value.borrow_for_layout() }
     }
 
     #[inline]
-    fn local_name(self) -> &'dom LocalName {
+    pub(crate) fn local_name(self) -> &'dom LocalName {
         &self.unsafe_get().identifier.local_name.0
     }
 
     #[inline]
-    fn namespace(self) -> &'dom Namespace {
+    pub(crate) fn namespace(self) -> &'dom Namespace {
         &self.unsafe_get().identifier.namespace.0
     }
 }

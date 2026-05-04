@@ -12,7 +12,6 @@ use js::rust::HandleObject;
 use style::str::{split_html_space_chars, str_join};
 use stylo_dom::ElementState;
 
-use crate::dom::attr::Attr;
 use crate::dom::bindings::codegen::Bindings::CharacterDataBinding::CharacterDataMethods;
 use crate::dom::bindings::codegen::Bindings::HTMLOptionElementBinding::HTMLOptionElementMethods;
 use crate::dom::bindings::codegen::Bindings::HTMLSelectElementBinding::HTMLSelectElement_Binding::HTMLSelectElementMethods;
@@ -24,6 +23,7 @@ use crate::dom::bindings::root::DomRoot;
 use crate::dom::bindings::str::DOMString;
 use crate::dom::characterdata::CharacterData;
 use crate::dom::document::Document;
+use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::element::{AttributeMutation, CustomElementCreationMode, Element, ElementCreator};
 use crate::dom::html::htmlelement::HTMLElement;
 use crate::dom::html::htmlformelement::HTMLFormElement;
@@ -273,10 +273,10 @@ impl HTMLOptionElementMethods<crate::DomTypeHolder> for HTMLOptionElement {
         }
 
         if let Some(val) = value {
-            option.SetValue(val)
+            option.SetValue(cx, val)
         }
 
-        option.SetDefaultSelected(default_selected);
+        option.SetDefaultSelected(cx, default_selected);
         option.set_selectedness(selected);
         option.update_select_validity(CanGc::from_cx(cx));
         Ok(option)
@@ -374,11 +374,11 @@ impl HTMLOptionElementMethods<crate::DomTypeHolder> for HTMLOptionElement {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-option-selected>
-    fn SetSelected(&self, selected: bool, can_gc: CanGc) {
+    fn SetSelected(&self, cx: &mut JSContext, selected: bool) {
         self.dirtiness.set(true);
         self.set_selectedness(selected);
         self.pick_if_selected_and_reset();
-        self.update_select_validity(can_gc);
+        self.update_select_validity(CanGc::from_cx(cx));
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-option-index>
@@ -395,7 +395,7 @@ impl VirtualMethods for HTMLOptionElement {
     fn attribute_mutated(
         &self,
         cx: &mut js::context::JSContext,
-        attr: &Attr,
+        attr: AttrRef<'_>,
         mutation: AttributeMutation,
     ) {
         self.super_type()
@@ -469,8 +469,8 @@ impl VirtualMethods for HTMLOptionElement {
         self.update_select_validity(CanGc::from_cx(cx));
     }
 
-    fn unbind_from_tree(&self, context: &UnbindContext, can_gc: CanGc) {
-        self.super_type().unwrap().unbind_from_tree(context, can_gc);
+    fn unbind_from_tree(&self, cx: &mut js::context::JSContext, context: &UnbindContext) {
+        self.super_type().unwrap().unbind_from_tree(cx, context);
 
         if let Some(select) = context
             .parent
@@ -478,8 +478,8 @@ impl VirtualMethods for HTMLOptionElement {
             .find_map(DomRoot::downcast::<HTMLSelectElement>)
         {
             select
-                .validity_state(can_gc)
-                .perform_validation_and_update(ValidationFlags::all(), can_gc);
+                .validity_state(CanGc::from_cx(cx))
+                .perform_validation_and_update(ValidationFlags::all(), CanGc::from_cx(cx));
             select.ask_for_reset();
         }
 
@@ -515,9 +515,9 @@ impl VirtualMethods for HTMLOptionElement {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#the-option-element:html-element-moving-steps>
-    fn moving_steps(&self, context: &MoveContext, can_gc: CanGc) {
+    fn moving_steps(&self, cx: &mut JSContext, context: &MoveContext) {
         if let Some(super_type) = self.super_type() {
-            super_type.moving_steps(context, can_gc);
+            super_type.moving_steps(cx, context);
         }
 
         // The option HTML element moving steps, given movedNode and oldParent, are to run update an
@@ -529,8 +529,8 @@ impl VirtualMethods for HTMLOptionElement {
                 .find_map(DomRoot::downcast::<HTMLSelectElement>)
             {
                 select
-                    .validity_state(can_gc)
-                    .perform_validation_and_update(ValidationFlags::all(), can_gc);
+                    .validity_state(CanGc::from_cx(cx))
+                    .perform_validation_and_update(ValidationFlags::all(), CanGc::from_cx(cx));
                 select.ask_for_reset();
             }
 
@@ -544,6 +544,6 @@ impl VirtualMethods for HTMLOptionElement {
         element.check_parent_disabled_state_for_option();
 
         self.pick_if_selected_and_reset();
-        self.update_select_validity(can_gc);
+        self.update_select_validity(CanGc::from_cx(cx));
     }
 }

@@ -10,8 +10,8 @@ use script_bindings::script_runtime::CanGc;
 use stylo_atoms::Atom;
 use time::OffsetDateTime;
 
-use crate::dom::attr::Attr;
 use crate::dom::element::AttributeMutation;
+use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::event::Event;
 use crate::dom::eventtarget::EventTarget;
 use crate::dom::filelist::FileList;
@@ -300,30 +300,30 @@ pub(crate) trait SpecificInputType {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#signal-a-type-change>
-    fn signal_type_change(&self, _input: &HTMLInputElement, _can_gc: CanGc) {}
+    fn signal_type_change(&self, _cx: &mut js::context::JSContext, _input: &HTMLInputElement) {}
 
     fn activation_behavior(
         &self,
+        _cx: &mut js::context::JSContext,
         _input: &HTMLInputElement,
         _event: &Event,
         _target: &EventTarget,
-        _can_gc: CanGc,
     ) {
     }
 
     fn legacy_pre_activation_behavior(
         &self,
+        _cx: &mut JSContext,
         _input: &HTMLInputElement,
-        _can_gc: CanGc,
     ) -> Option<InputActivationState> {
         None
     }
 
     fn legacy_canceled_activation_behavior(
         &self,
+        _cx: &mut JSContext,
         _input: &HTMLInputElement,
         _cache: InputActivationState,
-        _can_gc: CanGc,
     ) {
     }
 
@@ -345,7 +345,7 @@ pub(crate) trait SpecificInputType {
         &self,
         _cx: &mut JSContext,
         _input: &HTMLInputElement,
-        _attr: &Attr,
+        _attr: AttrRef<'_>,
         _mutation: AttributeMutation,
     ) {
     }

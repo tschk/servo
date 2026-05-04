@@ -3,11 +3,14 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use dom_struct::dom_struct;
+use js::context::JSContext;
 use js::jsval::UndefinedValue;
 use js::rust::HandleValue;
 use profile_traits::generic_callback::GenericCallback;
 use script_bindings::conversions::SafeToJSValConvertible;
 use servo_base::generic_channel::GenericSend;
+use servo_url::origin::ImmutableOrigin;
+use storage_traits::client_storage::StorageProxyMap;
 use storage_traits::indexeddb::{BackendResult, IndexedDBThreadMsg, SyncOperation};
 use stylo_atoms::Atom;
 use uuid::Uuid;
@@ -15,7 +18,7 @@ use uuid::Uuid;
 use crate::dom::bindings::codegen::Bindings::IDBDatabaseBinding::IDBTransactionDurability;
 use crate::dom::bindings::codegen::Bindings::IDBOpenDBRequestBinding::IDBOpenDBRequestMethods;
 use crate::dom::bindings::codegen::Bindings::IDBTransactionBinding::IDBTransactionMode;
-use crate::dom::bindings::error::{Error, ErrorToJsval};
+use crate::dom::bindings::error::Error;
 use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::refcounted::Trusted;
 use crate::dom::bindings::reflector::{DomGlobal, reflect_dom_object};
@@ -27,7 +30,7 @@ use crate::dom::indexeddb::idbrequest::IDBRequest;
 use crate::dom::indexeddb::idbtransaction::IDBTransaction;
 use crate::dom::indexeddb::idbversionchangeevent::IDBVersionChangeEvent;
 use crate::indexeddb::map_backend_error_to_dom_error;
-use crate::realms::enter_realm;
+use crate::realms::enter_auto_realm;
 use crate::script_runtime::CanGc;
 
 #[derive(Clone)]
@@ -38,7 +41,7 @@ struct OpenRequestListener {
 impl OpenRequestListener {
     /// The continuation of the parallel steps of
     /// <https://www.w3.org/TR/IndexedDB/#dom-idbfactory-deletedatabase>
-    fn handle_delete_db(&self, result: BackendResult<u64>, can_gc: CanGc) {
+    fn handle_delete_db(&self, cx: &mut JSContext, result: BackendResult<u64>) {
         // Step 4.1: Let result be the result of deleting a database, with storageKey, name, and request.
         // Note: done with the `result` argument.
 
@@ -54,10 +57,10 @@ impl OpenRequestListener {
         // Note: setting the done flag here as it is done in both branches below.
         open_request.idbrequest.set_ready_state_done();
 
-        let cx = GlobalScope::get_cx();
-        rooted!(in(*cx) let mut rval = UndefinedValue());
+        rooted!(&in(cx) let mut rval = UndefinedValue());
 
-        let _ac = enter_realm(&*open_request);
+        let mut realm = enter_auto_realm(cx, &*open_request);
+        let cx = &mut realm.current_realm();
 
         match result {
             Ok(version) => {
@@ -67,12 +70,12 @@ impl OpenRequestListener {
                 // and fire a version change event named success at request with result and null.
                 open_request.set_result(rval.handle());
                 let _ = IDBVersionChangeEvent::fire_version_change_event(
+                    cx,
                     &global,
                     open_request.upcast(),
                     Atom::from("success"),
                     version,
                     None,
-                    can_gc,
                 );
             },
             Err(err) => {
@@ -82,21 +85,16 @@ impl OpenRequestListener {
                 // set request’s done flag to true,
                 // and fire an event named error at request
                 // with its bubbles and cancelable attributes initialized to true.
-
-                // TODO: transform backend error into jsval.
                 let error = map_backend_error_to_dom_error(err);
-                let cx = GlobalScope::get_cx();
-                rooted!(in(*cx) let mut rval = UndefinedValue());
-                error.to_jsval(cx, &global, rval.handle_mut(), can_gc);
-                open_request.set_result(rval.handle());
+                open_request.set_error(Some(error), CanGc::from_cx(cx));
                 let event = Event::new(
                     &global,
                     Atom::from("error"),
                     EventBubbles::Bubbles,
                     EventCancelable::Cancelable,
-                    can_gc,
+                    CanGc::from_cx(cx),
                 );
-                event.fire(open_request.upcast(), can_gc);
+                event.fire(open_request.upcast(), CanGc::from_cx(cx));
             },
         }
     }
@@ -131,15 +129,21 @@ impl IDBOpenDBRequest {
 
     pub(crate) fn get_or_init_connection(
         &self,
+        cx: &mut JSContext,
         global: &GlobalScope,
         name: String,
         version: u64,
         upgraded: bool,
-        can_gc: CanGc,
     ) -> DomRoot<IDBDatabase> {
         self.pending_connection.or_init(|| {
             debug_assert!(!upgraded, "A connection should exist for the upgraded db.");
-            IDBDatabase::new(global, name.into(), self.get_id(), version, can_gc)
+            IDBDatabase::new(
+                global,
+                name.into(),
+                self.get_id(),
+                version,
+                CanGc::from_cx(cx),
+            )
         })
     }
 
@@ -148,14 +152,13 @@ impl IDBOpenDBRequest {
     /// The below are the steps in the task.
     pub(crate) fn upgrade_db_version(
         &self,
+        cx: &mut JSContext,
         connection: &IDBDatabase,
         old_version: u64,
         version: u64,
         transaction: u64,
-        can_gc: CanGc,
     ) {
         let global = self.global();
-        let cx = GlobalScope::get_cx();
 
         let transaction = IDBTransaction::new_with_serial(
             &global,
@@ -164,15 +167,15 @@ impl IDBOpenDBRequest {
             IDBTransactionDurability::Default,
             &connection.object_stores(),
             transaction,
-            can_gc,
+            CanGc::from_cx(cx),
         );
         transaction.set_versionchange_old_version(old_version);
         connection.set_transaction(&transaction);
         // This task runs Step 10.4 later, so keep the transaction inactive until then.
         transaction.set_active_flag(false);
 
-        rooted!(in(*cx) let mut connection_val = UndefinedValue());
-        connection.safe_to_jsval(cx, connection_val.handle_mut(), can_gc);
+        rooted!(&in(cx) let mut connection_val = UndefinedValue());
+        connection.safe_to_jsval(cx.into(), connection_val.handle_mut(), CanGc::from_cx(cx));
 
         // Step 10.1: Set request’s result to connection.
         self.idbrequest.set_result(connection_val.handle());
@@ -189,12 +192,12 @@ impl IDBOpenDBRequest {
         // Step 10.5: Let didThrow be the result of firing a version change event
         // named upgradeneeded at request with old version and version.
         let did_throw = IDBVersionChangeEvent::fire_version_change_event(
+            cx,
             &global,
             self.upcast(),
             Atom::from("upgradeneeded"),
             old_version,
             Some(version),
-            can_gc,
         );
 
         // Step 10.6: If transaction’s state is active, then:
@@ -205,7 +208,7 @@ impl IDBOpenDBRequest {
             // Step 10.6.2: If didThrow is true, run abort a transaction with
             // transaction and a newly created "AbortError" DOMException.
             if did_throw {
-                transaction.initiate_abort(Error::Abort(None), can_gc);
+                transaction.initiate_abort(Error::Abort(None), CanGc::from_cx(cx));
                 transaction.request_backend_abort();
             } else {
                 // The upgrade transaction auto-commits once inactive and quiescent.
@@ -214,7 +217,12 @@ impl IDBOpenDBRequest {
         }
     }
 
-    pub(crate) fn delete_database(&self, name: String) -> Result<(), ()> {
+    pub(crate) fn delete_database(
+        &self,
+        storage_key: ImmutableOrigin,
+        name: String,
+        proxy_map: StorageProxyMap,
+    ) -> Result<(), ()> {
         let global = self.global();
 
         let task_source = global
@@ -226,18 +234,14 @@ impl IDBOpenDBRequest {
         };
         let callback = GenericCallback::new(global.time_profiler_chan().clone(), move |message| {
             let response_listener = response_listener.clone();
-            task_source.queue(task!(request_callback: move || {
-                response_listener.handle_delete_db(message.unwrap(), CanGc::deprecated_note());
+            task_source.queue(task!(request_callback: move |cx| {
+                response_listener.handle_delete_db(cx, message.unwrap());
             }))
         })
         .expect("Could not create delete database callback");
 
-        let delete_operation = SyncOperation::DeleteDatabase(
-            callback,
-            global.origin().immutable().clone(),
-            name,
-            self.get_id(),
-        );
+        let delete_operation =
+            SyncOperation::DeleteDatabase(callback, storage_key, name, proxy_map, self.get_id());
 
         if global
             .storage_threads()
@@ -276,15 +280,15 @@ impl IDBOpenDBRequest {
         matches
     }
 
-    pub fn dispatch_success(&self, name: String, version: u64, upgraded: bool, can_gc: CanGc) {
+    pub fn dispatch_success(&self, cx: &mut JSContext, name: String, version: u64, upgraded: bool) {
         let global = self.global();
-        let result = self.get_or_init_connection(&global, name, version, upgraded, can_gc);
+        let result = self.get_or_init_connection(cx, &global, name, version, upgraded);
         self.idbrequest.set_ready_state_done();
-        let cx = GlobalScope::get_cx();
 
-        let _ac = enter_realm(&*result);
-        rooted!(in(*cx) let mut result_val = UndefinedValue());
-        result.safe_to_jsval(cx, result_val.handle_mut(), CanGc::deprecated_note());
+        let mut realm = enter_auto_realm(cx, &*result);
+        let cx = &mut realm.current_realm();
+        rooted!(&in(cx) let mut result_val = UndefinedValue());
+        result.safe_to_jsval(cx.into(), result_val.handle_mut(), CanGc::from_cx(cx));
         self.set_result(result_val.handle());
 
         let event = Event::new(
@@ -292,21 +296,21 @@ impl IDBOpenDBRequest {
             Atom::from("success"),
             EventBubbles::DoesNotBubble,
             EventCancelable::NotCancelable,
-            CanGc::deprecated_note(),
+            CanGc::from_cx(cx),
         );
-        event.fire(self.upcast(), CanGc::deprecated_note());
+        event.fire_with_cx(cx, self.upcast());
     }
 
     /// <https://w3c.github.io/IndexedDB/#eventdef-idbopendbrequest-blocked>
-    pub fn dispatch_blocked(&self, old_version: u64, new_version: Option<u64>, can_gc: CanGc) {
+    pub fn dispatch_blocked(&self, cx: &mut JSContext, old_version: u64, new_version: Option<u64>) {
         let global = self.global();
         let _ = IDBVersionChangeEvent::fire_version_change_event(
+            cx,
             &global,
             self.upcast(),
             Atom::from("blocked"),
             old_version,
             new_version,
-            can_gc,
         );
     }
 }

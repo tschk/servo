@@ -7,8 +7,11 @@ use js::context::JSContext;
 use js::jsapi::{Heap, JSObject};
 use js::jsval::UndefinedValue;
 use js::rust::{CustomAutoRooter, CustomAutoRooterGuard, HandleValue, MutableHandleValue};
+use net_traits::response::HttpsState;
 use servo_base::id::PipelineId;
-use servo_constellation_traits::{ScriptToConstellationMessage, StructuredSerializedData};
+use servo_constellation_traits::{
+    RemoteFocusOperation, ScriptToConstellationMessage, StructuredSerializedData,
+};
 use servo_url::ServoUrl;
 
 use crate::dom::bindings::codegen::Bindings::DissimilarOriginWindowBinding;
@@ -69,6 +72,7 @@ impl DissimilarOriginWindow {
                 Some(global_to_clone_from.is_secure_context()),
                 false,
                 global_to_clone_from.font_context().cloned(),
+                HttpsState::None,
             ),
             window_proxy: Dom::from_ref(window_proxy),
             location: Default::default(),
@@ -191,12 +195,12 @@ impl DissimilarOriginWindowMethods<crate::DomTypeHolder> for DissimilarOriginWin
     fn Focus(&self) {
         let browsing_context_id = self.window_proxy.browsing_context_id();
         debug!("Initiating a focus operation for {browsing_context_id:?}");
-        self.globalscope
-            .script_to_constellation_chan()
-            .send(ScriptToConstellationMessage::FocusRemoteBrowsingContext(
+        let _ = self.globalscope.script_to_constellation_chan().send(
+            ScriptToConstellationMessage::FocusRemoteBrowsingContext(
                 browsing_context_id,
-            ))
-            .unwrap();
+                RemoteFocusOperation::Viewport,
+            ),
+        );
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-location>

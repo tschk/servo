@@ -9,7 +9,6 @@ use js::rust::HandleObject;
 use style::attr::{AttrValue, LengthOrPercentageOrAuto};
 use style::color::AbsoluteColor;
 
-use crate::dom::attr::Attr;
 use crate::dom::bindings::codegen::Bindings::HTMLTableSectionElementBinding::HTMLTableSectionElementMethods;
 use crate::dom::bindings::codegen::Bindings::NodeBinding::NodeMethods;
 use crate::dom::bindings::error::{ErrorResult, Fallible};
@@ -17,15 +16,13 @@ use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::root::{DomRoot, LayoutDom};
 use crate::dom::bindings::str::DOMString;
 use crate::dom::document::Document;
-use crate::dom::element::{
-    CustomElementCreationMode, Element, ElementCreator, LayoutElementHelpers,
-};
+use crate::dom::element::attributes::storage::AttrRef;
+use crate::dom::element::{CustomElementCreationMode, Element, ElementCreator};
 use crate::dom::html::htmlcollection::HTMLCollection;
 use crate::dom::html::htmlelement::HTMLElement;
 use crate::dom::html::htmltablerowelement::HTMLTableRowElement;
 use crate::dom::node::{Node, NodeTraits};
 use crate::dom::virtualmethods::VirtualMethods;
-use crate::script_runtime::CanGc;
 
 #[dom_struct]
 pub(crate) struct HTMLTableSectionElement {
@@ -66,15 +63,15 @@ impl HTMLTableSectionElement {
 
 impl HTMLTableSectionElementMethods<crate::DomTypeHolder> for HTMLTableSectionElement {
     /// <https://html.spec.whatwg.org/multipage/#dom-tbody-rows>
-    fn Rows(&self) -> DomRoot<HTMLCollection> {
+    fn Rows(&self, cx: &mut JSContext) -> DomRoot<HTMLCollection> {
         HTMLCollection::new_with_filter_fn(
+            cx,
             &self.owner_window(),
             self.upcast(),
             |element, root| {
                 element.is::<HTMLTableRowElement>() &&
                     element.upcast::<Node>().GetParentNode().as_deref() == Some(root)
             },
-            CanGc::deprecated_note(),
         )
     }
 
@@ -84,7 +81,7 @@ impl HTMLTableSectionElementMethods<crate::DomTypeHolder> for HTMLTableSectionEl
         node.insert_cell_or_row(
             cx,
             index,
-            || self.Rows(),
+            |cx| self.Rows(cx),
             |cx| {
                 let row = Element::create(
                     cx,
@@ -103,24 +100,24 @@ impl HTMLTableSectionElementMethods<crate::DomTypeHolder> for HTMLTableSectionEl
     /// <https://html.spec.whatwg.org/multipage/#dom-tbody-deleterow>
     fn DeleteRow(&self, cx: &mut JSContext, index: i32) -> ErrorResult {
         let node = self.upcast::<Node>();
-        node.delete_cell_or_row(cx, index, || self.Rows(), |n| n.is::<HTMLTableRowElement>())
+        node.delete_cell_or_row(
+            cx,
+            index,
+            |cx| self.Rows(cx),
+            |n| n.is::<HTMLTableRowElement>(),
+        )
     }
 }
 
-pub(crate) trait HTMLTableSectionElementLayoutHelpers {
-    fn get_background_color(self) -> Option<AbsoluteColor>;
-    fn get_height(self) -> LengthOrPercentageOrAuto;
-}
-
-impl HTMLTableSectionElementLayoutHelpers for LayoutDom<'_, HTMLTableSectionElement> {
-    fn get_background_color(self) -> Option<AbsoluteColor> {
+impl LayoutDom<'_, HTMLTableSectionElement> {
+    pub(crate) fn get_background_color(self) -> Option<AbsoluteColor> {
         self.upcast::<Element>()
             .get_attr_for_layout(&ns!(), &local_name!("bgcolor"))
             .and_then(AttrValue::as_color)
             .cloned()
     }
 
-    fn get_height(self) -> LengthOrPercentageOrAuto {
+    pub(crate) fn get_height(self) -> LengthOrPercentageOrAuto {
         self.upcast::<Element>()
             .get_attr_for_layout(&ns!(), &local_name!("height"))
             .map(AttrValue::as_dimension)
@@ -134,7 +131,7 @@ impl VirtualMethods for HTMLTableSectionElement {
         Some(self.upcast::<HTMLElement>() as &dyn VirtualMethods)
     }
 
-    fn attribute_affects_presentational_hints(&self, attr: &Attr) -> bool {
+    fn attribute_affects_presentational_hints(&self, attr: AttrRef<'_>) -> bool {
         match attr.local_name() {
             &local_name!("height") => true,
             _ => self

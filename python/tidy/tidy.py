@@ -126,6 +126,7 @@ WEBIDL_STANDARDS = [
     b"//fetch.spec.whatwg.org",
     b"//html.spec.whatwg.org",
     b"//streams.spec.whatwg.org",
+    b"//storage.spec.whatwg.org",
     b"//url.spec.whatwg.org",
     b"//urlpattern.spec.whatwg.org",
     b"//xhr.spec.whatwg.org",
@@ -472,7 +473,17 @@ def run_python_type_checker() -> Iterator[tuple[str, int, str]]:
         pass
     else:
         for error in errors:
-            diagnostic = PyreflyDiagnostic(**error)
+            diagnostic = PyreflyDiagnostic(
+                line=error["line"],
+                column=error["column"],
+                stop_line=error["stop_line"],
+                stop_column=error["stop_column"],
+                path=error["path"],
+                code=error["code"],
+                name=error["name"],
+                description=error["description"],
+                concise_description=error["concise_description"],
+            )
             yield relative_path(diagnostic.path), diagnostic.line, diagnostic.concise_description
 
 
@@ -947,7 +958,7 @@ def parse_config(config_file: dict[str, Any]) -> None:
         # FIXME: Temporarily ignoring this since the type signature for
         # `normalize_paths` must use a constrained type variable for this to
         # typecheck but Pyrefly doesn't handle that correctly (but mypy does).
-        # pyrefly: ignore[bad-argument-type]
+        # pyrefly: ignore[unsupported-operation]
         config["check_ext"][normalize_paths(path)] = exts
 
     # Add list of blocked packages

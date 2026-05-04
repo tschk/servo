@@ -16,9 +16,10 @@ use servo_url::ServoUrl;
 
 use crate::fetch::headers::extract_mime_type_as_mime;
 use crate::http_status::HttpStatus;
+use crate::resource_fetch_timing::{ResourceFetchTimingContainer, ResourceTimingType};
 use crate::{
     FetchMetadata, FilteredMetadata, Metadata, NetworkError, ReferrerPolicy, ResourceFetchTiming,
-    ResourceTimingType, TlsSecurityInfo,
+    TlsSecurityInfo,
 };
 
 /// [Response type](https://fetch.spec.whatwg.org/#concept-response-type)
@@ -132,8 +133,7 @@ pub struct Response {
     #[conditional_malloc_size_of]
     pub aborted: Arc<AtomicBool>,
     /// track network metrics
-    #[conditional_malloc_size_of]
-    pub resource_timing: Arc<Mutex<ResourceFetchTiming>>,
+    pub resource_timing: ResourceFetchTimingContainer,
 
     /// <https://fetch.spec.whatwg.org/#concept-response-range-requested-flag>
     pub range_requested: bool,
@@ -163,7 +163,7 @@ impl Response {
             internal_response: None,
             return_internal: true,
             aborted: Arc::new(AtomicBool::new(false)),
-            resource_timing: Arc::new(Mutex::new(resource_timing)),
+            resource_timing: resource_timing.into(),
             range_requested: false,
             request_includes_credentials: true,
             redirect_taint: Default::default(),
@@ -198,9 +198,7 @@ impl Response {
             internal_response: None,
             return_internal: true,
             aborted: Arc::new(AtomicBool::new(false)),
-            resource_timing: Arc::new(Mutex::new(ResourceFetchTiming::new(
-                ResourceTimingType::Error,
-            ))),
+            resource_timing: ResourceFetchTiming::new(ResourceTimingType::Error).into(),
             range_requested: false,
             request_includes_credentials: true,
             redirect_taint: Default::default(),
@@ -227,13 +225,16 @@ impl Response {
     }
 
     pub fn actual_response(&self) -> &Response {
-        if self.return_internal && self.internal_response.is_some() {
-            self.internal_response.as_ref().unwrap()
-        } else {
-            self
+        match &self.internal_response {
+            Some(internal_response) if self.return_internal => internal_response,
+            _ => self,
         }
     }
 
+    #[expect(
+        clippy::unnecessary_unwrap,
+        reason = "match doesn't work, the borrow checker is overly conservative about &mut here"
+    )]
     pub fn actual_response_mut(&mut self) -> &mut Response {
         if self.return_internal && self.internal_response.is_some() {
             self.internal_response.as_mut().unwrap()
@@ -243,15 +244,14 @@ impl Response {
     }
 
     pub fn to_actual(self) -> Response {
-        if self.return_internal && self.internal_response.is_some() {
-            *self.internal_response.unwrap()
-        } else {
-            self
+        match self.internal_response {
+            Some(internal_response) if self.return_internal => *internal_response,
+            _ => self,
         }
     }
 
-    pub fn get_resource_timing(&self) -> Arc<Mutex<ResourceFetchTiming>> {
-        Arc::clone(&self.resource_timing)
+    pub fn get_resource_timing(&self) -> &ResourceFetchTimingContainer {
+        &self.resource_timing
     }
 
     /// Convert to a filtered response, of type `filter_type`.

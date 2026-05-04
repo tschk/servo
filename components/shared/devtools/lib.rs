@@ -159,6 +159,7 @@ pub struct ObjectPreview {
     pub own_properties_length: Option<u32>,
     pub function: Option<FunctionPreview>,
     pub array_length: Option<u32>,
+    pub items: Option<Vec<DebuggerValue>>,
 }
 
 #[derive(Clone, Debug, Deserialize, MallocSizeOf, Serialize)]
@@ -344,6 +345,10 @@ pub enum DevtoolScriptControlMsg {
         MatchedRule,
         GenericSender<Option<Vec<NodeStyle>>>,
     ),
+    /// Retrieve the list of stylesheets for the given pipeline and node.
+    GetStyleSheets(PipelineId, GenericSender<Vec<StyleSheetInfo>>),
+    /// Retrieve the actual CSS text for the stylesheet with the given node ID and index.
+    GetStyleSheetText(PipelineId, i32, GenericSender<Option<String>>),
     /// Retrieves the CSS selectors for the given node. A selector is comprised of the text
     /// of the selector and the id of the stylesheet that contains it.
     GetSelectors(PipelineId, String, GenericSender<Option<Vec<MatchedRule>>>),
@@ -621,6 +626,16 @@ pub struct EnvironmentInfo {
     pub scope_kind: Option<String>,
     pub function_display_name: Option<String>,
     pub binding_variables: Vec<PropertyDescriptor>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct StyleSheetInfo {
+    pub href: Option<String>,
+    pub disabled: bool,
+    pub title: String,
+    pub style_sheet_index: i32,
+    pub system: bool,
+    pub rule_count: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

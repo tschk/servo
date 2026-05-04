@@ -9,7 +9,6 @@ use js::rust::HandleObject;
 use style::attr::{AttrValue, LengthOrPercentageOrAuto};
 use style::color::AbsoluteColor;
 
-use crate::dom::attr::Attr;
 use crate::dom::bindings::codegen::Bindings::HTMLTableElementBinding::HTMLTableElementMethods;
 use crate::dom::bindings::codegen::Bindings::HTMLTableRowElementBinding::HTMLTableRowElementMethods;
 use crate::dom::bindings::codegen::Bindings::HTMLTableSectionElementBinding::HTMLTableSectionElementMethods;
@@ -19,9 +18,8 @@ use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::root::{DomRoot, LayoutDom, MutNullableDom};
 use crate::dom::bindings::str::DOMString;
 use crate::dom::document::Document;
-use crate::dom::element::{
-    CustomElementCreationMode, Element, ElementCreator, LayoutElementHelpers,
-};
+use crate::dom::element::attributes::storage::AttrRef;
+use crate::dom::element::{CustomElementCreationMode, Element, ElementCreator};
 use crate::dom::html::htmlcollection::HTMLCollection;
 use crate::dom::html::htmlelement::HTMLElement;
 use crate::dom::html::htmltablecellelement::HTMLTableCellElement;
@@ -29,7 +27,6 @@ use crate::dom::html::htmltableelement::HTMLTableElement;
 use crate::dom::html::htmltablesectionelement::HTMLTableSectionElement;
 use crate::dom::node::{Node, NodeTraits};
 use crate::dom::virtualmethods::VirtualMethods;
-use crate::script_runtime::CanGc;
 
 #[dom_struct]
 pub(crate) struct HTMLTableRowElement {
@@ -87,16 +84,16 @@ impl HTMLTableRowElementMethods<crate::DomTypeHolder> for HTMLTableRowElement {
     make_legacy_color_setter!(SetBgColor, "bgcolor");
 
     /// <https://html.spec.whatwg.org/multipage/#dom-tr-cells>
-    fn Cells(&self) -> DomRoot<HTMLCollection> {
+    fn Cells(&self, cx: &mut JSContext) -> DomRoot<HTMLCollection> {
         self.cells.or_init(|| {
             HTMLCollection::new_with_filter_fn(
+                cx,
                 &self.owner_window(),
                 self.upcast(),
                 |element, root| {
                     (element.is::<HTMLTableCellElement>()) &&
                         element.upcast::<Node>().GetParentNode().as_deref() == Some(root)
                 },
-                CanGc::deprecated_note(),
             )
         })
     }
@@ -107,7 +104,7 @@ impl HTMLTableRowElementMethods<crate::DomTypeHolder> for HTMLTableRowElement {
         node.insert_cell_or_row(
             cx,
             index,
-            || self.Cells(),
+            |cx| self.Cells(cx),
             |cx| {
                 let cell = Element::create(
                     cx,
@@ -129,19 +126,19 @@ impl HTMLTableRowElementMethods<crate::DomTypeHolder> for HTMLTableRowElement {
         node.delete_cell_or_row(
             cx,
             index,
-            || self.Cells(),
+            |cx| self.Cells(cx),
             |n| n.is::<HTMLTableCellElement>(),
         )
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-tr-rowindex>
-    fn RowIndex(&self) -> i32 {
+    fn RowIndex(&self, cx: &mut JSContext) -> i32 {
         let parent = match self.upcast::<Node>().GetParentNode() {
             Some(parent) => parent,
             None => return -1,
         };
         if let Some(table) = parent.downcast::<HTMLTableElement>() {
-            return self.row_index(table.Rows());
+            return self.row_index(table.Rows(cx));
         }
         if !parent.is::<HTMLTableSectionElement>() {
             return -1;
@@ -152,19 +149,19 @@ impl HTMLTableRowElementMethods<crate::DomTypeHolder> for HTMLTableRowElement {
         };
         grandparent
             .downcast::<HTMLTableElement>()
-            .map_or(-1, |table| self.row_index(table.Rows()))
+            .map_or(-1, |table| self.row_index(table.Rows(cx)))
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-tr-sectionrowindex>
-    fn SectionRowIndex(&self) -> i32 {
+    fn SectionRowIndex(&self, cx: &mut JSContext) -> i32 {
         let parent = match self.upcast::<Node>().GetParentNode() {
             Some(parent) => parent,
             None => return -1,
         };
         let collection = if let Some(table) = parent.downcast::<HTMLTableElement>() {
-            table.Rows()
+            table.Rows(cx)
         } else if let Some(table_section) = parent.downcast::<HTMLTableSectionElement>() {
-            table_section.Rows()
+            table_section.Rows(cx)
         } else {
             return -1;
         };
@@ -172,20 +169,15 @@ impl HTMLTableRowElementMethods<crate::DomTypeHolder> for HTMLTableRowElement {
     }
 }
 
-pub(crate) trait HTMLTableRowElementLayoutHelpers {
-    fn get_background_color(self) -> Option<AbsoluteColor>;
-    fn get_height(self) -> LengthOrPercentageOrAuto;
-}
-
-impl HTMLTableRowElementLayoutHelpers for LayoutDom<'_, HTMLTableRowElement> {
-    fn get_background_color(self) -> Option<AbsoluteColor> {
+impl LayoutDom<'_, HTMLTableRowElement> {
+    pub(crate) fn get_background_color(self) -> Option<AbsoluteColor> {
         self.upcast::<Element>()
             .get_attr_for_layout(&ns!(), &local_name!("bgcolor"))
             .and_then(AttrValue::as_color)
             .cloned()
     }
 
-    fn get_height(self) -> LengthOrPercentageOrAuto {
+    pub(crate) fn get_height(self) -> LengthOrPercentageOrAuto {
         self.upcast::<Element>()
             .get_attr_for_layout(&ns!(), &local_name!("height"))
             .map(AttrValue::as_dimension)
@@ -199,7 +191,7 @@ impl VirtualMethods for HTMLTableRowElement {
         Some(self.upcast::<HTMLElement>() as &dyn VirtualMethods)
     }
 
-    fn attribute_affects_presentational_hints(&self, attr: &Attr) -> bool {
+    fn attribute_affects_presentational_hints(&self, attr: AttrRef<'_>) -> bool {
         match attr.local_name() {
             &local_name!("height") => true,
             _ => self

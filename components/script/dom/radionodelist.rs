@@ -3,13 +3,14 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use dom_struct::dom_struct;
+use js::context::JSContext;
 use stylo_atoms::Atom;
 
 use crate::dom::bindings::codegen::Bindings::HTMLInputElementBinding::HTMLInputElementMethods;
 use crate::dom::bindings::codegen::Bindings::NodeListBinding::NodeListMethods;
 use crate::dom::bindings::codegen::Bindings::RadioNodeListBinding::RadioNodeListMethods;
 use crate::dom::bindings::inheritance::Castable;
-use crate::dom::bindings::reflector::reflect_dom_object;
+use crate::dom::bindings::reflector::reflect_dom_object_with_cx;
 use crate::dom::bindings::root::DomRoot;
 use crate::dom::bindings::str::DOMString;
 use crate::dom::html::htmlformelement::HTMLFormElement;
@@ -18,7 +19,6 @@ use crate::dom::input_element::input_type::InputType;
 use crate::dom::node::Node;
 use crate::dom::nodelist::{NodeList, NodeListType, RadioList, RadioListMode};
 use crate::dom::window::Window;
-use crate::script_runtime::CanGc;
 
 #[dom_struct]
 pub(crate) struct RadioNodeList {
@@ -35,44 +35,44 @@ impl RadioNodeList {
 
     #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     pub(crate) fn new(
+        cx: &mut JSContext,
         window: &Window,
         list_type: NodeListType,
-        can_gc: CanGc,
     ) -> DomRoot<RadioNodeList> {
-        reflect_dom_object(
+        reflect_dom_object_with_cx(
             Box::new(RadioNodeList::new_inherited(list_type)),
             window,
-            can_gc,
+            cx,
         )
     }
 
     pub(crate) fn new_controls_except_image_inputs(
+        cx: &mut JSContext,
         window: &Window,
         form: &HTMLFormElement,
         name: &Atom,
-        can_gc: CanGc,
     ) -> DomRoot<RadioNodeList> {
         RadioNodeList::new(
+            cx,
             window,
             NodeListType::Radio(RadioList::new(
                 form,
                 RadioListMode::ControlsExceptImageInputs,
                 name.clone(),
             )),
-            can_gc,
         )
     }
 
     pub(crate) fn new_images(
+        cx: &mut JSContext,
         window: &Window,
         form: &HTMLFormElement,
         name: &Atom,
-        can_gc: CanGc,
     ) -> DomRoot<RadioNodeList> {
         RadioNodeList::new(
+            cx,
             window,
             NodeListType::Radio(RadioList::new(form, RadioListMode::Images, name.clone())),
-            can_gc,
         )
     }
 }
@@ -109,7 +109,7 @@ impl RadioNodeListMethods<crate::DomTypeHolder> for RadioNodeList {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-radionodelist-value>
-    fn SetValue(&self, value: DOMString, can_gc: CanGc) {
+    fn SetValue(&self, cx: &mut JSContext, value: DOMString) {
         for node in self.upcast::<NodeList>().iter() {
             // Step 1
             if let Some(input) = node.downcast::<HTMLInputElement>() {
@@ -118,16 +118,14 @@ impl RadioNodeListMethods<crate::DomTypeHolder> for RadioNodeList {
                         // Step 2
                         let val = input.Value();
                         if val.is_empty() || val == value {
-                            input.SetChecked(true, can_gc);
+                            input.SetChecked(cx, true);
                             return;
                         }
                     },
-                    InputType::Radio(_) => {
+                    InputType::Radio(_) if input.Value() == value => {
                         // Step 2
-                        if input.Value() == value {
-                            input.SetChecked(true, can_gc);
-                            return;
-                        }
+                        input.SetChecked(cx, true);
+                        return;
                     },
                     _ => {},
                 }

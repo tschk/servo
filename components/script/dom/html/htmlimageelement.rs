@@ -30,7 +30,6 @@ use num_traits::ToPrimitive;
 use pixels::{CorsStatus, ImageMetadata, Snapshot};
 use regex::Regex;
 use rustc_hash::FxHashSet;
-use script_bindings::script_runtime::temp_cx;
 use servo_url::ServoUrl;
 use servo_url::origin::MutableOrigin;
 use style::attr::{AttrValue, LengthOrPercentageOrAuto, parse_unsigned_integer};
@@ -42,7 +41,6 @@ use url::Url;
 use crate::css::parser_context_for_anonymous_content;
 use crate::document_loader::{LoadBlocker, LoadType};
 use crate::dom::activation::Activatable;
-use crate::dom::attr::Attr;
 use crate::dom::bindings::cell::{DomRefCell, RefMut};
 use crate::dom::bindings::codegen::Bindings::DOMRectBinding::DOMRect_Binding::DOMRectMethods;
 use crate::dom::bindings::codegen::Bindings::ElementBinding::Element_Binding::ElementMethods;
@@ -58,8 +56,9 @@ use crate::dom::bindings::root::{DomRoot, LayoutDom, MutNullableDom};
 use crate::dom::bindings::str::{DOMString, USVString};
 use crate::dom::csp::{GlobalCspReporting, Violation};
 use crate::dom::document::Document;
+use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::element::{
-    AttributeMutation, CustomElementCreationMode, Element, ElementCreator, LayoutElementHelpers,
+    AttributeMutation, CustomElementCreationMode, Element, ElementCreator,
     cors_setting_for_element, referrer_policy_for_element, reflect_cross_origin_attribute,
     reflect_referrer_policy_attribute, set_cross_origin_attribute,
 };
@@ -555,18 +554,16 @@ impl HTMLImageElement {
         // Fire image.onload and loadend
         if trigger_image_load {
             // TODO: https://html.spec.whatwg.org/multipage/#fire-a-progress-event-or-event
+            self.upcast::<EventTarget>().fire_event(cx, atom!("load"));
             self.upcast::<EventTarget>()
-                .fire_event(atom!("load"), CanGc::from_cx(cx));
-            self.upcast::<EventTarget>()
-                .fire_event(atom!("loadend"), CanGc::from_cx(cx));
+                .fire_event(cx, atom!("loadend"));
         }
 
         // Fire image.onerror
         if trigger_image_error {
+            self.upcast::<EventTarget>().fire_event(cx, atom!("error"));
             self.upcast::<EventTarget>()
-                .fire_event(atom!("error"), CanGc::from_cx(cx));
-            self.upcast::<EventTarget>()
-                .fire_event(atom!("loadend"), CanGc::from_cx(cx));
+                .fire_event(cx, atom!("loadend"));
         }
     }
 
@@ -802,8 +799,7 @@ impl HTMLImageElement {
             // Step 2.2. Otherwise, if the image source has a width descriptor, replace the width
             // descriptor with a pixel density descriptor with a value of the width descriptor value
             // divided by source size and a unit of x.
-            if image_source.descriptor.width.is_some() {
-                let width = image_source.descriptor.width.unwrap();
+            if let Some(width) = image_source.descriptor.width {
                 image_source.descriptor.density = Some(width as f64 / source_size.to_f64_px());
             } else {
                 // Step 2.3. Otherwise, give the image source a pixel density descriptor of 1x.
@@ -1031,7 +1027,7 @@ impl HTMLImageElement {
                     let has_src_attribute = this.upcast::<Element>().has_attribute(&local_name!("src"));
 
                     if has_src_attribute || this.uses_srcset_or_picture() {
-                        this.upcast::<EventTarget>().fire_event(atom!("error"), CanGc::from_cx(cx));
+                        this.upcast::<EventTarget>().fire_event(cx, atom!("error"));
                     }
                 }));
 
@@ -1073,7 +1069,7 @@ impl HTMLImageElement {
                     // Step 13.4.2. If maybe omit events is not set or previousURL is not equal to
                     // selected source, then fire an event named error at the img element.
                     // TODO: Add missing `maybe omit events` flag and previousURL.
-                    this.upcast::<EventTarget>().fire_event(atom!("error"), CanGc::from_cx(cx));
+                    this.upcast::<EventTarget>().fire_event(cx, atom!("error"));
                 }));
 
             // Step 13.5. Return.
@@ -1197,7 +1193,7 @@ impl HTMLImageElement {
                             // Step 7.4.7.3. If maybe omit events is not set or previousURL is not
                             // equal to urlString, then fire an event named load at the img element.
                             // TODO: Add missing `maybe omit events` flag and previousURL.
-                            this.upcast::<EventTarget>().fire_event(atom!("load"), CanGc::from_cx(cx));
+                            this.upcast::<EventTarget>().fire_event(cx, atom!("load"));
                         }));
 
                     // Step 7.4.8. Abort the update the image data algorithm.
@@ -1393,9 +1389,9 @@ impl HTMLImageElement {
         self.owner_global()
             .task_manager()
             .dom_manipulation_task_source()
-            .queue(task!(fulfill_image_decode_promises: move || {
+            .queue(task!(fulfill_image_decode_promises: move |cx| {
                 for trusted_promise in trusted_image_decode_promises {
-                    trusted_promise.root().resolve_native(&(), CanGc::deprecated_note());
+                    trusted_promise.root().resolve_native(&(), CanGc::from_cx(cx));
                 }
             }));
     }
@@ -1420,9 +1416,9 @@ impl HTMLImageElement {
         self.owner_global()
             .task_manager()
             .dom_manipulation_task_source()
-            .queue(task!(reject_image_decode_promises: move || {
+            .queue(task!(reject_image_decode_promises: move |cx| {
                 for trusted_promise in trusted_image_decode_promises {
-                    trusted_promise.root().reject_error(Error::Encoding(None), CanGc::deprecated_note());
+                    trusted_promise.root().reject_error(Error::Encoding(None), CanGc::from_cx(cx));
                 }
             }));
     }
@@ -1479,7 +1475,7 @@ impl HTMLImageElement {
                 this.upcast::<Node>().dirty(NodeDamage::Other);
 
                 // Step 16.7. Fire an event named load at the img element.
-                this.upcast::<EventTarget>().fire_event(atom!("load"), CanGc::from_cx(cx));
+                this.upcast::<EventTarget>().fire_event(cx, atom!("load"));
             }));
     }
 
@@ -1678,15 +1674,6 @@ impl MicrotaskRunnable for ImageElementMicrotask {
     }
 }
 
-pub(crate) trait LayoutHTMLImageElementHelpers {
-    fn image_url(self) -> Option<ServoUrl>;
-    fn image_density(self) -> Option<f64>;
-    fn image_data(self) -> (Option<Image>, Option<ImageMetadata>);
-    fn get_width(self) -> LengthOrPercentageOrAuto;
-    fn get_height(self) -> LengthOrPercentageOrAuto;
-    fn showing_broken_image_icon(self) -> bool;
-}
-
 impl<'dom> LayoutDom<'dom, HTMLImageElement> {
     #[expect(unsafe_code)]
     fn current_request(self) -> &'dom ImageRequest {
@@ -1702,27 +1689,25 @@ impl<'dom> LayoutDom<'dom, HTMLImageElement> {
                 .expect("dimension attribute source should be always non-null")
         }
     }
-}
 
-impl LayoutHTMLImageElementHelpers for LayoutDom<'_, HTMLImageElement> {
-    fn image_url(self) -> Option<ServoUrl> {
+    pub(crate) fn image_url(self) -> Option<ServoUrl> {
         self.current_request().parsed_url.clone()
     }
 
-    fn image_data(self) -> (Option<Image>, Option<ImageMetadata>) {
+    pub(crate) fn image_data(self) -> (Option<Image>, Option<ImageMetadata>) {
         let current_request = self.current_request();
         (current_request.image.clone(), current_request.metadata)
     }
 
-    fn image_density(self) -> Option<f64> {
+    pub(crate) fn image_density(self) -> Option<f64> {
         self.current_request().current_pixel_density
     }
 
-    fn showing_broken_image_icon(self) -> bool {
+    pub(crate) fn showing_broken_image_icon(self) -> bool {
         matches!(self.current_request().state, State::Broken)
     }
 
-    fn get_width(self) -> LengthOrPercentageOrAuto {
+    pub(crate) fn get_width(self) -> LengthOrPercentageOrAuto {
         self.dimension_attribute_source()
             .get_attr_for_layout(&ns!(), &local_name!("width"))
             .map(AttrValue::as_dimension)
@@ -1730,7 +1715,7 @@ impl LayoutHTMLImageElementHelpers for LayoutDom<'_, HTMLImageElement> {
             .unwrap_or(LengthOrPercentageOrAuto::Auto)
     }
 
-    fn get_height(self) -> LengthOrPercentageOrAuto {
+    pub(crate) fn get_height(self) -> LengthOrPercentageOrAuto {
         self.dimension_attribute_source()
             .get_attr_for_layout(&ns!(), &local_name!("height"))
             .map(AttrValue::as_dimension)
@@ -1779,13 +1764,13 @@ impl HTMLImageElementMethods<crate::DomTypeHolder> for HTMLImageElement {
 
         // Step 3. If width is given, then set an attribute value for img using "width" and width.
         if let Some(w) = width {
-            image.SetWidth(w);
+            image.SetWidth(cx, w);
         }
 
         // Step 4. If height is given, then set an attribute value for img using "height" and
         // height.
         if let Some(h) = height {
-            image.SetHeight(h);
+            image.SetHeight(cx, h);
         }
 
         // Step 5. Return img.
@@ -2008,7 +1993,7 @@ impl VirtualMethods for HTMLImageElement {
     fn attribute_mutated(
         &self,
         cx: &mut js::context::JSContext,
-        attr: &Attr,
+        attr: AttrRef<'_>,
         mutation: AttributeMutation,
     ) {
         self.super_type()
@@ -2062,7 +2047,7 @@ impl VirtualMethods for HTMLImageElement {
         }
     }
 
-    fn attribute_affects_presentational_hints(&self, attr: &Attr) -> bool {
+    fn attribute_affects_presentational_hints(&self, attr: AttrRef<'_>) -> bool {
         match attr.local_name() {
             &local_name!("width") | &local_name!("height") => true,
             _ => self
@@ -2085,7 +2070,7 @@ impl VirtualMethods for HTMLImageElement {
         }
     }
 
-    fn handle_event(&self, event: &Event, can_gc: CanGc) {
+    fn handle_event(&self, cx: &mut js::context::JSContext, event: &Event) {
         if event.type_() != atom!("click") {
             return;
         }
@@ -2106,7 +2091,7 @@ impl VirtualMethods for HTMLImageElement {
             mouse_event.ClientX().to_f32().unwrap(),
             mouse_event.ClientY().to_f32().unwrap(),
         );
-        let bcr = self.upcast::<Element>().GetBoundingClientRect(can_gc);
+        let bcr = self.upcast::<Element>().GetBoundingClientRect(cx);
         let bcr_p = Point2D::new(bcr.X() as f32, bcr.Y() as f32);
 
         // Walk HTMLAreaElements
@@ -2117,7 +2102,7 @@ impl VirtualMethods for HTMLImageElement {
                 None => return,
             };
             if shp.hit_test(&point) {
-                element.activation_behavior(event, self.upcast(), can_gc);
+                element.activation_behavior(cx, event, self.upcast());
                 return;
             }
         }
@@ -2142,15 +2127,9 @@ impl VirtualMethods for HTMLImageElement {
         }
     }
 
-    #[expect(unsafe_code)]
     /// <https://html.spec.whatwg.org/multipage/#the-img-element:html-element-removing-steps>
-    fn unbind_from_tree(&self, context: &UnbindContext, _can_gc: CanGc) {
-        // TODO: https://github.com/servo/servo/issues/42837
-        let mut cx = unsafe { temp_cx() };
-        let cx = &mut cx;
-        self.super_type()
-            .unwrap()
-            .unbind_from_tree(context, CanGc::from_cx(cx));
+    fn unbind_from_tree(&self, cx: &mut js::context::JSContext, context: &UnbindContext) {
+        self.super_type().unwrap().unbind_from_tree(cx, context);
         let document = self.owner_document();
         document.unregister_responsive_image(self);
 
@@ -2162,14 +2141,10 @@ impl VirtualMethods for HTMLImageElement {
     }
 
     /// <https://html.spec.whatwg.org/multipage#the-img-element:html-element-moving-steps>
-    #[expect(unsafe_code)]
-    fn moving_steps(&self, context: &MoveContext, can_gc: CanGc) {
+    fn moving_steps(&self, cx: &mut JSContext, context: &MoveContext) {
         if let Some(super_type) = self.super_type() {
-            super_type.moving_steps(context, can_gc);
+            super_type.moving_steps(cx, context);
         }
-        // TODO: https://github.com/servo/servo/issues/43044
-        let mut cx = unsafe { temp_cx() };
-        let cx = &mut cx;
 
         // Step 1. If oldParent is a picture element, then, count this as a relevant mutation for movedNode.
         if let Some(old_parent) = context.old_parent {

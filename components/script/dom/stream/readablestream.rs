@@ -11,6 +11,7 @@ use servo_base::generic_channel::GenericSharedMemory;
 use servo_base::id::{MessagePortId, MessagePortIndex};
 use servo_constellation_traits::MessagePortImpl;
 use dom_struct::dom_struct;
+use js::context::JSContext;
 use js::jsapi::{Heap, JSObject};
 use js::jsval::{JSVal, ObjectValue, UndefinedValue};
 use js::realm::CurrentRealm;
@@ -60,7 +61,7 @@ use crate::dom::stream::underlyingsourcecontainer::UnderlyingSourceType;
 use crate::dom::stream::writablestreamdefaultwriter::WritableStreamDefaultWriter;
 use script_bindings::codegen::GenericBindings::MessagePortBinding::MessagePortMethods;
 use crate::dom::messageport::MessagePort;
-use crate::realms::{enter_realm, InRealm, enter_auto_realm};
+use crate::realms::{InRealm, enter_auto_realm};
 use crate::script_runtime::{CanGc, JSContext as SafeJSContext};
 use crate::dom::promisenativehandler::{Callback, PromiseNativeHandler};
 use crate::dom::bindings::transferable::Transferable;
@@ -426,7 +427,7 @@ impl PipeTo {
     #[expect(unsafe_code)]
     fn write_chunk(
         &self,
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         global: &GlobalScope,
         chunk: SafeHandleValue,
     ) -> bool {
@@ -741,7 +742,7 @@ impl PipeTo {
     }
 
     /// <https://streams.spec.whatwg.org/#rs-pipeTo-finalize>
-    fn finalize(&self, cx: &mut js::context::JSContext, global: &GlobalScope) {
+    fn finalize(&self, cx: &mut JSContext, global: &GlobalScope) {
         *self.state.borrow_mut() = PipeToState::Finalized;
 
         // Perform ! WritableStreamDefaultWriterRelease(writer).
@@ -753,7 +754,7 @@ impl PipeTo {
 
         // Otherwise, perform ! ReadableStreamDefaultReaderRelease(reader).
         self.reader
-            .release(CanGc::from_cx(cx))
+            .release(cx)
             .expect("Releasing the reader should not fail");
 
         // If signal is not undefined, remove abortAlgorithm from signal.
@@ -850,27 +851,28 @@ impl PartialEq for ReaderType {
 }
 
 /// <https://streams.spec.whatwg.org/#create-readable-stream>
-#[cfg_attr(crown, expect(crown::unrooted_must_root))]
 pub(crate) fn create_readable_stream(
+    cx: &mut JSContext,
     global: &GlobalScope,
     underlying_source_type: UnderlyingSourceType,
     queuing_strategy: Option<Rc<QueuingStrategySize>>,
     high_water_mark: Option<f64>,
-    can_gc: CanGc,
 ) -> DomRoot<ReadableStream> {
     // If highWaterMark was not passed, set it to 1.
     let high_water_mark = high_water_mark.unwrap_or(1.0);
 
     // If sizeAlgorithm was not passed, set it to an algorithm that returns 1.
-    let size_algorithm =
-        queuing_strategy.unwrap_or(extract_size_algorithm(&QueuingStrategy::empty(), can_gc));
+    let size_algorithm = queuing_strategy.unwrap_or(extract_size_algorithm(
+        &QueuingStrategy::empty(),
+        CanGc::from_cx(cx),
+    ));
 
     // Assert: ! IsNonNegativeNumber(highWaterMark) is true.
     assert!(high_water_mark >= 0.0);
 
     // Let stream be a new ReadableStream.
     // Perform ! InitializeReadableStream(stream).
-    let stream = ReadableStream::new_with_proto(global, None, can_gc);
+    let stream = ReadableStream::new_with_proto(global, None, CanGc::from_cx(cx));
 
     // Let controller be a new ReadableStreamDefaultController.
     let controller = ReadableStreamDefaultController::new(
@@ -878,13 +880,13 @@ pub(crate) fn create_readable_stream(
         underlying_source_type,
         high_water_mark,
         size_algorithm,
-        can_gc,
+        CanGc::from_cx(cx),
     );
 
     // Perform ? SetUpReadableStreamDefaultController(stream, controller, startAlgorithm,
     // pullAlgorithm, cancelAlgorithm, highWaterMark, sizeAlgorithm).
     controller
-        .setup(stream.clone(), can_gc)
+        .setup(cx, stream.clone())
         .expect("Setup of default controller cannot fail");
 
     // Return stream.
@@ -892,22 +894,22 @@ pub(crate) fn create_readable_stream(
 }
 
 /// <https://streams.spec.whatwg.org/#abstract-opdef-createreadablebytestream>
-#[cfg_attr(crown, expect(crown::unrooted_must_root))]
-pub(crate) fn readable_byte_stream_tee(
+fn readable_byte_stream_tee(
+    cx: &mut JSContext,
     global: &GlobalScope,
     underlying_source_type: UnderlyingSourceType,
-    can_gc: CanGc,
 ) -> DomRoot<ReadableStream> {
     // Let stream be a new ReadableStream.
     // Perform ! InitializeReadableStream(stream).
-    let tee_stream = ReadableStream::new_with_proto(global, None, can_gc);
+    let tee_stream = ReadableStream::new_with_proto(global, None, CanGc::from_cx(cx));
 
     // Let controller be a new ReadableByteStreamController.
-    let controller = ReadableByteStreamController::new(underlying_source_type, 0.0, global, can_gc);
+    let controller =
+        ReadableByteStreamController::new(underlying_source_type, 0.0, global, CanGc::from_cx(cx));
 
     // Perform ? SetUpReadableByteStreamController(stream, controller, startAlgorithm, pullAlgorithm, cancelAlgorithm, 0, undefined).
     controller
-        .setup(global, tee_stream.clone(), can_gc)
+        .setup(cx, global, tee_stream.clone())
         .expect("Setup of byte stream controller cannot fail");
 
     // Return stream.
@@ -988,38 +990,37 @@ impl ReadableStream {
 
     /// Build a stream backed by a Rust source that has already been read into memory.
     pub(crate) fn new_from_bytes(
+        cx: &mut JSContext,
         global: &GlobalScope,
         bytes: Vec<u8>,
-        can_gc: CanGc,
     ) -> Fallible<DomRoot<ReadableStream>> {
         let stream = ReadableStream::new_with_external_underlying_source(
+            cx,
             global,
             UnderlyingSourceType::Memory(bytes.len()),
-            can_gc,
         )?;
-        stream.enqueue_native(bytes, can_gc);
-        stream.controller_close_native(can_gc);
+        stream.enqueue_native(cx, bytes);
+        stream.controller_close_native(cx);
         Ok(stream)
     }
 
     /// Build a stream backed by a Rust underlying source.
     /// Note: external sources are always paired with a default controller.
-    #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     pub(crate) fn new_with_external_underlying_source(
+        cx: &mut JSContext,
         global: &GlobalScope,
         source: UnderlyingSourceType,
-        can_gc: CanGc,
     ) -> Fallible<DomRoot<ReadableStream>> {
         assert!(source.is_native());
-        let stream = ReadableStream::new_with_proto(global, None, can_gc);
+        let stream = ReadableStream::new_with_proto(global, None, CanGc::from_cx(cx));
         let controller = ReadableStreamDefaultController::new(
             global,
             source,
             1.0,
-            extract_size_algorithm(&QueuingStrategy::empty(), can_gc),
-            can_gc,
+            extract_size_algorithm(&QueuingStrategy::empty(), CanGc::from_cx(cx)),
+            CanGc::from_cx(cx),
         );
-        controller.setup(stream.clone(), can_gc)?;
+        controller.setup(cx, stream.clone())?;
         Ok(stream)
     }
 
@@ -1045,21 +1046,16 @@ impl ReadableStream {
     /// Call into the pull steps of the controller,
     /// as part of
     /// <https://streams.spec.whatwg.org/#readable-stream-default-reader-read>
-    pub(crate) fn perform_pull_steps(
-        &self,
-        cx: SafeJSContext,
-        read_request: &ReadRequest,
-        can_gc: CanGc,
-    ) {
+    pub(crate) fn perform_pull_steps(&self, cx: &mut JSContext, read_request: &ReadRequest) {
         match self.controller.borrow().as_ref() {
             Some(ControllerType::Default(controller)) => controller
                 .get()
                 .expect("Stream should have controller.")
-                .perform_pull_steps(read_request, can_gc),
+                .perform_pull_steps(cx, read_request),
             Some(ControllerType::Byte(controller)) => controller
                 .get()
                 .expect("Stream should have controller.")
-                .perform_pull_steps(cx, read_request, can_gc),
+                .perform_pull_steps(cx, read_request),
             None => {
                 unreachable!("Stream does not have a controller.");
             },
@@ -1071,17 +1067,16 @@ impl ReadableStream {
     /// <https://streams.spec.whatwg.org/#readable-stream-byob-reader-read>
     pub(crate) fn perform_pull_into(
         &self,
-        cx: SafeJSContext,
+        cx: &mut JSContext,
         read_into_request: &ReadIntoRequest,
         view: HeapBufferSource<ArrayBufferViewU8>,
         min: u64,
-        can_gc: CanGc,
     ) {
         match self.controller.borrow().as_ref() {
             Some(ControllerType::Byte(controller)) => controller
                 .get()
                 .expect("Stream should have controller.")
-                .perform_pull_into(cx, read_into_request, view, min, can_gc),
+                .perform_pull_into(cx, read_into_request, view, min),
             _ => {
                 unreachable!(
                     "Pulling a chunk from a stream with a default controller using a BYOB reader"
@@ -1135,12 +1130,12 @@ impl ReadableStream {
 
     /// Endpoint to enqueue chunks directly from Rust.
     /// Note: in other use cases this call happens via the controller.
-    pub(crate) fn enqueue_native(&self, bytes: Vec<u8>, can_gc: CanGc) {
+    pub(crate) fn enqueue_native(&self, cx: &mut JSContext, bytes: Vec<u8>) {
         match self.controller.borrow().as_ref() {
             Some(ControllerType::Default(controller)) => controller
                 .get()
                 .expect("Stream should have controller.")
-                .enqueue_native(bytes, can_gc),
+                .enqueue_native(cx, bytes),
             _ => {
                 unreachable!(
                     "Enqueueing chunk to a stream from Rust on other than default controller"
@@ -1150,7 +1145,7 @@ impl ReadableStream {
     }
 
     /// <https://streams.spec.whatwg.org/#readable-stream-error>
-    pub(crate) fn error(&self, e: SafeHandleValue, can_gc: CanGc) {
+    pub(crate) fn error(&self, cx: &mut JSContext, e: SafeHandleValue) {
         // Assert: stream.[[state]] is "readable".
         assert!(self.is_readable());
 
@@ -1172,7 +1167,7 @@ impl ReadableStream {
 
         if let Some(reader) = default_reader {
             // Perform ! ReadableStreamDefaultReaderErrorReadRequests(reader, e).
-            reader.error(e, can_gc);
+            reader.error(cx, e);
             return;
         }
 
@@ -1186,7 +1181,7 @@ impl ReadableStream {
 
         if let Some(reader) = byob_reader {
             // Perform ! ReadableStreamBYOBReaderErrorReadIntoRequests(reader, e).
-            reader.error_read_into_requests(e, can_gc);
+            reader.error_read_into_requests(e, CanGc::from_cx(cx));
         }
 
         // If reader is undefined, return.
@@ -1199,22 +1194,26 @@ impl ReadableStream {
 
     /// <https://streams.spec.whatwg.org/#readable-stream-error>
     /// Note: in other use cases this call happens via the controller.
-    pub(crate) fn error_native(&self, error: Error, can_gc: CanGc) {
-        let cx = GlobalScope::get_cx();
-        rooted!(in(*cx) let mut error_val = UndefinedValue());
-        error.to_jsval(cx, &self.global(), error_val.handle_mut(), can_gc);
-        self.error(error_val.handle(), can_gc);
+    pub(crate) fn error_native(&self, cx: &mut JSContext, error: Error) {
+        rooted!(&in(cx) let mut error_val = UndefinedValue());
+        error.to_jsval(
+            cx.into(),
+            &self.global(),
+            error_val.handle_mut(),
+            CanGc::from_cx(cx),
+        );
+        self.error(cx, error_val.handle());
     }
 
     /// Call into the controller's `Close` method.
     /// <https://streams.spec.whatwg.org/#readable-stream-default-controller-close>
-    pub(crate) fn controller_close_native(&self, can_gc: CanGc) {
+    pub(crate) fn controller_close_native(&self, cx: &mut JSContext) {
         match self.controller.borrow().as_ref() {
             Some(ControllerType::Default(controller)) => {
                 let _ = controller
                     .get()
                     .expect("Stream should have controller.")
-                    .Close(can_gc);
+                    .Close(cx);
             },
             _ => {
                 unreachable!("Native closing is only done on default controllers.")
@@ -1324,7 +1323,7 @@ impl ReadableStream {
     /// and before `stop_reading`.
     /// Native call to
     /// <https://streams.spec.whatwg.org/#readable-stream-default-reader-read>
-    pub(crate) fn read_a_chunk(&self, cx: &mut js::context::JSContext) -> Rc<Promise> {
+    pub(crate) fn read_a_chunk(&self, cx: &mut JSContext) -> Rc<Promise> {
         match self.reader.borrow().as_ref() {
             Some(ReaderType::Default(reader)) => {
                 let Some(reader) = reader.get() else {
@@ -1344,7 +1343,7 @@ impl ReadableStream {
     /// must be done after `start_reading`.
     /// Native call to
     /// <https://streams.spec.whatwg.org/#abstract-opdef-readablestreamdefaultreaderrelease>
-    pub(crate) fn stop_reading(&self, can_gc: CanGc) {
+    pub(crate) fn stop_reading(&self, cx: &mut JSContext) {
         let reader_ref = self.reader.borrow();
 
         match reader_ref.as_ref() {
@@ -1354,7 +1353,7 @@ impl ReadableStream {
                 };
 
                 drop(reader_ref);
-                reader.release(can_gc).expect("Reader release cannot fail.");
+                reader.release(cx).expect("Reader release cannot fail.");
             },
             _ => {
                 unreachable!("Native stop reading can only be done with a default reader.")
@@ -1449,7 +1448,12 @@ impl ReadableStream {
     }
 
     /// <https://streams.spec.whatwg.org/#readable-stream-fulfill-read-request>
-    pub(crate) fn fulfill_read_request(&self, chunk: SafeHandleValue, done: bool, can_gc: CanGc) {
+    pub(crate) fn fulfill_read_request(
+        &self,
+        cx: &mut JSContext,
+        chunk: SafeHandleValue,
+        done: bool,
+    ) {
         // step 1 - Assert: ! ReadableStreamHasDefaultReader(stream) is true.
         assert!(self.has_default_reader());
 
@@ -1467,12 +1471,12 @@ impl ReadableStream {
 
                 if done {
                     // step 6 - If done is true, perform readRequest’s close steps.
-                    request.close_steps(can_gc);
+                    request.close_steps(cx);
                 } else {
                     // step 7 - Otherwise, perform readRequest’s chunk steps, given chunk.
                     let result = RootedTraceableBox::new(Heap::default());
                     result.set(*chunk);
-                    request.chunk_steps(result, &self.global(), can_gc);
+                    request.chunk_steps(cx, result, &self.global());
                 }
             },
             _ => {
@@ -1486,9 +1490,9 @@ impl ReadableStream {
     /// <https://streams.spec.whatwg.org/#readable-stream-fulfill-read-into-request>
     pub(crate) fn fulfill_read_into_request(
         &self,
+        cx: &mut JSContext,
         chunk: SafeHandleValue,
         done: bool,
-        can_gc: CanGc,
     ) {
         // Assert: ! ReadableStreamHasBYOBReader(stream) is true.
         assert!(self.has_byob_reader());
@@ -1513,11 +1517,11 @@ impl ReadableStream {
                 let result = RootedTraceableBox::new(Heap::default());
                 if done {
                     result.set(*chunk);
-                    read_into_request.close_steps(Some(result), can_gc);
+                    read_into_request.close_steps(cx, Some(result));
                 } else {
                     // Otherwise, perform readIntoRequest’s chunk steps, given chunk.
                     result.set(*chunk);
-                    read_into_request.chunk_steps(result, can_gc);
+                    read_into_request.chunk_steps(result, CanGc::from_cx(cx));
                 }
             },
             _ => {
@@ -1529,7 +1533,7 @@ impl ReadableStream {
     }
 
     /// <https://streams.spec.whatwg.org/#readable-stream-close>
-    pub(crate) fn close(&self, can_gc: CanGc) {
+    pub(crate) fn close(&self, cx: &mut JSContext) {
         // Assert: stream.[[state]] is "readable".
         assert!(self.is_readable());
         // Set stream.[[state]] to "closed".
@@ -1549,7 +1553,7 @@ impl ReadableStream {
 
         if let Some(reader) = default_reader {
             // steps 5 & 6 for a default reader
-            reader.close(can_gc);
+            reader.close(cx);
             return;
         }
 
@@ -1564,7 +1568,7 @@ impl ReadableStream {
 
         if let Some(reader) = byob_reader {
             // steps 5 & 6 for a BYOB reader
-            reader.close(can_gc);
+            reader.close(CanGc::from_cx(cx));
         }
 
         // If reader is undefined, return.
@@ -1573,7 +1577,7 @@ impl ReadableStream {
     /// <https://streams.spec.whatwg.org/#readable-stream-cancel>
     pub(crate) fn cancel(
         &self,
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         global: &GlobalScope,
         reason: SafeHandleValue,
     ) -> Rc<Promise> {
@@ -1594,7 +1598,7 @@ impl ReadableStream {
             return promise;
         }
         // Perform ! ReadableStreamClose(stream).
-        self.close(CanGc::from_cx(cx));
+        self.close(cx);
 
         // If reader is not undefined and reader implements ReadableStreamBYOBReader,
         let byob_reader = {
@@ -1607,7 +1611,7 @@ impl ReadableStream {
 
         if let Some(reader) = byob_reader {
             // step 6.1, 6.2 & 6.3 of https://streams.spec.whatwg.org/#readable-stream-cancel
-            reader.cancel(CanGc::from_cx(cx));
+            reader.cancel(cx);
         }
 
         // Let sourceCancelPromise be ! stream.[[controller]].[[CancelSteps]](reason).
@@ -1642,8 +1646,10 @@ impl ReadableStream {
             Some(rejection_handler),
             CanGc::from_cx(cx),
         );
-        let realm = enter_realm(&*global);
-        let comp = InRealm::Entered(&realm);
+        let mut realm = enter_auto_realm(cx, &*global);
+        let cx = &mut realm.current_realm();
+        let in_realm_proof = cx.into();
+        let comp = InRealm::Already(&in_realm_proof);
         source_cancel_promise.append_native_handler(&handler, comp, CanGc::from_cx(cx));
 
         // Return the result of reacting to sourceCancelPromise
@@ -1658,12 +1664,12 @@ impl ReadableStream {
 
     #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     /// <https://streams.spec.whatwg.org/#abstract-opdef-readablebytestreamtee>
-    fn byte_tee(&self, can_gc: CanGc) -> Fallible<Vec<DomRoot<ReadableStream>>> {
+    fn byte_tee(&self, cx: &mut JSContext) -> Fallible<Vec<DomRoot<ReadableStream>>> {
         // Assert: stream implements ReadableStream.
         // Assert: stream.[[controller]] implements ReadableByteStreamController.
 
         // Let reader be ? AcquireReadableStreamDefaultReader(stream).
-        let reader = self.acquire_default_reader(can_gc)?;
+        let reader = self.acquire_default_reader(CanGc::from_cx(cx))?;
         let reader = Rc::new(RefCell::new(ReaderType::Default(MutNullableDom::new(
             Some(&reader),
         ))));
@@ -1684,13 +1690,13 @@ impl ReadableStream {
         let canceled_2 = Rc::new(Cell::new(false));
 
         // Let reason1 be undefined.
-        let reason_1 = Rc::new(Heap::boxed(UndefinedValue()));
+        let reason_1 = Rc::new(Heap::default());
 
         // Let reason2 be undefined.
-        let reason_2 = Rc::new(Heap::boxed(UndefinedValue()));
+        let reason_2 = Rc::new(Heap::default());
 
         // Let cancelPromise be a new promise.
-        let cancel_promise = Promise::new(&self.global(), can_gc);
+        let cancel_promise = Promise::new2(cx, &self.global());
         let reader_version = Rc::new(Cell::new(0));
 
         let byte_tee_source_1 = ByteTeeUnderlyingSource::new(
@@ -1707,7 +1713,7 @@ impl ReadableStream {
             reader_version.clone(),
             ByteTeeCancelAlgorithm::Cancel1Algorithm,
             ByteTeePullAlgorithm::Pull1Algorithm,
-            can_gc,
+            CanGc::from_cx(cx),
         );
 
         let byte_tee_source_2 = ByteTeeUnderlyingSource::new(
@@ -1724,30 +1730,30 @@ impl ReadableStream {
             reader_version,
             ByteTeeCancelAlgorithm::Cancel2Algorithm,
             ByteTeePullAlgorithm::Pull2Algorithm,
-            can_gc,
+            CanGc::from_cx(cx),
         );
 
         // Set branch1 to ! CreateReadableByteStream(startAlgorithm, pull1Algorithm, cancel1Algorithm).
         let branch_1 = readable_byte_stream_tee(
+            cx,
             &self.global(),
-            UnderlyingSourceType::TeeByte(Dom::from_ref(&byte_tee_source_1)),
-            can_gc,
+            UnderlyingSourceType::TeeByte(&byte_tee_source_1),
         );
         byte_tee_source_1.set_branch_1(&branch_1);
         byte_tee_source_2.set_branch_1(&branch_1);
 
         // Set branch2 to ! CreateReadableByteStream(startAlgorithm, pull2Algorithm, cancel2Algorithm).
         let branch_2 = readable_byte_stream_tee(
+            cx,
             &self.global(),
-            UnderlyingSourceType::TeeByte(Dom::from_ref(&byte_tee_source_2)),
-            can_gc,
+            UnderlyingSourceType::TeeByte(&byte_tee_source_2),
         );
         byte_tee_source_1.set_branch_2(&branch_2);
         byte_tee_source_2.set_branch_2(&branch_2);
 
         // Perform forwardReaderError, given reader.
-        byte_tee_source_1.forward_reader_error(reader.clone(), can_gc);
-        byte_tee_source_2.forward_reader_error(reader, can_gc);
+        byte_tee_source_1.forward_reader_error(reader.clone(), CanGc::from_cx(cx));
+        byte_tee_source_2.forward_reader_error(reader, CanGc::from_cx(cx));
 
         // Return « branch1, branch2 ».
         Ok(vec![branch_1, branch_2])
@@ -1757,8 +1763,8 @@ impl ReadableStream {
     #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     fn default_tee(
         &self,
+        cx: &mut JSContext,
         clone_for_branch_2: bool,
-        can_gc: CanGc,
     ) -> Fallible<Vec<DomRoot<ReadableStream>>> {
         // Assert: stream implements ReadableStream.
 
@@ -1766,7 +1772,7 @@ impl ReadableStream {
         let clone_for_branch_2 = Rc::new(Cell::new(clone_for_branch_2));
 
         // Let reader be ? AcquireReadableStreamDefaultReader(stream).
-        let reader = self.acquire_default_reader(can_gc)?;
+        let reader = self.acquire_default_reader(CanGc::from_cx(cx))?;
 
         // Let reading be false.
         let reading = Rc::new(Cell::new(false));
@@ -1778,11 +1784,11 @@ impl ReadableStream {
         let canceled_2 = Rc::new(Cell::new(false));
 
         // Let reason1 be undefined.
-        let reason_1 = Rc::new(Heap::boxed(UndefinedValue()));
+        let reason_1 = Rc::new(Heap::default());
         // Let reason2 be undefined.
-        let reason_2 = Rc::new(Heap::boxed(UndefinedValue()));
+        let reason_2 = Rc::new(Heap::default());
         // Let cancelPromise be a new promise.
-        let cancel_promise = Promise::new(&self.global(), can_gc);
+        let cancel_promise = Promise::new2(cx, &self.global());
 
         let tee_source_1 = DefaultTeeUnderlyingSource::new(
             &reader,
@@ -1796,11 +1802,10 @@ impl ReadableStream {
             reason_2.clone(),
             cancel_promise.clone(),
             DefaultTeeCancelAlgorithm::Cancel1Algorithm,
-            can_gc,
+            CanGc::from_cx(cx),
         );
 
-        let underlying_source_type_branch_1 =
-            UnderlyingSourceType::Tee(Dom::from_ref(&tee_source_1));
+        let underlying_source_type_branch_1 = UnderlyingSourceType::Tee(&tee_source_1);
 
         let tee_source_2 = DefaultTeeUnderlyingSource::new(
             &reader,
@@ -1814,30 +1819,29 @@ impl ReadableStream {
             reason_2,
             cancel_promise.clone(),
             DefaultTeeCancelAlgorithm::Cancel2Algorithm,
-            can_gc,
+            CanGc::from_cx(cx),
         );
 
-        let underlying_source_type_branch_2 =
-            UnderlyingSourceType::Tee(Dom::from_ref(&tee_source_2));
+        let underlying_source_type_branch_2 = UnderlyingSourceType::Tee(&tee_source_2);
 
         // Set branch_1 to ! CreateReadableStream(startAlgorithm, pullAlgorithm, cancel1Algorithm).
         let branch_1 = create_readable_stream(
+            cx,
             &self.global(),
             underlying_source_type_branch_1,
             None,
             None,
-            can_gc,
         );
         tee_source_1.set_branch_1(&branch_1);
         tee_source_2.set_branch_1(&branch_1);
 
         // Set branch_2 to ! CreateReadableStream(startAlgorithm, pullAlgorithm, cancel2Algorithm).
         let branch_2 = create_readable_stream(
+            cx,
             &self.global(),
             underlying_source_type_branch_2,
             None,
             None,
-            can_gc,
         );
         tee_source_1.set_branch_2(&branch_2);
         tee_source_2.set_branch_2(&branch_2);
@@ -1849,7 +1853,7 @@ impl ReadableStream {
             canceled_1,
             canceled_2,
             cancel_promise,
-            can_gc,
+            CanGc::from_cx(cx),
         );
 
         // Return « branch_1, branch_2 ».
@@ -1960,8 +1964,8 @@ impl ReadableStream {
     /// <https://streams.spec.whatwg.org/#readable-stream-tee>
     pub(crate) fn tee(
         &self,
+        cx: &mut JSContext,
         clone_for_branch_2: bool,
-        can_gc: CanGc,
     ) -> Fallible<Vec<DomRoot<ReadableStream>>> {
         // Assert: stream implements ReadableStream.
         // Assert: cloneForBranch2 is a boolean.
@@ -1969,12 +1973,12 @@ impl ReadableStream {
         match self.controller.borrow().as_ref() {
             Some(ControllerType::Default(_)) => {
                 // Return ? ReadableStreamDefaultTee(stream, cloneForBranch2).
-                self.default_tee(clone_for_branch_2, can_gc)
+                self.default_tee(cx, clone_for_branch_2)
             },
             Some(ControllerType::Byte(_)) => {
                 // If stream.[[controller]] implements ReadableByteStreamController,
                 // return ? ReadableByteStreamTee(stream).
-                self.byte_tee(can_gc)
+                self.byte_tee(cx)
             },
             None => {
                 unreachable!("Stream should have a controller.");
@@ -1983,14 +1987,14 @@ impl ReadableStream {
     }
 
     /// <https://streams.spec.whatwg.org/#set-up-readable-byte-stream-controller-from-underlying-source>
-    pub(crate) fn set_up_byte_controller(
+    fn set_up_byte_controller(
         &self,
+        cx: &mut JSContext,
         global: &GlobalScope,
         underlying_source_dict: JsUnderlyingSource,
         underlying_source_handle: SafeHandleObject,
         stream: DomRoot<ReadableStream>,
         strategy_hwm: f64,
-        can_gc: CanGc,
     ) -> Fallible<()> {
         // Let pullAlgorithm be an algorithm that returns a promise resolved with undefined.
         // Let cancelAlgorithm be an algorithm that returns a promise resolved with undefined.
@@ -2012,10 +2016,10 @@ impl ReadableStream {
         }
 
         let controller = ReadableByteStreamController::new(
-            UnderlyingSourceType::Js(underlying_source_dict, Heap::default()),
+            UnderlyingSourceType::Js(underlying_source_dict),
             strategy_hwm,
             global,
-            can_gc,
+            CanGc::from_cx(cx),
         );
 
         // Note: this must be done before `setup`,
@@ -2024,13 +2028,13 @@ impl ReadableStream {
 
         // Perform ? SetUpReadableByteStreamController(stream, controller, startAlgorithm,
         // pullAlgorithm, cancelAlgorithm, highWaterMark, autoAllocateChunkSize).
-        controller.setup(global, stream, can_gc)
+        controller.setup(cx, global, stream)
     }
 
     /// <https://streams.spec.whatwg.org/#abstract-opdef-setupcrossrealmtransformreadable>
     pub(crate) fn setup_cross_realm_transform_readable(
         &self,
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         port: &MessagePort,
     ) {
         let port_id = port.message_port_id();
@@ -2048,7 +2052,7 @@ impl ReadableStream {
         // Let controller be a new ReadableStreamDefaultController.
         let controller = ReadableStreamDefaultController::new(
             &self.global(),
-            UnderlyingSourceType::Transfer(Dom::from_ref(port)),
+            UnderlyingSourceType::Transfer(port),
             0.,
             size_algorithm,
             CanGc::from_cx(cx),
@@ -2066,7 +2070,7 @@ impl ReadableStream {
 
         // Perform ! SetUpReadableStreamDefaultController
         controller
-            .setup(DomRoot::from_ref(self), CanGc::from_cx(cx))
+            .setup(cx, DomRoot::from_ref(self))
             .expect("Setting up controller for transfer cannot fail.");
     }
 }
@@ -2074,20 +2078,19 @@ impl ReadableStream {
 impl ReadableStreamMethods<crate::DomTypeHolder> for ReadableStream {
     /// <https://streams.spec.whatwg.org/#rs-constructor>
     fn Constructor(
-        cx: SafeJSContext,
+        cx: &mut JSContext,
         global: &GlobalScope,
         proto: Option<SafeHandleObject>,
-        can_gc: CanGc,
         underlying_source: Option<*mut JSObject>,
         strategy: &QueuingStrategy,
     ) -> Fallible<DomRoot<Self>> {
         // If underlyingSource is missing, set it to null.
-        rooted!(in(*cx) let underlying_source_obj = underlying_source.unwrap_or(ptr::null_mut()));
+        rooted!(&in(cx) let underlying_source_obj = underlying_source.unwrap_or(ptr::null_mut()));
         // Let underlyingSourceDict be underlyingSource,
         // converted to an IDL value of type UnderlyingSource.
         let underlying_source_dict = if !underlying_source_obj.is_null() {
-            rooted!(in(*cx) let obj_val = ObjectValue(underlying_source_obj.get()));
-            match JsUnderlyingSource::new(cx, obj_val.handle(), can_gc) {
+            rooted!(&in(cx) let obj_val = ObjectValue(underlying_source_obj.get()));
+            match JsUnderlyingSource::new(cx.into(), obj_val.handle(), CanGc::from_cx(cx)) {
                 Ok(ConversionResult::Success(val)) => val,
                 Ok(ConversionResult::Failure(error)) => {
                     return Err(Error::Type(error.into_owned()));
@@ -2101,7 +2104,7 @@ impl ReadableStreamMethods<crate::DomTypeHolder> for ReadableStream {
         };
 
         // Perform ! InitializeReadableStream(this).
-        let stream = ReadableStream::new_with_proto(global, proto, can_gc);
+        let stream = ReadableStream::new_with_proto(global, proto, CanGc::from_cx(cx));
 
         if underlying_source_dict.type_.is_some() {
             // If strategy["size"] exists, throw a RangeError exception.
@@ -2117,26 +2120,26 @@ impl ReadableStreamMethods<crate::DomTypeHolder> for ReadableStream {
             // Perform ? SetUpReadableByteStreamControllerFromUnderlyingSource(this,
             // underlyingSource, underlyingSourceDict, highWaterMark).
             stream.set_up_byte_controller(
+                cx,
                 global,
                 underlying_source_dict,
                 underlying_source_obj.handle(),
                 stream.clone(),
                 strategy_hwm,
-                can_gc,
             )?;
         } else {
             // Let highWaterMark be ? ExtractHighWaterMark(strategy, 1).
             let high_water_mark = extract_high_water_mark(strategy, 1.0)?;
 
             // Let sizeAlgorithm be ! ExtractSizeAlgorithm(strategy).
-            let size_algorithm = extract_size_algorithm(strategy, can_gc);
+            let size_algorithm = extract_size_algorithm(strategy, CanGc::from_cx(cx));
 
             let controller = ReadableStreamDefaultController::new(
                 global,
-                UnderlyingSourceType::Js(underlying_source_dict, Heap::default()),
+                UnderlyingSourceType::Js(underlying_source_dict),
                 high_water_mark,
                 size_algorithm,
-                can_gc,
+                CanGc::from_cx(cx),
             );
 
             // Note: this must be done before `setup`,
@@ -2144,7 +2147,7 @@ impl ReadableStreamMethods<crate::DomTypeHolder> for ReadableStream {
             controller.set_underlying_source_this_object(underlying_source_obj.handle());
 
             // Perform ? SetUpReadableStreamDefaultControllerFromUnderlyingSource
-            controller.setup(stream.clone(), can_gc)?;
+            controller.setup(cx, stream.clone())?;
         };
 
         Ok(stream)
@@ -2156,7 +2159,7 @@ impl ReadableStreamMethods<crate::DomTypeHolder> for ReadableStream {
     }
 
     /// <https://streams.spec.whatwg.org/#rs-cancel>
-    fn Cancel(&self, cx: &mut js::context::JSContext, reason: SafeHandleValue) -> Rc<Promise> {
+    fn Cancel(&self, cx: &mut JSContext, reason: SafeHandleValue) -> Rc<Promise> {
         let global = self.global();
         if self.is_locked() {
             // If ! IsReadableStreamLocked(this) is true,
@@ -2195,9 +2198,9 @@ impl ReadableStreamMethods<crate::DomTypeHolder> for ReadableStream {
     }
 
     /// <https://streams.spec.whatwg.org/#rs-tee>
-    fn Tee(&self, can_gc: CanGc) -> Fallible<Vec<DomRoot<ReadableStream>>> {
+    fn Tee(&self, cx: &mut JSContext) -> Fallible<Vec<DomRoot<ReadableStream>>> {
         // Return ? ReadableStreamTee(this, false).
-        self.tee(false, can_gc)
+        self.tee(cx, false)
     }
 
     /// <https://streams.spec.whatwg.org/#rs-pipe-to>
@@ -2378,19 +2381,19 @@ impl CrossRealmTransformReadable {
         // Otherwise, if type is "close",
         if type_string == "close" {
             // Perform ! ReadableStreamDefaultControllerClose(controller).
-            self.controller.close(CanGc::from_cx(cx));
+            self.controller.close(cx);
 
             // Disentangle port.
-            global.disentangle_port(port, CanGc::from_cx(cx));
+            global.disentangle_port(cx, port);
         }
 
         // Otherwise, if type is "error",
         if type_string == "error" {
             // Perform ! ReadableStreamDefaultControllerError(controller, value).
-            self.controller.error(value.handle(), CanGc::from_cx(cx));
+            self.controller.error(cx, value.handle());
 
             // Disentangle port.
-            global.disentangle_port(port, CanGc::from_cx(cx));
+            global.disentangle_port(cx, port);
         }
     }
 
@@ -2411,11 +2414,10 @@ impl CrossRealmTransformReadable {
         port.cross_realm_transform_send_error(rooted_error.handle(), CanGc::from_cx(cx));
 
         // Perform ! ReadableStreamDefaultControllerError(controller, error).
-        self.controller
-            .error(rooted_error.handle(), CanGc::from_cx(cx));
+        self.controller.error(cx, rooted_error.handle());
 
         // Disentangle port.
-        global.disentangle_port(port, CanGc::from_cx(cx));
+        global.disentangle_port(cx, port);
     }
 }
 
@@ -2499,10 +2501,7 @@ impl Transferable for ReadableStream {
     type Data = MessagePortImpl;
 
     /// <https://streams.spec.whatwg.org/#ref-for-transfer-steps>
-    fn transfer(
-        &self,
-        cx: &mut js::context::JSContext,
-    ) -> Fallible<(MessagePortId, MessagePortImpl)> {
+    fn transfer(&self, cx: &mut JSContext) -> Fallible<(MessagePortId, MessagePortImpl)> {
         // Step 1. If ! IsReadableStreamLocked(value) is true, throw a
         // "DataCloneError" DOMException.
         if self.is_locked() {
@@ -2543,7 +2542,7 @@ impl Transferable for ReadableStream {
 
     /// <https://streams.spec.whatwg.org/#ref-for-transfer-receiving-steps>
     fn transfer_receive(
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         owner: &GlobalScope,
         id: MessagePortId,
         port_impl: MessagePortImpl,

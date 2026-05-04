@@ -129,13 +129,16 @@ impl Worker {
             );
         } else {
             // Step 4 of the "port post message steps" of the implicit messageport, fire messageerror.
-            MessageEvent::dispatch_error(target, &global, CanGc::from_cx(cx));
+            MessageEvent::dispatch_error(cx, target, &global);
         }
     }
 
-    pub(crate) fn dispatch_simple_error(address: TrustedWorkerAddress, can_gc: CanGc) {
+    pub(crate) fn dispatch_simple_error(
+        cx: &mut js::context::JSContext,
+        address: TrustedWorkerAddress,
+    ) {
         let worker = address.root();
-        worker.upcast().fire_event(atom!("error"), can_gc);
+        worker.upcast().fire_event(cx, atom!("error"));
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-dedicatedworkerglobalscope-postmessage>
@@ -245,7 +248,11 @@ impl WorkerMethods<crate::DomTypeHolder> for Worker {
             }
         }
 
-        let init = prepare_workerscope_init(global, Some(devtools_sender), Some(worker_id));
+        let webgl_chan = global
+            .downcast::<Window>()
+            .and_then(|window| window.webgl_chan_value());
+        let init =
+            prepare_workerscope_init(global, Some(devtools_sender), Some(worker_id), webgl_chan);
 
         let (control_sender, control_receiver) = unbounded();
         let (context_sender, context_receiver) = unbounded();
@@ -344,6 +351,6 @@ impl WorkerMethods<crate::DomTypeHolder> for Worker {
 impl TaskOnce for SimpleWorkerErrorHandler<Worker> {
     #[cfg_attr(crown, expect(crown::unrooted_must_root))]
     fn run_once(self, cx: &mut JSContext) {
-        Worker::dispatch_simple_error(self.addr, CanGc::from_cx(cx));
+        Worker::dispatch_simple_error(cx, self.addr);
     }
 }

@@ -25,10 +25,12 @@ use crate::fetch::methods::{DoneChannel, FetchContext, RangeRequestBounds, fetch
 mod blob;
 mod data;
 mod file;
+mod os;
 
 use blob::BlobProtocolHander;
 use data::DataProtocolHander;
 use file::FileProtocolHander;
+use os::OsProtocolHandler;
 
 type FutureResponse<'a> = Pin<Box<dyn Future<Output = Response> + Send + 'a>>;
 
@@ -96,6 +98,9 @@ impl ProtocolRegistry {
             .expect("Infallible");
         registry
             .register("file", FileProtocolHander::default())
+            .expect("Infallible");
+        registry
+            .register("os", OsProtocolHandler::default())
             .expect("Infallible");
         registry
     }

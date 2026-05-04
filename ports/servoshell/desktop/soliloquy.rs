@@ -10,8 +10,9 @@ use std::collections::HashMap;
 use log::info;
 use servo::WebViewId;
 use soliloquy_browser_optimizations::{
-    CachedResource, LruCache, PrefetchManager, PrefetchPriority, ResourceType,
-    TabResidencyManager,
+    cache::CachedResource,
+    network::{PrefetchPriority, ResourceType},
+    LruCache, PrefetchManager, TabResidencyManager,
 };
 use url::Url;
 

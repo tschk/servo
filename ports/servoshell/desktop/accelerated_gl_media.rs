@@ -15,28 +15,25 @@ pub(crate) fn setup_gl_accelerated_media(_: RefMut<'_, Device>, _: RefMut<'_, Co
 #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub(crate) fn setup_gl_accelerated_media(device: RefMut<'_, Device>, context: RefMut<'_, Context>) {
     use servo::{MediaGlContext, MediaNativeDisplay, Servo};
-    use surfman::platform::generic::multi::connection::NativeConnection;
-    use surfman::platform::generic::multi::context::NativeContext;
+    use surfman::{NativeConnection, NativeContext};
 
     let api = api(&device, &context);
-    let context = match device.native_context(&context) {
-        NativeContext::Default(NativeContext::Default(native_context)) => {
-            MediaGlContext::Egl(native_context.egl_context as usize)
+    let native_context = match device.native_context(&context) {
+        NativeContext::Default(_) => {
+            eprintln!("[sol-servo] accelerated_gl_media skipped for surfaceless backend");
+            return;
         },
-        NativeContext::Default(NativeContext::Alternate(native_context)) => {
-            MediaGlContext::Egl(native_context.egl_context as usize)
-        },
-        NativeContext::Alternate(_) => MediaGlContext::Unknown,
+        NativeContext::Alternate(native_context) => native_context,
     };
-    let display = match device.connection().native_connection() {
-        surfman::NativeConnection::Default(NativeConnection::Default(connection)) => {
-            MediaNativeDisplay::Egl(connection.0 as usize)
+    let context = MediaGlContext::Egl(native_context.egl_context as usize);
+    let native_connection = match device.connection().native_connection() {
+        NativeConnection::Default(_) => {
+            eprintln!("[sol-servo] accelerated_gl_media skipped for surfaceless connection");
+            return;
         },
-        surfman::NativeConnection::Default(NativeConnection::Alternate(connection)) => {
-            MediaNativeDisplay::X11(connection.x11_display as usize)
-        },
-        surfman::NativeConnection::Alternate(_) => MediaNativeDisplay::Unknown,
+        NativeConnection::Alternate(native_connection) => native_connection,
     };
+    let display = MediaNativeDisplay::Egl(native_connection.egl_display as usize);
     Servo::initialize_gl_accelerated_media(display, api, context);
 }
 

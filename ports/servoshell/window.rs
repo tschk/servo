@@ -80,7 +80,7 @@ impl ServoShellWindow {
         state: Rc<RunningAppState>,
         url: Url,
     ) -> WebView {
-        let webview = self.create_toplevel_webview(state, url);
+        let webview = self.create_toplevel_webview(state.clone(), url);
         self.activate_webview(webview.id());
         state.track_webview_activated(webview.id());
         webview

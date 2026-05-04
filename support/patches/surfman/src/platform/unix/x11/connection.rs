@@ -283,7 +283,7 @@ impl Connection {
 
 impl NativeConnectionWrapper {
     #[inline]
-    pub(crate) fn lock_display(&self) -> DisplayGuard {
+    pub(crate) fn lock_display(&self) -> DisplayGuard<'_> {
         unsafe {
             let display = self.x11_display;
             let xlib = &self.xlib;
@@ -321,18 +321,44 @@ impl<'a> DisplayGuard<'a> {
 unsafe fn create_egl_display(display: *mut Display) -> Result<EGLDisplay, Error> {
     EGL_FUNCTIONS.with(|egl| {
         let display_attributes = [egl::NONE as EGLAttrib];
-        eprintln!("[sol-servo] surfman.x11.create_egl_display GetPlatformDisplay start");
-        let mut egl_display = egl.GetPlatformDisplay(
-            EGL_PLATFORM_X11_KHR,
-            display as *mut c_void,
-            display_attributes.as_ptr(),
-        );
-        eprintln!("[sol-servo] surfman.x11.create_egl_display GetPlatformDisplay done");
+        let use_legacy_display = std::env::var("SOLILOQUY_SURFMAN_X11_LEGACY_EGL")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        let mut egl_display = if use_legacy_display {
+            eprintln!("[sol-servo] surfman.x11.create_egl_display GetDisplay start");
+            let egl_display = egl.GetDisplay(display as *mut c_void);
+            eprintln!("[sol-servo] surfman.x11.create_egl_display GetDisplay done");
+            egl_display
+        } else {
+            eprintln!("[sol-servo] surfman.x11.create_egl_display GetPlatformDisplay start");
+            let egl_display = egl.GetPlatformDisplay(
+                EGL_PLATFORM_X11_KHR,
+                display as *mut c_void,
+                display_attributes.as_ptr(),
+            );
+            eprintln!("[sol-servo] surfman.x11.create_egl_display GetPlatformDisplay done");
+            egl_display
+        };
 
         if egl_display == egl::NO_DISPLAY {
-            eprintln!("[sol-servo] surfman.x11.create_egl_display GetDisplay fallback start");
-            egl_display = egl.GetDisplay(display as *mut c_void);
-            eprintln!("[sol-servo] surfman.x11.create_egl_display GetDisplay fallback done");
+            if use_legacy_display {
+                eprintln!(
+                    "[sol-servo] surfman.x11.create_egl_display GetPlatformDisplay fallback start"
+                );
+                egl_display = egl.GetPlatformDisplay(
+                    EGL_PLATFORM_X11_KHR,
+                    display as *mut c_void,
+                    display_attributes.as_ptr(),
+                );
+                eprintln!(
+                    "[sol-servo] surfman.x11.create_egl_display GetPlatformDisplay fallback done"
+                );
+            } else {
+                eprintln!("[sol-servo] surfman.x11.create_egl_display GetDisplay fallback start");
+                egl_display = egl.GetDisplay(display as *mut c_void);
+                eprintln!("[sol-servo] surfman.x11.create_egl_display GetDisplay fallback done");
+            }
         }
 
         if egl_display == egl::NO_DISPLAY {

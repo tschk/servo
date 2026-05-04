@@ -9999,7 +9999,7 @@ dependencies = [
  "euclid",
  "fnv",
  "gl_generator",
- "glow 0.16.0",
+ "glow 0.17.0",
  "libc",
  "log",
  "objc2 0.6.4",

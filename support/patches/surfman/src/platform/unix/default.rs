@@ -6,13 +6,16 @@
 //! headed contexts use X11 through `Connection::from_display_handle()`.
 
 type DefaultDevice = crate::platform::unix::generic::device::Device;
-type AlternateDevice = crate::platform::unix::x11::device::Device;
+// `from_display_handle` tries generic (always fails) then this backend. Must be Wayland for
+// Cage/Sway/etc.; X11-only would incorrectly reject Wayland RawDisplayHandle (regression in
+// Soliloquy appliance builds that forced X11 here).
+type AlternateDevice = crate::platform::unix::wayland::device::Device;
 
-/// X11 display server connections.
+/// Unix connection: surfaceless + Wayland headed path (X11 headed is unsupported in this fork).
 pub mod connection {
     use super::{AlternateDevice, DefaultDevice};
 
-    /// Default Unix connection: surfaceless first, X11 fallback.
+    /// Default Unix connection: surfaceless first, Wayland fallback for `from_display_handle`.
     pub type Connection =
         crate::platform::generic::multi::connection::Connection<DefaultDevice, AlternateDevice>;
     /// Native Unix connection for the selected backend.

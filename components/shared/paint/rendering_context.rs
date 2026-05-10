@@ -467,17 +467,32 @@ impl WindowRenderingContext {
             return Err(Error::Failed);
         }
 
-        let force_connection_new = std::env::var("SOLILOQUY_SURFMAN_CONNECTION_NEW")
+        // Always prefer the display-backed connection: it matches the window handle type (X11/Wayland).
+        // `Connection::new()` on Linux selects the surfaceless EGL default, which cannot create
+        // native widgets for normal desktop windows (IncompatibleNativeWidget for Wayland/X11).
+        let allow_surfaceless_fallback = std::env::var("SOLILOQUY_SURFMAN_CONNECTION_NEW")
             .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
         eprintln!(
-            "[sol-servo] window_rendering_context.connection start connection_new={}",
-            force_connection_new
+            "[sol-servo] window_rendering_context.connection start surfaceless_fallback={}",
+            allow_surfaceless_fallback
         );
-        let connection = if force_connection_new {
-            Connection::new()?
-        } else {
-            Connection::from_display_handle(display_handle)?
+        let connection = match Connection::from_display_handle(display_handle) {
+            Ok(connection) => connection,
+            Err(err) => {
+                eprintln!(
+                    "[sol-servo] window_rendering_context from_display_handle failed: {:?}",
+                    err
+                );
+                if allow_surfaceless_fallback {
+                    eprintln!(
+                        "[sol-servo] window_rendering_context falling back to Connection::new()"
+                    );
+                    Connection::new()?
+                } else {
+                    return Err(err);
+                }
+            },
         };
         eprintln!("[sol-servo] window_rendering_context.connection done");
 

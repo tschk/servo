@@ -24,7 +24,7 @@ use egui_winit::EventResponse;
 use euclid::{Length, Point2D, Rect, Scale, Size2D};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use log::info;
-use log::{info, warn};
+use log::warn;
 use servo::{
     DeviceIndependentPixel, DevicePixel, Image, LoadStatus, OffscreenRenderingContext, PixelFormat,
     RenderingContext, WebView, WebViewId,

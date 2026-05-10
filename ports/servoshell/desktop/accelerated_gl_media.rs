@@ -33,7 +33,8 @@ pub(crate) fn setup_gl_accelerated_media(device: RefMut<'_, Device>, context: Re
         },
         NativeConnection::Alternate(native_connection) => native_connection,
     };
-    let display = MediaNativeDisplay::Egl(native_connection.egl_display as usize);
+    // Wayland `NativeConnection` is a newtype around `EGLDisplay` (`pub struct NativeConnection(...)`).
+    let display = MediaNativeDisplay::Egl(native_connection.0 as usize);
     Servo::initialize_gl_accelerated_media(display, api, context);
 }
 

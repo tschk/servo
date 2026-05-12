@@ -45,6 +45,7 @@ pub struct Gui {
     rendering_context: Rc<OffscreenRenderingContext>,
     context: EguiGlow,
     toolbar_height: Length<f32, DeviceIndependentPixel>,
+    no_browser_chrome: bool,
 
     location: String,
 
@@ -191,6 +192,7 @@ impl Gui {
         event_loop_proxy: EventLoopProxy<AppEvent>,
         rendering_context: Rc<OffscreenRenderingContext>,
         initial_url: Url,
+        no_browser_chrome: bool,
     ) -> Self {
         rendering_context
             .make_current()
@@ -225,6 +227,7 @@ impl Gui {
             rendering_context,
             context,
             toolbar_height: Default::default(),
+            no_browser_chrome,
             location: initial_url.to_string(),
             location_dirty: false,
             load_status: LoadStatus::Complete,
@@ -379,6 +382,7 @@ impl Gui {
             rendering_context,
             context,
             toolbar_height,
+            no_browser_chrome,
             location,
             location_dirty,
             favicon_textures,
@@ -391,7 +395,7 @@ impl Gui {
 
             // TODO: While in fullscreen add some way to mitigate the increased phishing risk
             // when not displaying the URL bar: https://github.com/servo/servo/issues/32443
-            if winit_window.fullscreen().is_none() {
+            if !*no_browser_chrome && winit_window.fullscreen().is_none() {
                 let frame = egui::Frame::default()
                     .fill(ctx.style().visuals.window_fill)
                     .inner_margin(4.0);

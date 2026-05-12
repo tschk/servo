@@ -211,6 +211,7 @@ impl HeadedWindow {
             event_loop_proxy,
             rendering_context.clone(),
             initial_url,
+            servoshell_preferences.no_browser_chrome,
         ));
         eprintln!("[sol-servo] headed_window.gui.new done");
 

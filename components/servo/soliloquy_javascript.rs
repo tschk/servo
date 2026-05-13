@@ -25,6 +25,7 @@ static SOLILOQUY_V8_INIT: Once = Once::new();
 #[cfg(feature = "soliloquy_v8")]
 thread_local! {
     static SOLILOQUY_V8_ISOLATE: RefCell<Option<v8::OwnedIsolate>> = RefCell::new(None);
+    static SOLILOQUY_V8_CONTEXTS: RefCell<HashMap<String, v8::Global<v8::Context>>> = RefCell::new(HashMap::new());
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -203,20 +204,11 @@ impl SoliloquyV8IsolateOwner {
     }
 
     #[cfg(feature = "soliloquy_v8")]
-    fn evaluate_smoke_script(&self, script: &str) -> Option<SoliloquyJavascriptEvaluation> {
-        is_v8_smoke_script(script).then(|| SoliloquyJavascriptEvaluation {
-            result: self.evaluate_script(script),
-            mutations: Vec::new(),
-        })
-    }
-
-    #[cfg(not(feature = "soliloquy_v8"))]
-    fn evaluate_smoke_script(&self, _script: &str) -> Option<SoliloquyJavascriptEvaluation> {
-        None
-    }
-
-    #[cfg(feature = "soliloquy_v8")]
-    fn evaluate_script(&self, script: &str) -> Result<JSValue, JavaScriptEvaluationError> {
+    fn evaluate_script(
+        &self,
+        webview_id: WebViewId,
+        script: &str,
+    ) -> Result<JSValue, JavaScriptEvaluationError> {
         if !self.real_isolate_ready() {
             return Err(JavaScriptEvaluationError::InternalError);
         }
@@ -227,7 +219,17 @@ impl SoliloquyV8IsolateOwner {
                 .as_mut()
                 .ok_or(JavaScriptEvaluationError::InternalError)?;
             let handle_scope = &mut v8::HandleScope::new(isolate);
-            let context = v8::Context::new(handle_scope);
+            let context = SOLILOQUY_V8_CONTEXTS.with(|contexts| {
+                let mut contexts = contexts.borrow_mut();
+                let key = format!("{webview_id:?}");
+                if let Some(context) = contexts.get(&key) {
+                    v8::Local::new(handle_scope, context)
+                } else {
+                    let context = v8::Context::new(handle_scope);
+                    contexts.insert(key, v8::Global::new(handle_scope, context));
+                    context
+                }
+            });
             let scope = &mut v8::ContextScope::new(handle_scope, context);
             let source = v8::String::new(scope, script)
                 .ok_or(JavaScriptEvaluationError::CompilationFailure)?;
@@ -238,6 +240,31 @@ impl SoliloquyV8IsolateOwner {
                 .ok_or(JavaScriptEvaluationError::EvaluationFailure(None))?;
             Ok(v8_value_to_js_value(scope, value))
         })
+    }
+
+    #[cfg(feature = "soliloquy_v8")]
+    fn evaluate_general_script(
+        &self,
+        webview_id: WebViewId,
+        script: &str,
+    ) -> Option<SoliloquyJavascriptEvaluation> {
+        if script_requires_servo_browser_globals(script) {
+            return None;
+        }
+
+        Some(SoliloquyJavascriptEvaluation {
+            result: self.evaluate_script(webview_id, script),
+            mutations: Vec::new(),
+        })
+    }
+
+    #[cfg(not(feature = "soliloquy_v8"))]
+    fn evaluate_general_script(
+        &self,
+        _webview_id: WebViewId,
+        _script: &str,
+    ) -> Option<SoliloquyJavascriptEvaluation> {
+        None
     }
 }
 
@@ -290,7 +317,10 @@ impl SoliloquyScriptBackend for V8DispatchScriptBackend {
             .or_else(|| evaluate_live_dom_property(webview_id, trimmed))
             .or_else(|| evaluate_command(webview_id, trimmed, &self.isolate_owner))
             .or_else(|| evaluate_engine_probe(webview_id, trimmed))
-            .or_else(|| self.isolate_owner.evaluate_smoke_script(trimmed))
+            .or_else(|| {
+                self.isolate_owner
+                    .evaluate_general_script(webview_id, trimmed)
+            })
             .or_else(|| evaluate_binary_plus(trimmed))
             .or_else(|| evaluate_literal(trimmed))
     }
@@ -404,17 +434,21 @@ fn evaluate_binary_plus(script: &str) -> Option<SoliloquyJavascriptEvaluation> {
     }
 }
 
-#[cfg(feature = "soliloquy_v8")]
-fn is_v8_smoke_script(script: &str) -> bool {
-    if evaluate_literal(script).is_some() {
-        return true;
-    }
-
-    let Some((lhs, rhs)) = split_binary_plus(script) else {
-        return false;
-    };
-
-    evaluate_literal(lhs).is_some() && evaluate_literal(rhs).is_some()
+fn script_requires_servo_browser_globals(script: &str) -> bool {
+    let script = script.trim();
+    [
+        "document",
+        "window.",
+        "globalThis.",
+        "location",
+        "navigator",
+        "history",
+        "localStorage",
+        "sessionStorage",
+        "fetch",
+    ]
+    .iter()
+    .any(|global| script.contains(global))
 }
 
 fn evaluate_engine_probe(
@@ -817,7 +851,7 @@ mod tests {
 
     #[cfg(feature = "soliloquy_v8")]
     #[test]
-    fn v8_dispatch_backend_executes_smoke_scripts_in_rusty_v8() {
+    fn v8_dispatch_backend_executes_general_scripts_in_rusty_v8() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
         set_engine_env(&_guard, "v8-experimental");
@@ -825,6 +859,25 @@ mod tests {
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(8), "1 + true"),
             Some(Ok(JSValue::Number(2.0)))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(8), "['rv', 8].join('')"),
+            Some(Ok(JSValue::String("rv8".to_string())))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(8), "(() => 21 * 2)()"),
+            Some(Ok(JSValue::Number(42.0)))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(
+                test_webview_id(8),
+                "var rv8State = 42; rv8State"
+            ),
+            Some(Ok(JSValue::Number(42.0)))
+        );
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(8), "rv8State + 1"),
+            Some(Ok(JSValue::Number(43.0)))
         );
 
         clear_engine_env(&_guard);

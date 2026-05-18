@@ -15,14 +15,17 @@ name = "script"
 path = "lib.rs"
 
 [features]
+mozjs = ["dep:js", "script_bindings/mozjs", "dep:jstraceable_derive"]
+v8 = ["dep:rusty_v8", "script_bindings/v8"]
 bluetooth = ['servo-bluetooth-traits', 'script_bindings/bluetooth']
-crown = ['js/crown']
-debugmozjs = ['js/debugmozjs']
+crown = ['js?/crown']
+debugmozjs = ['js?/debugmozjs']
 gamepad = ["script_bindings/gamepad", "embedder_traits/gamepad"]
-jitspew = ['js/jitspew']
+jitspew = ['js?/jitspew']
 js_backtrace = []
-js_jit = ["js/jit"]
-profilemozjs = ['js/profilemozjs']
+js_jit = ["js?/jit"]
+profilemozjs = ['js?/profilemozjs']
+refcell_backtrace = ["accountable-refcell"]
 testbinding = ["script_bindings/testbinding"]
 tracing = ["dep:tracing", "script_bindings/tracing"]
 webgl_backtrace = ["servo-canvas-traits/webgl_backtrace"]
@@ -89,8 +92,9 @@ icu_locid = { workspace = true }
 indexmap = { workspace = true }
 ipc-channel = { workspace = true }
 itertools = { workspace = true }
-js = { workspace = true }
-jstraceable_derive = { workspace = true }
+js = { workspace = true, optional = true }
+rusty_v8 = { workspace = true, optional = true }
+jstraceable_derive = { workspace = true, optional = true }
 keyboard-types = { workspace = true }
 layout_api = { workspace = true }
 libc = { workspace = true }

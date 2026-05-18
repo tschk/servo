@@ -41,7 +41,16 @@ impl SoliloquyJavascriptBackend {
                 "v8" | "v8-experimental" | "v8_experimental" => Self::V8Experimental,
                 _ => Self::Mozjs,
             },
-            Err(_) => Self::Mozjs,
+            Err(_) => {
+                #[cfg(feature = "soliloquy_v8")]
+                {
+                    Self::V8Experimental
+                }
+                #[cfg(not(feature = "soliloquy_v8"))]
+                {
+                    Self::Mozjs
+                }
+            }
         }
     }
 

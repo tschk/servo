@@ -18,7 +18,7 @@ crate-type = ["rlib"]
 [features]
 # Note: Servoshell does not use the default features of servo, so you also
 # need to add features that should be default to ports/servoshell/Cargo.toml
-default = ["baked-in-resources", "clipboard", "js_jit"]
+default = ["baked-in-resources", "clipboard", "js_jit", "mozjs"]
 background_hang_monitor = ["servo-background-hang-monitor/sampler"]
 # This is slightly magical, but this will also work on ohos, where `servo-default-resource` is not added,
 # which makes `baked-in-resources a no-op (as intended) on ohos (and perhaps other platforms in the future).
@@ -43,6 +43,7 @@ gamepad = [
 jitspew = ["script/jitspew"]
 js_backtrace = ["script/js_backtrace"]
 js_jit = ["script/js_jit"]
+mozjs = ["script/mozjs"]
 media-gstreamer = ["servo-media-gstreamer", "gstreamer"]
 native-bluetooth = ["servo-bluetooth/native-bluetooth"]
 no-wgl = ["mozangle/egl", "mozangle/build_dlls", "surfman/sm-angle-default", "paint_api/no-wgl"]

@@ -11,6 +11,13 @@ rusty_v8 = { workspace = true, optional = true }
 [features]
 default = []
 v8 = ["dep:rusty_v8"]
+crown = []
+debugmozjs = []
+jitspew = []
+jit = []
+profilemozjs = []
+libz-sys = []
+intl = []
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(crown)'] }

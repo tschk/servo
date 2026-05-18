@@ -38,7 +38,7 @@ pub mod glue {
     pub fn RUST_JSID_TO_STRING(_cx: *mut jsapi::JSContext, _id: *const jsapi::jsid) -> *mut jsapi::JSString { ptr::null_mut() }
     pub fn AppendToIdVector(_cx: *mut jsapi::JSContext, _v: *mut u32, _id: *const jsapi::jsid) -> bool { false }
     pub fn GetProxyHandler(_proxy: *mut jsapi::JSObject) -> *const std::ffi::c_void { ptr::null() }
-    pub fn NewProxyObject(_cx: *mut jsapi::JSContext, _handler: *const std::ffi::c_void, _priv: *mut jsapi::JSObject, _proto: *mut jsapi::JSObject) -> *mut jsapi::JSObject { ptr::null_mut() }
+    pub fn NewProxyObject(_cx: *mut jsapi::JSContext, _handler: *const std::ffi::c_void, _priv: *mut jsapi::JSObject, _proto: *mut jsapi::JSObject, _options: *const std::ffi::c_void, _flag: bool) -> *mut jsapi::JSObject { ptr::null_mut() }
     pub fn GetProxyPrivate(_proxy: *mut jsapi::JSObject) -> *mut std::ffi::c_void { ptr::null_mut() }
     pub fn SetProxyPrivate(_proxy: *mut jsapi::JSObject, _priv: *mut std::ffi::c_void) {}
     pub fn DeletePropertyIgnoringResult(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _prop: *const u8) {}
@@ -97,8 +97,18 @@ pub mod jsapi {
     pub type JSAutoCompartment = *mut std::ffi::c_void;
     pub type GCContext = *mut std::ffi::c_void;
 
-    pub type Handle<T> = *const T;
-    pub type MutableHandle<T> = *mut T;
+    #[repr(transparent)]
+    pub struct Handle<T>(pub *const T);
+    impl<T> Handle<T> {
+        pub unsafe fn from_raw(raw: *const T) -> *const T { raw }
+    }
+
+    #[repr(transparent)]
+    pub struct MutableHandle<T>(pub *mut T);
+    impl<T> MutableHandle<T> {
+        pub unsafe fn from_raw(raw: *mut T) -> *mut T { raw }
+    }
+
     pub type HandleId = *const jsid;
     pub type HandleObject = *const JSObject;
     pub type HandleValue = *const JSVal;
@@ -185,7 +195,8 @@ pub mod jsapi {
 
     #[repr(C)]
     pub struct JSNativeWrapper {
-        pub _unused: [u8; 0],
+        pub op: Option<unsafe extern "C" fn(*mut JSContext, *mut JSObject, *const JSVal) -> bool>,
+        pub info: *const std::ffi::c_void,
     }
 
     #[repr(C)]
@@ -201,6 +212,9 @@ pub mod jsapi {
         pub name: *const u8,
         pub flags: u32,
         pub cOps: *const JSClassOps,
+        pub spec: *const std::ffi::c_void,
+        pub ext: *const std::ffi::c_void,
+        pub oOps: *const std::ffi::c_void,
     }
 
     #[repr(C)]
@@ -219,26 +233,86 @@ pub mod jsapi {
     }
 
     #[repr(C)]
-    pub struct JSPropertySpec {
-        pub name: *const u8,
+    pub struct JSPropertySpec_Name {
+        pub string_: *const u8,
+        pub symbol_: usize,
     }
 
     #[repr(C)]
-    pub struct JSPropertySpec_Accessor { pub _unused: [u8; 0] }
+    pub struct JSPropertySpec_Accessor {
+        pub native: JSNativeWrapper,
+    }
+
     #[repr(C)]
-    pub struct JSPropertySpec_AccessorsOrValue_Accessors { pub _unused: [u8; 0] }
+    pub struct JSPropertySpec_AccessorsOrValue_Accessors {
+        pub getter: JSPropertySpec_Accessor,
+        pub setter: JSPropertySpec_Accessor,
+    }
+
+    #[repr(u32)]
+    pub enum JSPropertySpec_Kind {
+        NativeAccessor = 0,
+        Value = 1,
+    }
+
+    #[repr(u32)]
+    pub enum JSPropertySpec_ValueWrapper_Type {
+        String = 0,
+    }
+
     #[repr(C)]
-    pub struct JSPropertySpec_AccessorsOrValue { pub _unused: [u8; 0] }
+    pub struct JSPropertySpec_ValueWrapper__bindgen_ty_1 {
+        pub string: *const u8,
+    }
+
     #[repr(C)]
-    pub struct JSPropertySpec_Kind { pub _unused: [u8; 0] }
+    pub struct JSPropertySpec_ValueWrapper {
+        pub type_: JSPropertySpec_ValueWrapper_Type,
+        pub __bindgen_anon_1: JSPropertySpec_ValueWrapper__bindgen_ty_1,
+    }
+
     #[repr(C)]
-    pub struct JSPropertySpec_Name { pub _unused: [u8; 0] }
+    pub struct JSPropertySpec_AccessorsOrValue {
+        pub accessors: JSPropertySpec_AccessorsOrValue_Accessors,
+        pub value: JSPropertySpec_ValueWrapper,
+    }
+
     #[repr(C)]
-    pub struct JSPropertySpec_ValueWrapper__bindgen_ty_1 { pub _unused: [u8; 0] }
-    #[repr(C)]
-    pub struct JSPropertySpec_ValueWrapper { pub _unused: [u8; 0] }
-    #[repr(C)]
-    pub struct JSPropertySpec_ValueWrapper_Type { pub _unused: [u8; 0] }
+    pub struct JSPropertySpec {
+        pub name: JSPropertySpec_Name,
+        pub attributes_: u32,
+        pub kind_: JSPropertySpec_Kind,
+        pub u: JSPropertySpec_AccessorsOrValue,
+    }
+    impl JSPropertySpec {
+        pub const ZERO: Self = JSPropertySpec {
+            name: JSPropertySpec_Name { string_: ptr::null(), symbol_: 0 },
+            attributes_: 0,
+            kind_: JSPropertySpec_Kind::NativeAccessor,
+            u: JSPropertySpec_AccessorsOrValue {
+                accessors: JSPropertySpec_AccessorsOrValue_Accessors {
+                    getter: JSPropertySpec_Accessor {
+                        native: JSNativeWrapper {
+                            op: None,
+                            info: ptr::null(),
+                        },
+                    },
+                    setter: JSPropertySpec_Accessor {
+                        native: JSNativeWrapper {
+                            op: None,
+                            info: ptr::null(),
+                        },
+                    },
+                },
+                value: JSPropertySpec_ValueWrapper {
+                    type_: JSPropertySpec_ValueWrapper_Type::String,
+                    __bindgen_anon_1: JSPropertySpec_ValueWrapper__bindgen_ty_1 {
+                        string: ptr::null(),
+                    },
+                },
+            },
+        };
+    }
 
     #[repr(C)]
     pub struct JSFunctionSpec {
@@ -246,6 +320,7 @@ pub mod jsapi {
         pub call: *const std::ffi::c_void,
         pub nargs: u16,
         pub flags: u16,
+        pub selfHostedName: *const u8,
     }
 
     pub const JSCLASS_IS_DOMJSCLASS: u32 = 1 << 4;
@@ -445,7 +520,7 @@ pub mod rust {
         pub unsafe fn JS_SetImmutablePrototype(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _succeeded: *mut bool) -> bool { false }
         pub unsafe fn JS_SetPrototype(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _proto: *mut jsapi::JSObject) -> bool { false }
         pub unsafe fn JS_WrapObject(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject) -> bool { false }
-        pub unsafe fn NewProxyObject(_cx: *mut jsapi::JSContext, _handler: *const std::ffi::c_void, _priv: *mut jsapi::JSObject, _proto: *mut jsapi::JSObject) -> *mut jsapi::JSObject { ptr::null_mut() }
+        pub unsafe fn NewProxyObject(_cx: *mut jsapi::JSContext, _handler: *const std::ffi::c_void, _priv: *mut jsapi::JSObject, _proto: *mut jsapi::JSObject, _options: *const std::ffi::c_void, _flag: bool) -> *mut jsapi::JSObject { ptr::null_mut() }
         pub fn RUST_INTERNED_STRING_TO_JSID(_cx: *mut jsapi::JSContext, _s: *const u8) -> jsapi::jsid { 0 }
         pub fn RUST_SYMBOL_TO_JSID(_cx: *mut jsapi::JSContext, _sym: jsapi::SymbolCode) -> jsapi::jsid { 0 }
         pub fn int_to_jsid(_i: i32) -> jsapi::jsid { _i as u64 }
@@ -570,15 +645,28 @@ pub mod gc {
     }
     pub trait RootedTraceableSet {}
 
-    pub struct RootedGuard<T> {
-        _phantom: std::marker::PhantomData<T>,
+    pub struct RootedGuard<'a, T> {
+        value: T,
+        _phantom: std::marker::PhantomData<&'a T>,
     }
-    impl<T> RootedGuard<T> {
-        pub unsafe fn new(_cx: *mut jsapi::JSContext, _val: T) -> Self {
-            Self { _phantom: std::marker::PhantomData }
+    impl<'a, T> RootedGuard<'a, T> {
+        pub unsafe fn new(_cx: *mut jsapi::JSContext, _root: &'a mut std::mem::MaybeUninit<T>, val: T) -> Self {
+            Self { value: val, _phantom: std::marker::PhantomData }
         }
-        pub fn handle(&self) -> &T { unimplemented!() }
-        pub fn get(&self) -> T { unimplemented!() }
+        pub fn handle(&self) -> *const T { &self.value as *const T }
+        pub fn handle_mut(&mut self) -> *mut T { &mut self.value as *mut T }
+        pub fn get(&self) -> T where T: Copy { self.value }
+        pub fn set(&mut self, val: T) { self.value = val; }
+    }
+
+    impl<'a> RootedGuard<'a, *mut std::ffi::c_void> {
+        pub fn is_undefined(&self) -> bool { false }
+        pub fn is_object(&self) -> bool { false }
+        pub fn is_null_or_undefined(&self) -> bool { true }
+        pub fn to_object(&self) -> *mut std::ffi::c_void { std::ptr::null_mut() }
+    }
+    impl<'a, T> RootedGuard<'a, *mut T> {
+        pub fn is_null(&self) -> bool { self.value.is_null() }
     }
 
     pub unsafe fn add_associated_memory(_obj: *const jsapi::JSObject, _sz: usize) {}
@@ -611,6 +699,15 @@ pub mod gc {
     pub trait GCMethods {
         fn initial() -> Self where Self: Sized;
     }
+    impl<T> GCMethods for *mut T {
+        fn initial() -> Self { std::ptr::null_mut() }
+    }
+    impl<T> GCMethods for *const T {
+        fn initial() -> Self { std::ptr::null() }
+    }
+    impl GCMethods for u64 { fn initial() -> Self { 0 } }
+    impl GCMethods for u32 { fn initial() -> Self { 0 } }
+    impl GCMethods for bool { fn initial() -> Self { false } }
 }
 
 // ── Context / Rooting ───────────────────────────────────────────────────────
@@ -619,7 +716,11 @@ pub mod context {
     use super::jsapi;
     use super::*;
 
-    pub type JSContext = jsapi::JSContext;
+    #[repr(transparent)]
+    pub struct JSContext(pub jsapi::JSContext);
+    impl JSContext {
+        pub unsafe fn from_ptr(raw: *mut jsapi::JSContext) -> *mut jsapi::JSContext { raw }
+    }
     pub type RawJSContext = *mut jsapi::JSContext;
     pub type SafeJSContext = *mut jsapi::JSContext;
 
@@ -631,7 +732,7 @@ pub mod context {
         pub unsafe fn new_unchecked(_cx: *mut jsapi::JSContext) -> Self { Self }
     }
 
-    pub unsafe fn from_ptr(_p: std::ptr::NonNull<jsapi::JSContext>) -> JSContext { std::ptr::null_mut() }
+    pub unsafe fn from_ptr(_p: std::ptr::NonNull<jsapi::JSContext>) -> JSContext { JSContext(std::ptr::null_mut()) }
 }
 
 // ── Realm management ────────────────────────────────────────────────────────
@@ -652,6 +753,7 @@ pub mod realms {
     pub struct CurrentRealm;
     impl CurrentRealm {
         pub unsafe fn new(_cx: *mut jsapi::JSContext) -> Self { Self }
+        pub fn assert<T>(_cx: &mut T) -> Self { Self }
     }
 }
 
@@ -678,7 +780,7 @@ pub mod conversions {
     pub use super::rust::conversions::{FromJSValConvertible, ToJSValConvertible};
 
     pub enum ConversionBehavior { Default, EnforceRange, Clamp }
-    pub enum ConversionResult<T> { Ok(T), Err(()) }
+    pub enum ConversionResult<T> { Success(T), Failure(Box<str>) }
 
     pub fn jsstr_to_string(_cx: *mut jsapi::JSContext, _s: *mut jsapi::JSString) -> String {
         String::new()

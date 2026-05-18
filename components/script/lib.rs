@@ -9,13 +9,8 @@
 #![cfg_attr(crown, register_tool(crown))]
 
 // These are used a lot so let's keep them for now
-#[cfg(feature = "mozjs")]
 #[macro_use]
 extern crate js;
-#[cfg(not(feature = "mozjs"))]
-#[path = "../script_bindings/js_mod.rs"]
-pub mod js;
-#[cfg(feature = "mozjs")]
 #[macro_use]
 extern crate jstraceable_derive;
 #[macro_use]

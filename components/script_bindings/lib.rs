@@ -6,13 +6,8 @@
 // Register the linter `crown`, which is the Servo-specific linter for the script crate.
 #![cfg_attr(crown, register_tool(crown))]
 
-#[cfg(feature = "mozjs")]
 #[macro_use]
 extern crate js;
-#[cfg(not(feature = "mozjs"))]
-#[path = "js_mod.rs"]
-pub mod js;
-#[cfg(feature = "mozjs")]
 #[macro_use]
 extern crate jstraceable_derive;
 #[macro_use]

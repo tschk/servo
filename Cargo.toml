@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "support/js_stub",
     "components/media/examples",
     "components/xpath",
     "ports/servoshell",
@@ -138,7 +139,7 @@ inventory = "0.3.24"
 ipc-channel = "0.22"
 itertools = "0.14"
 jni = "0.22"
-js = { package = "mozjs", version = "=0.15.14", default-features = false, features = ["intl", "libz-sys"] }
+js = { path = "support/js_stub" }
 keyboard-types = { version = "0.8.3", features = ["serde", "webdriver"] }
 kurbo = { version = "0.13.1", features = ["euclid"] }
 libc = "0.2"

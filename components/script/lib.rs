@@ -13,7 +13,7 @@
 #[macro_use]
 extern crate js;
 #[cfg(not(feature = "mozjs"))]
-#[path = "../script_bindings/js_stub.rs"]
+#[path = "../script_bindings/js_mod.rs"]
 pub mod js;
 #[cfg(feature = "mozjs")]
 #[macro_use]

@@ -27,8 +27,9 @@ dom_struct = { workspace = true }
 encoding_rs = { workspace = true }
 html5ever = { workspace = true }
 indexmap = { workspace = true }
-js = { workspace = true }
-jstraceable_derive = { workspace = true }
+js = { workspace = true, optional = true }
+rusty_v8 = { workspace = true, optional = true }
+jstraceable_derive = { workspace = true, optional = true }
 keyboard-types = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
@@ -58,6 +59,8 @@ phf_shared = "0.13"
 serde_json = { workspace = true }
 
 [features]
+mozjs = ["dep:js", "dep:jstraceable_derive"]
+v8 = ["dep:rusty_v8"]
 bluetooth = []
 gamepad = []
 testbinding = []

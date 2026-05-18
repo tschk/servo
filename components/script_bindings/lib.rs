@@ -10,13 +10,6 @@
 #[macro_use]
 extern crate js;
 #[cfg(not(feature = "mozjs"))]
-#[path = "js_stub.rs"]
-pub mod js;
-
-#[cfg(feature = "mozjs")]
-#[macro_use]
-extern crate js;
-#[cfg(not(feature = "mozjs"))]
 #[path = "js_mod.rs"]
 pub mod js;
 #[cfg(feature = "mozjs")]

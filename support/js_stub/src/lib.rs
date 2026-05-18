@@ -1,4 +1,7 @@
 // V8-backed JS engine bridge — replaces mozjs SpiderMonkey FFI.
+// Uses rusty_v8 with thread-local isolates and persistent handles.
+
+#[macro_use]
 mod macros;
 
 use std::cell::RefCell;

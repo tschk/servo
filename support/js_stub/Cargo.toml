@@ -1,0 +1,16 @@
+[package]
+name = "js"
+version = "0.15.13"
+edition.workspace = true
+license = "MPL-2.0"
+description = "V8-backed JS stub replacing mozjs SpiderMonkey FFI"
+
+[dependencies]
+rusty_v8 = { workspace = true, optional = true }
+
+[features]
+default = []
+v8 = ["dep:rusty_v8"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(crown)'] }

@@ -98,24 +98,44 @@ pub mod jsapi {
     pub type GCContext = *mut std::ffi::c_void;
 
     #[repr(transparent)]
-    pub struct Handle<T>(pub *const T);
-    impl<T> Handle<T> {
-        pub unsafe fn from_raw(raw: *const T) -> *const T { raw }
+    pub struct Handle<'a, T: 'a>(pub *const T, pub std::marker::PhantomData<&'a T>);
+    impl<'a, T: 'a> Handle<'a, T> {
+        pub unsafe fn from_raw(raw: *const T) -> Self { Self(raw, std::marker::PhantomData) }
+        pub fn get(&self) -> T where T: Copy { unsafe { *self.0 } }
+    }
+    impl<'a, T: 'a> std::ops::Deref for Handle<'a, T> {
+        type Target = T;
+        fn deref(&self) -> &T { unsafe { &*self.0 } }
+    }
+    impl<'a, T: 'a> From<Handle<'a, T>> for *const T {
+        fn from(h: Handle<'a, T>) -> *const T { h.0 }
     }
 
     #[repr(transparent)]
-    pub struct MutableHandle<T>(pub *mut T);
-    impl<T> MutableHandle<T> {
-        pub unsafe fn from_raw(raw: *mut T) -> *mut T { raw }
+    pub struct MutableHandle<'a, T: 'a>(pub *mut T, pub std::marker::PhantomData<&'a T>);
+    impl<'a, T: 'a> MutableHandle<'a, T> {
+        pub unsafe fn from_raw(raw: *mut T) -> Self { Self(raw, std::marker::PhantomData) }
+        pub fn get(&self) -> T where T: Copy { unsafe { *self.0 } }
+        pub fn set(&mut self, val: T) { unsafe { *self.0 = val; } }
+    }
+    impl<'a, T: 'a> std::ops::Deref for MutableHandle<'a, T> {
+        type Target = T;
+        fn deref(&self) -> &T { unsafe { &*self.0 } }
+    }
+    impl<'a, T: 'a> std::ops::DerefMut for MutableHandle<'a, T> {
+        fn deref_mut(&mut self) -> &mut T { unsafe { &mut *self.0 } }
+    }
+    impl<'a, T: 'a> From<MutableHandle<'a, T>> for *mut T {
+        fn from(h: MutableHandle<'a, T>) -> *mut T { h.0 }
     }
 
-    pub type HandleId = *const jsid;
-    pub type HandleObject = *const JSObject;
-    pub type HandleValue = *const JSVal;
+    pub type HandleId<'a> = Handle<'a, jsid>;
+    pub type HandleObject<'a> = Handle<'a, JSObject>;
+    pub type HandleValue<'a> = Handle<'a, JSVal>;
     pub type HandleValueArray = *const JSVal;
     pub type MutableHandleIdVector = *mut *const jsid;
-    pub type MutableHandleObject = *mut JSObject;
-    pub type MutableHandleValue = *mut JSVal;
+    pub type MutableHandleObject<'a> = MutableHandle<'a, JSObject>;
+    pub type MutableHandleValue<'a> = MutableHandle<'a, JSVal>;
     pub fn UndefinedHandleValue() -> *const JSVal { std::ptr::null() }
     pub type CallArgs = *mut std::ffi::c_void;
     pub type ObjectOpResult = *mut std::ffi::c_void;
@@ -653,8 +673,8 @@ pub mod gc {
         pub unsafe fn new(_cx: *mut jsapi::JSContext, _root: &'a mut std::mem::MaybeUninit<T>, val: T) -> Self {
             Self { value: val, _phantom: std::marker::PhantomData }
         }
-        pub fn handle(&self) -> *const T { &self.value as *const T }
-        pub fn handle_mut(&mut self) -> *mut T { &mut self.value as *mut T }
+        pub fn handle(&self) -> super::jsapi::Handle<'_, T> { super::jsapi::Handle(&self.value as *const T, std::marker::PhantomData) }
+        pub fn handle_mut(&mut self) -> super::jsapi::MutableHandle<'_, T> { super::jsapi::MutableHandle(&mut self.value as *mut T, std::marker::PhantomData) }
         pub fn get(&self) -> T where T: Copy { self.value }
         pub fn set(&mut self, val: T) { self.value = val; }
     }
@@ -719,7 +739,16 @@ pub mod context {
     #[repr(transparent)]
     pub struct JSContext(pub jsapi::JSContext);
     impl JSContext {
-        pub unsafe fn from_ptr(raw: *mut jsapi::JSContext) -> *mut jsapi::JSContext { raw }
+        pub unsafe fn from_ptr(raw: jsapi::JSContext) -> Self { Self(raw) }
+        pub fn raw_cx(&self) -> jsapi::JSContext { self.0 }
+        pub unsafe fn raw_cx_no_gc(&self) -> jsapi::JSContext { self.0 }
+    }
+    impl std::ops::Deref for JSContext {
+        type Target = jsapi::JSContext;
+        fn deref(&self) -> &jsapi::JSContext { &self.0 }
+    }
+    impl std::ops::DerefMut for JSContext {
+        fn deref_mut(&mut self) -> &mut jsapi::JSContext { &mut self.0 }
     }
     pub type RawJSContext = *mut jsapi::JSContext;
     pub type SafeJSContext = *mut jsapi::JSContext;

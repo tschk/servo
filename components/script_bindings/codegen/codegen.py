@@ -532,7 +532,7 @@ class CGMethodCall(CGThing):
                 for i in range(0, distinguishingIndex)]
 
             # Select the right overload from our set.
-            distinguishingArg = f"args.get({distinguishingIndex}))"
+            distinguishingArg = f"args.get({distinguishingIndex})"
 
             def pickFirstSignature(condition: str | None, filterLambda: Callable[[Any], bool]) -> bool:
                 sigs = list(filter(filterLambda, possibleSignatures))
@@ -1428,7 +1428,7 @@ class CGArgumentConverter(CGThing):
         assert not argument.defaultValue or argument.optional
 
         replacementVariables = {
-            "val": f"{args}.get({index}))",
+            "val": f"{args}.get({index})",
         }
 
         info = getJSToNativeConversionInfo(
@@ -1470,7 +1470,7 @@ class CGArgumentConverter(CGThing):
         else:
             assert argument.optional
             variadicConversion = {
-                "val": f"{args}.get(variadicArg))",
+                "val": f"{args}.get(variadicArg)",
             }
             innerConverter = [instantiateJSToNativeConversionTemplate(
                 template, variadicConversion, declType, "slot")]
@@ -4410,7 +4410,7 @@ class CGPerSignatureCall(CGThing):
            not (isinstance(self.idlNode, IDLMethod) and self.idlNode.isMethod() and self.idlNode.isMaplikeOrSetlikeOrIterableMethod())):
             resultName = "retval"
         return wrapForType(
-            'args.rval())',
+            'args.rval()',
             result=resultName,
             successCode='return true;',
         )
@@ -4866,7 +4866,7 @@ if !v.is_object() {{
     return false;
 }}
 rooted!(&in(cx) let target_obj = v.to_object());
-JS_SetProperty(cx, target_obj.handle(), {str_to_cstr_ptr(forwardToAttrName)}, args.get(0)))
+JS_SetProperty(cx, target_obj.handle(), {str_to_cstr_ptr(forwardToAttrName)}, args.get(0))
 """)
 
 
@@ -4884,7 +4884,7 @@ class CGSpecializedReplaceableSetter(CGSpecializedSetter):
         assert all(ord(c) < 128 for c in name)
         return CGGeneric(f"""
 JS_DefineProperty(cx, obj, {name},
-                  args.get(0)), JSPROP_ENUMERATE as u32)""")
+                  args.get(0), JSPROP_ENUMERATE as u32)""")
 
 
 class CGMemberJITInfo(CGThing):
@@ -4914,7 +4914,8 @@ class CGMemberJITInfo(CGThing):
                 """
                 JSJitInfo {
                     __bindgen_anon_1: JSJitInfo__bindgen_ty_1 {
-                        ${opKind}: ${opValue}
+                        ${opKind}: ${opValue},
+                        ..Default::default()
                     },
                     __bindgen_anon_2: JSJitInfo__bindgen_ty_2 {
                         protoID: PrototypeList::ID::${name} as u16,
@@ -5269,7 +5270,8 @@ class CGStaticMethodJitinfo(CGGeneric):
             pub(crate) fn init_{method.identifier.name}_methodinfo<D: DomTypes>() {{
                 {method.identifier.name}_methodinfo.set(JSJitInfo {{
                     __bindgen_anon_1: JSJitInfo__bindgen_ty_1 {{
-                        staticMethod: Some({CGDictionary.makeMemberName(method.identifier.name)}::<D>)
+                        staticMethod: Some({CGDictionary.makeMemberName(method.identifier.name)}::<D>),
+                        ..Default::default()
                     }},
                     __bindgen_anon_2: JSJitInfo__bindgen_ty_2 {{
                         protoID: PrototypeList::ID::Last as u16,

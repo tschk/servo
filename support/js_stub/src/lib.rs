@@ -237,15 +237,20 @@ pub mod jsapi {
         String = 1, Integer = 2, Double = 4,
     }
 
-    pub type JSJitGetterCallArgs = *mut std::ffi::c_void;
-    pub type JSJitMethodCallArgs = *mut std::ffi::c_void;
-    pub type JSJitSetterCallArgs = *mut std::ffi::c_void;
+    pub type JSJitGetterCallArgs = CallArgs;
+    pub type JSJitMethodCallArgs = CallArgs;
+    pub type JSJitSetterCallArgs = CallArgs;
 
     #[repr(C)]
     pub struct JSJitInfo__bindgen_ty_1 {
         pub method: Option<unsafe extern "C" fn(*mut JSContext, u32, *mut JSVal) -> bool>,
         pub getter: Option<unsafe extern "C" fn(*mut JSContext, u32, *mut JSVal) -> bool>,
         pub setter: Option<unsafe extern "C" fn(*mut JSContext, u32, *mut JSVal) -> bool>,
+    }
+    impl Default for JSJitInfo__bindgen_ty_1 {
+        fn default() -> Self {
+            JSJitInfo__bindgen_ty_1 { method: None, getter: None, setter: None }
+        }
     }
     #[repr(C)]
     pub struct JSJitInfo__bindgen_ty_2 {

@@ -480,7 +480,7 @@ class CGMethodCall(CGThing):
             if requiredArgs > 0:
                 code = (
                     f"if argc < {requiredArgs} {{\n"
-                    f"    throw_type_error(cx.raw_cx(), c\"Not enough arguments to {methodName}.\");\n"
+                    f"    throw_type_error(cx, c\"Not enough arguments to {methodName}.\");\n"
                     "    return false;\n"
                     "}")
                 self.cgRoot.prepend(
@@ -532,7 +532,7 @@ class CGMethodCall(CGThing):
                 for i in range(0, distinguishingIndex)]
 
             # Select the right overload from our set.
-            distinguishingArg = f"HandleValue::from_raw(args.get({distinguishingIndex}))"
+            distinguishingArg = f"args.get({distinguishingIndex}))"
 
             def pickFirstSignature(condition: str | None, filterLambda: Callable[[Any], bool]) -> bool:
                 sigs = list(filter(filterLambda, possibleSignatures))
@@ -628,7 +628,7 @@ class CGMethodCall(CGThing):
             # XXXbz Now we're supposed to check for distinguishingArg being
             # an array or a platform object that supports indexed
             # properties... skip that last for now.  It's a bit of a pain.
-            pickFirstSignature(f"{distinguishingArg}.get().is_object() && is_array_like::<D>(cx.raw_cx(), {distinguishingArg})",
+            pickFirstSignature(f"{distinguishingArg}.get().is_object() && is_array_like::<D>(cx, {distinguishingArg})",
                                lambda s:
                                    (s[1][distinguishingIndex].type.isSequence()
                                     or s[1][distinguishingIndex].type.isObject()))
@@ -659,7 +659,7 @@ class CGMethodCall(CGThing):
             else:
                 # Just throw; we have no idea what we're supposed to
                 # do with this.
-                caseBody.append(CGGeneric("throw_type_error(cx.raw_cx(), c\"Could not convert JavaScript argument\");\n"
+                caseBody.append(CGGeneric("throw_type_error(cx, c\"Could not convert JavaScript argument\");\n"
                                           "return false;"))
 
             argCountCases.append(CGCase(str(argCount),
@@ -671,7 +671,7 @@ class CGMethodCall(CGThing):
         overloadCGThings.append(
             CGSwitch("argcount",
                      argCountCases,
-                     CGGeneric(f"throw_type_error(cx.raw_cx(), c\"Not enough arguments to {methodName}.\");\n"
+                     CGGeneric(f"throw_type_error(cx, c\"Not enough arguments to {methodName}.\");\n"
                                "return false;")))
         # XXXjdm Avoid unreachable statement warnings
         # overloadCGThings.append(
@@ -819,7 +819,7 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
         exceptionCode = "return false;\n"
 
     if failureCode is None:
-        failOrPropagate = f"throw_type_error(cx.raw_cx(), error.as_ref());\n{exceptionCode}"
+        failOrPropagate = f"throw_type_error(cx, error.as_ref());\n{exceptionCode}"
     else:
         failOrPropagate = failureCode
 
@@ -833,14 +833,14 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
         return CGWrapper(
             CGGeneric(
                 failureCode
-                or (f'throw_type_error(cx.raw_cx(), c"{firstCap(sourceDescription)} is not an object.");\n'
+                or (f'throw_type_error(cx, c"{firstCap(sourceDescription)} is not an object.");\n'
                     f'{exceptionCode}')),
             post="\n")
 
     def onFailureNotCallable(failureCode: str | None) -> CGGeneric:
         return CGGeneric(
             failureCode
-            or (f'throw_type_error(cx.raw_cx(), c"{firstCap(sourceDescription)} is not callable.");\n'
+            or (f'throw_type_error(cx, c"{firstCap(sourceDescription)} is not callable.");\n'
                 f'{exceptionCode}'))
 
     # A helper function for handling default values.
@@ -882,7 +882,7 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
 
     # A helper function for types that implement FromJSValConvertible trait
     def fromJSValTemplate(config: str, errorHandler: str, exceptionCode: str) -> str:
-        return f"""match FromJSValConvertible::from_jsval(cx.raw_cx(), ${{val}}, {config}) {{
+        return f"""match FromJSValConvertible::from_jsval(cx, ${{val}}, {config}) {{
     Ok(ConversionResult::Success(value)) => value,
     Ok(ConversionResult::Failure(error)) => {{
         {errorHandler}
@@ -998,7 +998,7 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
         if descriptor.interface.isCallback():
             name = descriptor.nativeType
             declType = CGWrapper(CGGeneric(f"{name}<D>"), pre="Rc<", post=">")
-            template = f"{name}::new(SafeJSContext::from_ptr(cx.raw_cx()), ${{val}}.get().to_object())"
+            template = f"{name}::new(cx, ${{val}}.get().to_object())"
             if type.nullable():
                 declType = CGWrapper(declType, pre="Option<", post=">")
                 template = wrapObjectTemplate(f"Some({template})", "None",
@@ -1019,7 +1019,7 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
 
         if failureCode is None:
             unwrapFailureCode = (
-                f'throw_type_error(cx.raw_cx(), c"{sourceDescription} does not '
+                f'throw_type_error(cx, c"{sourceDescription} does not '
                 f'implement interface {descriptor.interface.identifier.name}.");\n'
                 f'{exceptionCode}')
         else:
@@ -1027,7 +1027,7 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
 
         templateBody = fill(
             """
-            match ${function}($${val}, SafeJSContext::from_ptr(cx.raw_cx())) {
+            match ${function}($${val}, cx) {
                 Ok(val) => val,
                 Err(()) => {
                     $*{failureCode}
@@ -1051,7 +1051,7 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
     if is_typed_array(type):
         if failureCode is None:
             unwrapFailureCode = (
-                f'throw_type_error(cx.raw_cx(), c"{sourceDescription} is not a typed array.");\n'
+                f'throw_type_error(cx, c"{sourceDescription} is not a typed array.");\n'
                 f'{exceptionCode}'
             )
         else:
@@ -1178,7 +1178,7 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
         # pyrefly: ignore  # missing-attribute
         enum = type.inner.identifier.name
         if invalidEnumValueFatal:
-            handleInvalidEnumValueCode = failureCode or f"throw_type_error(cx.raw_cx(), error.as_ref()); {exceptionCode}"
+            handleInvalidEnumValueCode = failureCode or f"throw_type_error(cx, error.as_ref()); {exceptionCode}"
         else:
             handleInvalidEnumValueCode = "return true;"
 
@@ -1428,7 +1428,7 @@ class CGArgumentConverter(CGThing):
         assert not argument.defaultValue or argument.optional
 
         replacementVariables = {
-            "val": f"HandleValue::from_raw({args}.get({index}))",
+            "val": f"{args}.get({index}))",
         }
 
         info = getJSToNativeConversionInfo(
@@ -1470,7 +1470,7 @@ class CGArgumentConverter(CGThing):
         else:
             assert argument.optional
             variadicConversion = {
-                "val": f"HandleValue::from_raw({args}.get(variadicArg))",
+                "val": f"{args}.get(variadicArg))",
             }
             innerConverter = [instantiateJSToNativeConversionTemplate(
                 template, variadicConversion, declType, "slot")]
@@ -1509,7 +1509,7 @@ def wrapForType(jsvalRef: str, result: str = 'result', successCode: str = 'true'
       * 'successCode': the code to run once we have done the conversion.
       * 'pre': code to run before the conversion if rooting is necessary
     """
-    wrap = f"{pre}\n({result}).to_jsval(cx.raw_cx(), {jsvalRef});"
+    wrap = f"{pre}\n({result}).to_jsval(cx, {jsvalRef});"
     if successCode:
         wrap += f"\n{successCode}"
     return wrap
@@ -2850,7 +2850,7 @@ class CGGeneric(CGThing):
 
 class CGCallbackTempRoot(CGGeneric):
     def __init__(self, name: str) -> None:
-        CGGeneric.__init__(self, f"{name.replace('<D>', '::<D>')}::new(SafeJSContext::from_ptr(cx.raw_cx()), ${{val}}.get().to_object())")
+        CGGeneric.__init__(self, f"{name.replace('<D>', '::<D>')}::new(cx, ${{val}}.get().to_object())")
 
 
 def getAllTypes(
@@ -3311,7 +3311,7 @@ def CopyLegacyUnforgeablePropertiesToInstance(descriptor: Descriptor) -> str:
     if descriptor.proxy:
         copyCode += """\
 rooted!(&in(cx) let mut expando = ptr::null_mut::<JSObject>());
-ensure_expando_object(cx.raw_cx(), obj.handle().into(), expando.handle_mut());
+ensure_expando_object(cx, obj.handle().into(), expando.handle_mut());
 """
         obj = "expando"
     else:
@@ -3329,7 +3329,7 @@ let mut slot = UndefinedValue();
 JS_GetReservedSlot(canonical_proto.get(), DOM_PROTO_UNFORGEABLE_HOLDER_SLOT, &mut slot);
 rooted!(&in(cx) let mut unforgeable_holder = ptr::null_mut::<JSObject>());
 unforgeable_holder.handle_mut().set(slot.to_object());
-assert!({copyFunc}(cx.raw_cx(), {obj}.handle(), unforgeable_holder.handle()));
+assert!({copyFunc}(cx, {obj}.handle(), unforgeable_holder.handle()));
 """
 
     return copyCode
@@ -3368,9 +3368,9 @@ let handler: *const libc::c_void =
     RegisterBindings::proxy_handlers::{self.descriptor.interface.identifier.name}
     .load(std::sync::atomic::Ordering::Acquire);
 rooted!(&in(cx) let obj = NewProxyObject(
-    cx.raw_cx(),
+    cx,
     handler,
-    Handle::from_raw(UndefinedHandleValue),
+    UndefinedHandleValue,
     {proto},
     ptr::null(),
     {lazyProto},
@@ -3387,14 +3387,14 @@ SetProxyReservedSlot(
 rooted!(&in(cx) let mut proto = ptr::null_mut::<JSObject>());
 if let Some(given) = given_proto {
     proto.set(*given);
-    if get_context_realm(cx.raw_cx()) != get_object_realm(*given) {
-        assert!(JS_WrapObject(cx.raw_cx(), proto.handle_mut()));
+    if get_context_realm(cx) != get_object_realm(*given) {
+        assert!(JS_WrapObject(cx, proto.handle_mut()));
     }
 } else {
     proto.set(*canonical_proto);
 }
 rooted!(&in(cx) let obj = JS_NewObjectWithGivenProto(
-    cx.raw_cx(),
+    cx,
     &Class.get().base,
     proto.handle(),
 ));
@@ -3418,7 +3418,7 @@ let raw = Root::new(MaybeUnreflectedDom::from_box(object));
 let scope = scope.reflector().get_jsobject();
 assert!(!scope.get().is_null());
 assert!(((*get_object_class(scope.get())).flags & JSCLASS_IS_GLOBAL) != 0);
-let _ac = JSAutoRealm::new(cx.raw_cx(), scope.get());
+let _ac = JSAutoRealm::new(cx, scope.get());
 
 rooted!(&in(cx) let mut canonical_proto = ptr::null_mut::<JSObject>());
 GetProtoObject::<D>(cx, scope, canonical_proto.handle_mut());
@@ -3480,12 +3480,12 @@ unsafe {{
     let root = raw.reflect_with(obj.get());
     root.reflector().set_proto_id(PrototypeList::ID::{name} as u16);
 
-    let _ac = JSAutoRealm::new(cx.raw_cx(), obj.get());
+    let _ac = JSAutoRealm::new(cx, obj.get());
     rooted!(&in(cx) let mut canonical_proto = ptr::null_mut::<JSObject>());
     GetProtoObject::<D>(cx, obj.handle(), canonical_proto.handle_mut());
-    assert!(JS_SetPrototype(cx.raw_cx(), obj.handle(), canonical_proto.handle()));
+    assert!(JS_SetPrototype(cx, obj.handle(), canonical_proto.handle()));
     let mut immutable = false;
-    assert!(JS_SetImmutablePrototype(cx.raw_cx(), obj.handle(), &mut immutable));
+    assert!(JS_SetImmutablePrototype(cx, obj.handle(), &mut immutable));
     assert!(immutable);
 
     {membersStr}
@@ -3716,14 +3716,14 @@ let global = incumbent_global.reflector().get_jsobject();\n"""
                     let is_satisfied = conditions.iter().any(|c|
                          c.is_satisfied::<D>(
                            cx.into(),
-                           HandleObject::from_raw(obj),
+                           obj,
                            global));
                     if is_satisfied {
                       rooted!(&in(cx) let mut temp = UndefinedValue());
-                      if !get_${name}::<D>(cx.raw_cx(), obj, this, JSJitGetterCallArgs { _base: temp.handle_mut().into() }) {
+                      if !get_${name}::<D>(cx, obj, this, JSJitGetterCallArgs { _base: temp.handle_mut().into() }) {
                         return false;
                       }
-                      if !JS_DefineProperty(cx.raw_cx(), result,
+                      if !JS_DefineProperty(cx, result,
                                             ${nameAsArray},
                                             temp.handle(), JSPROP_ENUMERATE as u32) {
                         return false;
@@ -3754,9 +3754,9 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
         name = self.descriptor.interface.identifier.name
         if self.descriptor.interface.isNamespace():
             if self.descriptor.interface.getExtendedAttribute("ProtoObjectHack"):
-                proto = "GetRealmObjectPrototype(cx.raw_cx())"
+                proto = "GetRealmObjectPrototype(cx)"
             else:
-                proto = "JS_NewPlainObject(cx.raw_cx())"
+                proto = "JS_NewPlainObject(cx)"
             if self.properties.static_methods.length():
                 methods = f"{self.properties.static_methods.variableName()}.get()"
             else:
@@ -3801,7 +3801,7 @@ assert!((*cache)[PrototypeList::Constructor::{name} as usize].is_null());
                 protoGetter = "GetRealmIteratorPrototype"
             else:
                 protoGetter = "GetRealmObjectPrototype"
-            getPrototypeProto = f"prototype_proto.set({protoGetter}(cx.raw_cx()))"
+            getPrototypeProto = f"prototype_proto.set({protoGetter}(cx))"
         else:
             getPrototypeProto = (
                 f"{toBindingNamespace(parentName)}::GetProtoObject::<D>(cx, global, prototype_proto.handle_mut())"
@@ -3876,7 +3876,7 @@ assert!((*cache)[PrototypeList::ID::{proto_properties['id']} as usize].is_null()
                 code.append(CGGeneric(f"""
 {parentName}::GetConstructorObject::<D>(cx, global, interface_proto.handle_mut());"""))
             else:
-                code.append(CGGeneric("interface_proto.set(GetRealmFunctionPrototype(cx.raw_cx()));"))
+                code.append(CGGeneric("interface_proto.set(GetRealmFunctionPrototype(cx));"))
             code.append(CGGeneric(f"""
 assert!(!interface_proto.is_null());
 
@@ -3907,7 +3907,7 @@ assert!((*cache)[PrototypeList::Constructor::{properties['id']} as usize].is_nul
         if aliasedMembers:
             def defineAlias(alias: str) -> CGThing:
                 if alias == "@@iterator":
-                    symbolJSID = "RUST_SYMBOL_TO_JSID(GetWellKnownSymbol(cx.raw_cx(), SymbolCode::iterator), \
+                    symbolJSID = "RUST_SYMBOL_TO_JSID(GetWellKnownSymbol(cx, SymbolCode::iterator), \
                                   iteratorId.handle_mut())"
                     getSymbolJSID: CGThing | None = CGGeneric(fill("rooted!(&in(cx) let mut iteratorId: jsid);\n${symbolJSID};\n",
                                                    symbolJSID=symbolJSID))
@@ -3930,7 +3930,7 @@ assert!((*cache)[PrototypeList::Constructor::{properties['id']} as usize].is_nul
                     #     match the enumerability of the property being aliased.
                     CGGeneric(fill(
                         """
-                        assert!(${defineFn}(cx.raw_cx(), prototype.handle(), ${prop}, aliasedVal.handle(), ${enumFlags}));
+                        assert!(${defineFn}(cx, prototype.handle(), ${prop}, aliasedVal.handle(), ${enumFlags}));
                         """,
                         defineFn=defineFn,
                         prop=prop,
@@ -3941,7 +3941,7 @@ assert!((*cache)[PrototypeList::Constructor::{properties['id']} as usize].is_nul
                 return CGList([
                     CGGeneric(fill(
                         """
-                        assert!(JS_GetProperty(cx.raw_cx(), prototype.handle(),
+                        assert!(JS_GetProperty(cx, prototype.handle(),
                                                ${prop} as *const u8 as *const _,
                                                aliasedVal.handle_mut()));
                         """,
@@ -3991,7 +3991,7 @@ assert!((*cache)[PrototypeList::Constructor::{properties['id']} as usize].is_nul
             code.append(CGGeneric(f"""
 rooted!(&in(cx) let mut unforgeable_holder = ptr::null_mut::<JSObject>());
 unforgeable_holder.handle_mut().set(
-    JS_NewObjectWithoutMetadata(cx.raw_cx(), {holderClass}, {holderProto}));
+    JS_NewObjectWithoutMetadata(cx, {holderClass}, {holderProto}));
 assert!(!unforgeable_holder.is_null());
 """))
             code.append(InitLegacyUnforgeablePropertiesOnHolder(self.descriptor, self.properties))
@@ -4257,9 +4257,9 @@ class CGCallGenerator(CGThing):
             args.prepend(CGGeneric("cx"))
         else:
             if "cx" not in argsPre and needsCx:
-                args.prepend(CGGeneric("SafeJSContext::from_ptr(cx.raw_cx())"))
+                args.prepend(CGGeneric("cx"))
             if nativeMethodName in descriptor.inRealmMethods:
-                args.append(CGGeneric("InRealm::already(&AlreadyInRealm::assert_for_cx(SafeJSContext::from_ptr(cx.raw_cx())))"))
+                args.append(CGGeneric("InRealm::already(&AlreadyInRealm::assert_for_cx(cx))"))
             if nativeMethodName in descriptor.canGcMethods:
                 args.append(CGGeneric("CanGc::deprecated_note()"))
         if rootType:
@@ -4297,13 +4297,13 @@ class CGCallGenerator(CGThing):
             if static:
                 glob = "global.upcast::<D::GlobalScope>()"
             else:
-                glob = "&this.global_(InRealm::already(&AlreadyInRealm::assert_for_cx(SafeJSContext::from_ptr(cx.raw_cx()))))"
+                glob = "&this.global_(InRealm::already(&AlreadyInRealm::assert_for_cx(cx)))"
 
             self.cgRoot.append(CGGeneric(
                 "let result = match result {\n"
                 "    Ok(result) => result,\n"
                 "    Err(e) => {\n"
-                f"        <D as DomHelpers<D>>::throw_dom_exception(SafeJSContext::from_ptr(cx.raw_cx()), {glob}, e, CanGc::deprecated_note());\n"
+                f"        <D as DomHelpers<D>>::throw_dom_exception(cx, {glob}, e, CanGc::deprecated_note());\n"
                 f"        return{errorResult};\n"
                 "    },\n"
                 "};"))
@@ -4410,7 +4410,7 @@ class CGPerSignatureCall(CGThing):
            not (isinstance(self.idlNode, IDLMethod) and self.idlNode.isMethod() and self.idlNode.isMaplikeOrSetlikeOrIterableMethod())):
             resultName = "retval"
         return wrapForType(
-            'MutableHandleValue::from_raw(args.rval())',
+            'args.rval())',
             result=resultName,
             successCode='return true;',
         )
@@ -4575,8 +4575,8 @@ class CGSpecializedMethod(CGAbstractExternMethod):
                                                         self.method)
         return CGWrapper(CGMethodCall([], nativeName, self.method.isStatic(),
                                       self.descriptor, self.method),
-                         pre="let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());\n"
-                             "let cx = &mut cx;\n"
+                         pre="let mut cx = *cx;\n"
+                             ""
                              f"let this = &*(this as *const {self.descriptor.concreteType});\n"
                              "let args = &*args;\n"
                              "let argc = args.argc_;\n")
@@ -4673,9 +4673,9 @@ class CGDefaultToJSONMethod(CGSpecializedMethod):
     def definition_body(self) -> CGThing:
         ret = dedent("""
             use crate::inheritance::HasParent;
-            let mut cx = JSContext::from_ptr(NonNull::new(cx).unwrap());
-            let cx = &mut cx;
-            rooted!(&in(cx) let result = JS_NewPlainObject(cx.raw_cx()));
+            let mut cx = *cx;
+            
+            rooted!(&in(cx) let result = JS_NewPlainObject(cx));
             if result.is_null() {
               return false;
             }
@@ -4718,7 +4718,7 @@ class CGStaticMethod(CGAbstractStaticBindingMethod):
     def generate_code(self) -> CGThing:
         nativeName = CGSpecializedMethod.makeNativeName(self.descriptor,
                                                         self.method)
-        safeContext = CGGeneric("let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());\nlet cx = &mut cx;\n")
+        safeContext = CGGeneric("let mut cx = *cx;\n\n")
         setupArgs = CGGeneric("let args = CallArgs::from_vp(vp, argc);\n")
         call = CGMethodCall(["&global"], nativeName, True, self.descriptor, self.method)
         return CGList([safeContext, setupArgs, call])
@@ -4744,8 +4744,8 @@ class CGSpecializedGetter(CGAbstractExternMethod):
 
         return CGWrapper(CGGetterCall([], self.attr.type, nativeName,
                                       self.descriptor, self.attr),
-                         pre="let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());\n"
-                             "let cx = &mut cx;\n"
+                         pre="let mut cx = *cx;\n"
+                             ""
                              f"let this = &*(this as *const {self.descriptor.concreteType});\n")
 
     @staticmethod
@@ -4775,7 +4775,7 @@ class CGStaticGetter(CGAbstractStaticBindingMethod):
     def generate_code(self) -> CGThing:
         nativeName = CGSpecializedGetter.makeNativeName(self.descriptor,
                                                         self.attr)
-        safeContext = CGGeneric("let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());\nlet cx = &mut cx;\n")
+        safeContext = CGGeneric("let mut cx = *cx;\n\n")
         setupArgs = CGGeneric("let args = CallArgs::from_vp(vp, argc);\n")
         call = CGGetterCall(["&global"], self.attr.type, nativeName, self.descriptor,
                             self.attr)
@@ -4801,8 +4801,8 @@ class CGSpecializedSetter(CGAbstractExternMethod):
                                                         self.attr)
         return CGWrapper(
             CGSetterCall([], self.attr.type, nativeName, self.descriptor, self.attr),
-            pre=("let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());\n"
-                 "let cx = &mut cx;\n"
+            pre=("let mut cx = *cx;\n"
+                 ""
                  f"let this = &*(this as *const {self.descriptor.concreteType});\n")
         )
 
@@ -4827,11 +4827,11 @@ class CGStaticSetter(CGAbstractStaticBindingMethod):
     def generate_code(self) -> CGThing:
         nativeName = CGSpecializedSetter.makeNativeName(self.descriptor,
                                                         self.attr)
-        safeContext = CGGeneric("let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());\nlet cx = &mut cx;\n")
+        safeContext = CGGeneric("let mut cx = *cx;\n\n")
         checkForArg = CGGeneric(
             "let args = CallArgs::from_vp(vp, argc);\n"
             "if argc == 0 {\n"
-            f'    throw_type_error(cx.raw_cx(), c"Not enough arguments to {self.attr.identifier.name} setter.");\n'
+            f'    throw_type_error(cx, c"Not enough arguments to {self.attr.identifier.name} setter.");\n'
             "    return false;\n"
             "}")
         call = CGSetterCall(["&global"], self.attr.type, nativeName, self.descriptor,
@@ -4855,18 +4855,18 @@ class CGSpecializedForwardingSetter(CGSpecializedSetter):
         assert all(ord(c) < 128 for c in attrName)
         assert all(ord(c) < 128 for c in forwardToAttrName)
         return CGGeneric(f"""
-let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());
-let cx = &mut cx;
+let mut cx = *cx;
+
 rooted!(&in(cx) let mut v = UndefinedValue());
-if !JS_GetProperty(cx.raw_cx(), HandleObject::from_raw(obj), {str_to_cstr_ptr(attrName)}, v.handle_mut()) {{
+if !JS_GetProperty(cx, obj, {str_to_cstr_ptr(attrName)}, v.handle_mut()) {{
     return false;
 }}
 if !v.is_object() {{
-    throw_type_error(cx.raw_cx(), c"Value.{attrName} is not an object.");
+    throw_type_error(cx, c"Value.{attrName} is not an object.");
     return false;
 }}
 rooted!(&in(cx) let target_obj = v.to_object());
-JS_SetProperty(cx.raw_cx(), target_obj.handle(), {str_to_cstr_ptr(forwardToAttrName)}, HandleValue::from_raw(args.get(0)))
+JS_SetProperty(cx, target_obj.handle(), {str_to_cstr_ptr(forwardToAttrName)}, args.get(0)))
 """)
 
 
@@ -4883,8 +4883,8 @@ class CGSpecializedReplaceableSetter(CGSpecializedSetter):
         # JS_DefineProperty can only deal with ASCII.
         assert all(ord(c) < 128 for c in name)
         return CGGeneric(f"""
-JS_DefineProperty(cx, HandleObject::from_raw(obj), {name},
-                  HandleValue::from_raw(args.get(0)), JSPROP_ENUMERATE as u32)""")
+JS_DefineProperty(cx, obj, {name},
+                  args.get(0)), JSPROP_ENUMERATE as u32)""")
 
 
 class CGMemberJITInfo(CGThing):
@@ -5632,7 +5632,7 @@ class CGUnionConversionStruct(CGThing):
         def get_match(name: str) -> str:
             generic = "::<D>" if containsDomInterface(self.type) else ""
             return (
-                f"match {self.type}{generic}::TryConvertTo{name}(SafeJSContext::from_ptr(cx), value) {{\n"
+                f"match {self.type}{generic}::TryConvertTo{name}(cx, value) {{\n"
                 "    Err(_) => return Err(()),\n"
                 f"    Ok(Some(value)) => return Ok(ConversionResult::Success({self.type}::{name}(value))),\n"
                 "    Ok(None) => (),\n"
@@ -6243,7 +6243,7 @@ class CGProxyNamedOperation(CGProxySpecialOperation):
     def define(self) -> str:
         # Our first argument is the id we're getting.
         argName = self.arguments[0].identifier.name
-        return (f'let {argName} = jsid_to_string(cx.raw_cx(), Handle::from_raw(id)).expect("Not a string-convertible JSID?");\n'
+        return (f'let {argName} = jsid_to_string(cx, id).expect("Not a string-convertible JSID?");\n'
                 "let this = UnwrapProxy::<D>(proxy);\n"
                 "let this = &*this;\n"
                 f"{CGProxySpecialOperation.define(self)}")
@@ -6287,10 +6287,10 @@ class CGProxyNamedDeleter(CGProxyNamedOperation):
         # Our first argument is the id we're getting.
         argName = self.arguments[0].identifier.name
         return ("if !id.is_symbol() {\n"
-                f'    let {argName} = match jsid_to_string(cx.raw_cx(), Handle::from_raw(id)) {{\n'
+                f'    let {argName} = match jsid_to_string(cx, id) {{\n'
                 "        Some(val) => val,\n"
                 "        None => {\n"
-                "            throw_type_error(cx.raw_cx(), c\"Not a string-convertible JSID\");\n"
+                "            throw_type_error(cx, c\"Not a string-convertible JSID\");\n"
                 "            return false;\n"
                 "        }\n"
                 "    };\n"
@@ -6330,9 +6330,9 @@ class CGDOMJSProxyHandler_getOwnPropertyDescriptor(CGAbstractExternMethod):
     def getBody(self) -> str:
         indexedGetter = self.descriptor.operations['IndexedGetter']
 
-        get = "let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());\n"
-        get += "let mut cx = CurrentRealm::assert(&mut cx);\n"
-        get += "let cx = &mut cx;\n"
+        get = "let mut cx = *cx;\n"
+        get += "// CurrentRealm passthrough\n"
+        get += ""
 
         if self.descriptor.isMaybeCrossOriginObject():
             get += dedent(
@@ -6350,18 +6350,18 @@ class CGDOMJSProxyHandler_getOwnPropertyDescriptor(CGAbstractExternMethod):
                 }
 
                 // Safe to enter the Realm of proxy now.
-                let mut cx = AutoRealm::new_from_handle(cx, Handle::from_raw(proxy));
-                let cx = &mut cx;
+                let mut cx = AutoRealm::new_from_handle(cx, proxy);
+                
                 """)
 
         if indexedGetter:
-            get += "let index = get_array_index_from_id(Handle::from_raw(id));\n"
+            get += "let index = get_array_index_from_id(id);\n"
 
             attrs = "JSPROP_ENUMERATE"
             if self.descriptor.operations['IndexedSetter'] is None:
                 attrs += " | JSPROP_READONLY"
             fillDescriptor = ("set_property_descriptor(\n"
-                              "    MutableHandle::from_raw(desc),\n"
+                              "    desc,\n"
                               "    rval.handle(),\n"
                               f"    ({attrs}) as u32,\n"
                               "    &mut *is_none\n"
@@ -6389,7 +6389,7 @@ class CGDOMJSProxyHandler_getOwnPropertyDescriptor(CGAbstractExternMethod):
             else:
                 attrs = "0"
             fillDescriptor = ("set_property_descriptor(\n"
-                              "    MutableHandle::from_raw(desc),\n"
+                              "    desc,\n"
                               "    rval.handle(),\n"
                               f"    ({attrs}) as u32,\n"
                               "    &mut *is_none\n"
@@ -6411,7 +6411,7 @@ class CGDOMJSProxyHandler_getOwnPropertyDescriptor(CGAbstractExternMethod):
             namedGet = f"""
 if {condition} {{
     let mut has_on_proto = false;
-    if !has_property_on_prototype(cx.raw_cx(), proxy_lt, id_lt, &mut has_on_proto) {{
+    if !has_property_on_prototype(cx, proxy_lt, id_lt, &mut has_on_proto) {{
         return false;
     }}
     if !has_on_proto {{
@@ -6426,11 +6426,11 @@ if {condition} {{
 rooted!(&in(cx) let mut expando = ptr::null_mut::<JSObject>());
 get_expando_object(proxy, expando.handle_mut());
 //if (!xpc::WrapperFactory::IsXrayWrapper(proxy) && (expando = GetExpandoObject(proxy))) {{
-let proxy_lt = Handle::from_raw(proxy);
-let id_lt = Handle::from_raw(id);
+let proxy_lt = proxy;
+let id_lt = id;
 if !expando.is_null() {{
     rooted!(&in(cx) let mut ignored = ptr::null_mut::<JSObject>());
-    if !JS_GetPropertyDescriptorById(cx.raw_cx(), expando.handle().into(), id, desc, ignored.handle_mut().into(), is_none) {{
+    if !JS_GetPropertyDescriptorById(cx, expando.handle().into(), id, desc, ignored.handle_mut().into(), is_none) {{
         return false;
     }}
     if !*is_none {{
@@ -6455,9 +6455,9 @@ class CGDOMJSProxyHandler_defineProperty(CGAbstractExternMethod):
         self.descriptor = descriptor
 
     def getBody(self) -> str:
-        set = "let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());\n"
-        set += "let mut cx = CurrentRealm::assert(&mut cx);\n"
-        set += "let cx = &mut cx;\n"
+        set = "let mut cx = *cx;\n"
+        set += "// CurrentRealm passthrough\n"
+        set += ""
 
 
         if self.descriptor.isMaybeCrossOriginObject():
@@ -6468,13 +6468,13 @@ class CGDOMJSProxyHandler_defineProperty(CGAbstractExternMethod):
                 }
 
                 // Safe to enter the Realm of proxy now.
-                let mut cx = AutoRealm::new_from_handle(cx, Handle::from_raw(proxy));
-                let cx = &mut cx;
+                let mut cx = AutoRealm::new_from_handle(cx, proxy);
+                
                 """)
 
         indexedSetter = self.descriptor.operations['IndexedSetter']
         if indexedSetter:
-            set += ("let index = get_array_index_from_id(Handle::from_raw(id));\n"
+            set += ("let index = get_array_index_from_id(id);\n"
                     "if let Some(index) = index {\n"
                     "    let this = UnwrapProxy::<D>(proxy);\n"
                     "    let this = &*this;\n"
@@ -6482,7 +6482,7 @@ class CGDOMJSProxyHandler_defineProperty(CGAbstractExternMethod):
                     "    return (*opresult).succeed();\n"
                     "}\n")
         elif self.descriptor.operations['IndexedGetter']:
-            set += ("if get_array_index_from_id(Handle::from_raw(id)).is_some() {\n"
+            set += ("if get_array_index_from_id(id).is_some() {\n"
                     "    return (*opresult).failNoIndexedSetter();\n"
                     "}\n")
 
@@ -6502,7 +6502,7 @@ class CGDOMJSProxyHandler_defineProperty(CGAbstractExternMethod):
                     "        return (*opresult).fail_no_named_setter();\n"
                     "    }\n"
                     "}\n")
-        set += f"return proxyhandler::define_property(cx.raw_cx(), {', '.join(a.name for a in self.args[1:])});"
+        set += f"return proxyhandler::define_property(cx, {', '.join(a.name for a in self.args[1:])});"
         return set
 
     def definition_body(self) -> CGThing:
@@ -6518,9 +6518,9 @@ class CGDOMJSProxyHandler_delete(CGAbstractExternMethod):
         self.descriptor = descriptor
 
     def getBody(self) -> str:
-        set = "let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());\n"
-        set += "let mut cx = CurrentRealm::assert(&mut cx);\n"
-        set += "let cx = &mut cx;\n"
+        set = "let mut cx = *cx;\n"
+        set += "// CurrentRealm passthrough\n"
+        set += ""
 
         if self.descriptor.isMaybeCrossOriginObject():
             set += dedent(
@@ -6530,8 +6530,8 @@ class CGDOMJSProxyHandler_delete(CGAbstractExternMethod):
                 }
 
                 // Safe to enter the Realm of proxy now.
-                let mut cx = AutoRealm::new_from_handle(cx, Handle::from_raw(proxy));
-                let cx = &mut cx;
+                let mut cx = AutoRealm::new_from_handle(cx, proxy);
+                
                 """)
 
         if self.descriptor.operations['NamedDeleter']:
@@ -6539,7 +6539,7 @@ class CGDOMJSProxyHandler_delete(CGAbstractExternMethod):
                 raise TypeError("Can't handle a deleter on an interface that has "
                                 "unforgeables. Figure out how that should work!")
             set += CGProxyNamedDeleter(self.descriptor).define()
-        set += f"return proxyhandler::delete(cx.raw_cx(), {', '.join(a.name for a in self.args[1:])});"
+        set += f"return proxyhandler::delete(cx, {', '.join(a.name for a in self.args[1:])});"
         return set
 
     def definition_body(self) -> CGThing:
@@ -6558,9 +6558,9 @@ class CGDOMJSProxyHandler_ownPropertyKeys(CGAbstractExternMethod):
     def getBody(self) -> str:
         body = dedent(
             """
-            let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());
-            let mut cx = CurrentRealm::assert(&mut cx);
-            let cx = &mut cx;
+            let mut cx = *cx;
+            // CurrentRealm passthrough
+            
             let unwrapped_proxy = UnwrapProxy::<D>(proxy);
             """)
 
@@ -6574,8 +6574,8 @@ class CGDOMJSProxyHandler_ownPropertyKeys(CGAbstractExternMethod):
                 }
 
                 // Safe to enter the Realm of proxy now.
-                let mut cx = AutoRealm::new_from_handle(cx, Handle::from_raw(proxy));
-                let cx = &mut cx;
+                let mut cx = AutoRealm::new_from_handle(cx, proxy);
+                
                 """)
 
         if self.descriptor.operations['IndexedGetter']:
@@ -6597,10 +6597,10 @@ class CGDOMJSProxyHandler_ownPropertyKeys(CGAbstractExternMethod):
                 """
                 for name in (*unwrapped_proxy).SupportedPropertyNames() {
                     let cstring = CString::new(name).unwrap();
-                    let jsstring = JS_AtomizeAndPinString(cx.raw_cx(), cstring.as_ptr());
+                    let jsstring = JS_AtomizeAndPinString(cx, cstring.as_ptr());
                     rooted!(&in(cx) let rooted = jsstring);
                     rooted!(&in(cx) let mut rooted_jsid: jsid);
-                    RUST_INTERNED_STRING_TO_JSID(cx.raw_cx(), rooted.handle().get(), rooted_jsid.handle_mut());
+                    RUST_INTERNED_STRING_TO_JSID(cx, rooted.handle().get(), rooted_jsid.handle_mut());
                     AppendToIdVector(props, rooted_jsid.handle());
                 }
                 """)
@@ -6610,7 +6610,7 @@ class CGDOMJSProxyHandler_ownPropertyKeys(CGAbstractExternMethod):
             rooted!(&in(cx) let mut expando = ptr::null_mut::<JSObject>());
             get_expando_object(proxy, expando.handle_mut());
             if !expando.is_null() &&
-                !GetPropertyKeys(cx.raw_cx(), expando.handle(), JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS, props) {
+                !GetPropertyKeys(cx, expando.handle(), JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS, props) {
                 return false;
             }
 
@@ -6638,10 +6638,10 @@ class CGDOMJSProxyHandler_getOwnEnumerablePropertyKeys(CGAbstractExternMethod):
     def getBody(self) -> str:
         body = dedent(
             """
-            let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());
+            let mut cx = *cx;
             let unwrapped_proxy = UnwrapProxy::<D>(proxy);
-            let mut cx = CurrentRealm::assert(&mut cx);
-            let cx = &mut cx;
+            // CurrentRealm passthrough
+            
             """)
 
         if self.descriptor.isMaybeCrossOriginObject():
@@ -6653,8 +6653,8 @@ class CGDOMJSProxyHandler_getOwnEnumerablePropertyKeys(CGAbstractExternMethod):
                 }
 
                 // Safe to enter the Realm of proxy now.
-                let mut cx = AutoRealm::new_from_handle(cx, Handle::from_raw(proxy));
-                let cx = &mut cx;
+                let mut cx = AutoRealm::new_from_handle(cx, proxy);
+                
                 """)
 
         if self.descriptor.operations['IndexedGetter']:
@@ -6676,7 +6676,7 @@ class CGDOMJSProxyHandler_getOwnEnumerablePropertyKeys(CGAbstractExternMethod):
             rooted!(&in(cx) let mut expando = ptr::null_mut::<JSObject>());
             get_expando_object(proxy, expando.handle_mut());
             if !expando.is_null() &&
-                !GetPropertyKeys(cx.raw_cx(), expando.handle(), JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS, props) {
+                !GetPropertyKeys(cx, expando.handle(), JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS, props) {
                 return false;
             }
 
@@ -6699,9 +6699,9 @@ class CGDOMJSProxyHandler_hasOwn(CGAbstractExternMethod):
     def getBody(self) -> str:
         indexedGetter = self.descriptor.operations['IndexedGetter']
         indexed = dedent("""
-                         let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());
-                         let mut cx = CurrentRealm::assert(&mut cx);
-                         let cx = &mut cx;
+                         let mut cx = *cx;
+                         // CurrentRealm passthrough
+                         
                          """)
 
         if self.descriptor.isMaybeCrossOriginObject():
@@ -6714,12 +6714,12 @@ class CGDOMJSProxyHandler_hasOwn(CGAbstractExternMethod):
                 }
 
                 // Safe to enter the Realm of proxy now.
-                let mut cx = AutoRealm::new_from_handle(cx, Handle::from_raw(proxy));
-                let cx = &mut cx;
+                let mut cx = AutoRealm::new_from_handle(cx, proxy);
+                
                 """)
 
         if indexedGetter:
-            indexed += ("let index = get_array_index_from_id(Handle::from_raw(id));\n"
+            indexed += ("let index = get_array_index_from_id(id);\n"
                         "if let Some(index) = index {\n"
                         "    let this = UnwrapProxy::<D>(proxy);\n"
                         "    let this = &*this;\n"
@@ -6735,7 +6735,7 @@ class CGDOMJSProxyHandler_hasOwn(CGAbstractExternMethod):
             named = f"""
 if {condition} {{
     let mut has_on_proto = false;
-    if !has_property_on_prototype(cx.raw_cx(), proxy_lt, id_lt, &mut has_on_proto) {{
+    if !has_property_on_prototype(cx, proxy_lt, id_lt, &mut has_on_proto) {{
         return false;
     }}
     if !has_on_proto {{
@@ -6751,11 +6751,11 @@ if {condition} {{
 
         return f"""{indexed}\
 rooted!(&in(cx) let mut expando = ptr::null_mut::<JSObject>());
-let proxy_lt = Handle::from_raw(proxy);
-let id_lt = Handle::from_raw(id);
+let proxy_lt = proxy;
+let id_lt = id;
 get_expando_object(proxy, expando.handle_mut());
 if !expando.is_null() {{
-    let ok = JS_HasPropertyById(cx.raw_cx(), expando.handle().into(), id, bp);
+    let ok = JS_HasPropertyById(cx, expando.handle().into(), id, bp);
     if !ok || *bp {{
         return ok;
     }}
@@ -6786,8 +6786,8 @@ class CGDOMJSProxyHandler_get(CGAbstractExternMethod):
                 }
 
                 // Safe to enter the Realm of proxy now.
-                let mut cx = AutoRealm::new_from_handle(cx, Handle::from_raw(proxy));
-                let cx = &mut cx;
+                let mut cx = AutoRealm::new_from_handle(cx, proxy);
+                
                 """)
         else:
             maybeCrossOriginGet = ""
@@ -6796,12 +6796,12 @@ rooted!(&in(cx) let mut expando = ptr::null_mut::<JSObject>());
 get_expando_object(proxy, expando.handle_mut());
 if !expando.is_null() {
     let mut hasProp = false;
-    if !JS_HasPropertyById(cx.raw_cx(), expando.handle().into(), id, &mut hasProp) {
+    if !JS_HasPropertyById(cx, expando.handle().into(), id, &mut hasProp) {
         return false;
     }
 
     if hasProp {
-        return JS_ForwardGetPropertyTo(cx.raw_cx(), expando.handle().into(), id, receiver, vp);
+        return JS_ForwardGetPropertyTo(cx, expando.handle().into(), id, receiver, vp);
     }
 }"""
 
@@ -6844,20 +6844,20 @@ if !expando.is_null() {
         return f"""
 //MOZ_ASSERT(!xpc::WrapperFactory::IsXrayWrapper(proxy),
 //"Should not have a XrayWrapper here");
-let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());
-let mut cx = CurrentRealm::assert(&mut cx);
-let cx = &mut cx;
+let mut cx = *cx;
+// CurrentRealm passthrough
+
 
 {maybeCrossOriginGet}
 
-let proxy_lt = Handle::from_raw(proxy);
-let mut vp_lt = MutableHandle::from_raw(vp);
-let id_lt = Handle::from_raw(id);
-let receiver_lt = Handle::from_raw(receiver);
+let proxy_lt = proxy;
+let mut vp_lt = vp;
+let id_lt = id;
+let receiver_lt = receiver;
 
 {getIndexedOrExpando}
 let mut found = false;
-if !get_property_on_prototype(cx.raw_cx(), proxy_lt, receiver_lt, id_lt, &mut found, vp_lt.reborrow()) {{
+if !get_property_on_prototype(cx, proxy_lt, receiver_lt, id_lt, &mut found, vp_lt.reborrow()) {{
     return false;
 }}
 
@@ -6883,8 +6883,8 @@ class CGDOMJSProxyHandler_getPrototype(CGAbstractExternMethod):
     def getBody(self) -> str:
         return dedent(
             """
-            let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());
-            let mut realm = CurrentRealm::assert(&mut cx);
+            let mut cx = *cx;
+            // CurrentRealm passthrough
             proxyhandler::maybe_cross_origin_get_prototype::<D>(&mut realm, proxy, GetProtoObject::<D>, proto)
             """)
 
@@ -6974,10 +6974,10 @@ class CGClassConstructHook(CGAbstractExternMethod):
         self.exposureSet = descriptor.interface.exposureSet
 
     def definition_body(self) -> CGThing:
-        preamble = """let mut cx = JSContext::from_ptr(ptr::NonNull::new(cx).unwrap());
-let cx = &mut cx;
+        preamble = """let mut cx = *cx;
+
 let args = CallArgs::from_vp(vp, argc);
-let global = D::GlobalScope::from_object(JS_CALLEE(cx.raw_cx(), vp).to_object());
+let global = D::GlobalScope::from_object(JS_CALLEE(cx, vp).to_object());
 """
         if self.constructor.isHTMLConstructor():
             signatures = self.constructor.signatures()
@@ -7755,7 +7755,7 @@ impl{self.generic} Clone for {self.makeClassName(self.dictionary)}{self.genericS
                 f"    match {self.makeModuleName(d.parent)}::{self.makeClassName(d.parent)}::new(cx, val, can_gc)? {{\n"
                 "        ConversionResult::Success(v) => v,\n"
                 "        ConversionResult::Failure(error) => {\n"
-                "            throw_type_error(cx.raw_cx(), error.as_ref());\n"
+                "            throw_type_error(cx, error.as_ref());\n"
                 "            return Err(());\n"
                 "        }\n"
                 "    }\n"
@@ -7774,7 +7774,7 @@ impl{self.generic} Clone for {self.makeClassName(self.dictionary)}{self.genericS
             insertion = (
                 f"rooted!(in(cx) let mut {varName}_js = UndefinedValue());\n"
                 f"{varName}.to_jsval(cx, {varName}_js.handle_mut());\n"
-                f'set_dictionary_property(SafeJSContext::from_ptr(cx), obj.handle(), c"{dictionaryName}", {varName}_js.handle()).unwrap();')
+                f'set_dictionary_property(cx, obj.handle(), c"{dictionaryName}", {varName}_js.handle()).unwrap();')
             return CGGeneric(insertion)
 
         def memberInsert(memberInfo: tuple[IDLArgument, JSToNativeConversionInfo]) -> CGThing:
@@ -7835,7 +7835,7 @@ impl{self.generic} Clone for {self.makeClassName(self.dictionary)}{self.genericS
             "    type Config = ();\n"
             "    unsafe fn from_jsval(cx: *mut RawJSContext, value: HandleValue, _option: ())\n"
             f"                         -> Result<ConversionResult<{actualType}>, ()> {{\n"
-            f"        {selfName}::new(SafeJSContext::from_ptr(cx), value, CanGc::deprecated_note())\n"
+            f"        {selfName}::new(cx, value, CanGc::deprecated_note())\n"
             "    }\n"
             "}\n"
             "\n"
@@ -7893,7 +7893,7 @@ impl{self.generic} Clone for {self.makeClassName(self.dictionary)}{self.genericS
         assert (member.defaultValue is None) == (default is None)
         if not member.optional:
             assert default is None
-            default = (f'throw_type_error(cx.raw_cx(), c"Missing required member \\"{member.identifier.name}\\".");\n'
+            default = (f'throw_type_error(cx, c"Missing required member \\"{member.identifier.name}\\".");\n'
                        "return Err(());")
         elif not default:
             default = "None"
@@ -7902,7 +7902,7 @@ impl{self.generic} Clone for {self.makeClassName(self.dictionary)}{self.genericS
         conversion = (
             "{\n"
             "    rooted!(&in(cx) let mut rval = UndefinedValue());\n"
-            "    if get_dictionary_property(cx.raw_cx(), object.handle(), "
+            "    if get_dictionary_property(cx, object.handle(), "
             f'c"{member.identifier.name}", '
             "rval.handle_mut(), can_gc)? && !rval.is_undefined() {\n"
             f"{indent(conversion)}\n"
@@ -8903,7 +8903,7 @@ class CallbackMethod(CallbackMember):
         return (f"{self.getCallableDecl()}"
                 f"rooted!(&in(cx) let rootedThis = {self.getThisObj()});\n"
                 f"let ok = {self.getCallGuard()}Call(\n"
-                "    cx.raw_cx(), rootedThis.handle(), callable.handle(),\n"
+                "    cx, rootedThis.handle(), callable.handle(),\n"
                 "    &HandleValueArray {\n"
                 f"        length_: {argc} as ::libc::size_t,\n"
                 f"        elements_: {argv}\n"
@@ -9061,7 +9061,7 @@ class CGIterableMethodGenerator(CGGeneric):
             CGGeneric.__init__(self, fill(
                 """
                 if !IsCallable(arg0) {
-                  throw_type_error(cx.raw_cx(), c"Argument 1 of ${ifaceName}.forEach is not callable.");
+                  throw_type_error(cx, c"Argument 1 of ${ifaceName}.forEach is not callable.");
                   return false;
                 }
                 rooted!(&in(cx) let arg0 = ObjectValue(arg0));
@@ -9082,12 +9082,12 @@ class CGIterableMethodGenerator(CGGeneric):
                 // https://heycam.github.io/webidl/#es-forEach
                 let mut i = 0;
                 while i < (*this).get_iterable_length() {
-                  (*this).get_value_at_index(i).to_jsval(cx.raw_cx(), call_arg1.handle_mut());
-                  (*this).get_key_at_index(i).to_jsval(cx.raw_cx(), call_arg2.handle_mut());
+                  (*this).get_value_at_index(i).to_jsval(cx, call_arg1.handle_mut());
+                  (*this).get_key_at_index(i).to_jsval(cx, call_arg2.handle_mut());
                   call_args.set_index(0, call_arg1.handle().get());
                   call_args.set_index(1, call_arg2.handle().get());
                   let call_args_handle = HandleValueArray::from(&call_args);
-                  if !Call(cx.raw_cx(), arg1, arg0.handle(), &call_args_handle,
+                  if !Call(cx, arg1, arg0.handle(), &call_args_handle,
                            ignoredReturnVal.handle_mut()) {
                     return false;
                   }
@@ -9101,7 +9101,7 @@ class CGIterableMethodGenerator(CGGeneric):
             return
         CGGeneric.__init__(self, fill(
             """
-            let realm = AlreadyInRealm::assert_for_cx(SafeJSContext::from_ptr(cx.raw_cx()));
+            let realm = AlreadyInRealm::assert_for_cx(cx);
             let result = ${iterClass}::new(this, IteratorType::${itrMethod}, InRealm::already(&realm));
             """,
             iterClass=iteratorNativeType(descriptor, True),

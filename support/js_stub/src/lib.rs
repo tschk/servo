@@ -52,13 +52,41 @@ pub mod glue {
 
     #[repr(C)]
     pub struct ProxyTraps {
-        pub getPropertyDescriptor: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, jsapi::jsid, *mut jsapi::JSVal) -> bool>,
-        pub defineProperty: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, jsapi::jsid, *const jsapi::PropertyDescriptor, *mut jsapi::ObjectOpResult) -> bool>,
-        pub ownPropertyKeys: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut jsapi::JSVal) -> bool>,
+        pub enter: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject) -> bool>,
+        pub getPropertyDescriptor: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *const jsapi::jsid, *mut jsapi::JSVal) -> bool>,
+        pub getOwnPropertyDescriptor: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *const jsapi::jsid, *mut jsapi::PropertyDescriptor) -> bool>,
+        pub defineProperty: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *const jsapi::jsid, *const jsapi::PropertyDescriptor, *mut jsapi::ObjectOpResult) -> bool>,
+        pub ownPropertyKeys: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut *const jsapi::jsid) -> bool>,
+        pub delete_: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *const jsapi::jsid, *mut jsapi::ObjectOpResult) -> bool>,
+        pub enumerate: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut jsapi::ObjectOpResult) -> bool>,
+        pub getPrototypeIfOrdinary: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut bool, *mut *mut jsapi::JSObject) -> bool>,
+        pub getPrototype: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut *mut jsapi::JSObject) -> bool>,
+        pub setPrototype: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut jsapi::JSObject, *mut jsapi::ObjectOpResult) -> bool>,
+        pub setImmutablePrototype: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut bool) -> bool>,
+        pub preventExtensions: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut jsapi::ObjectOpResult) -> bool>,
+        pub isExtensible: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut bool) -> bool>,
+        pub has: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *const jsapi::jsid, *mut bool) -> bool>,
+        pub get: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *const jsapi::jsid, *mut jsapi::JSVal) -> bool>,
+        pub set: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *const jsapi::jsid, *mut jsapi::JSVal, *mut jsapi::JSVal, *mut jsapi::ObjectOpResult) -> bool>,
+        pub call: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *const jsapi::JSVal, *mut jsapi::JSVal) -> bool>,
+        pub construct: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *const jsapi::JSVal, *mut jsapi::JSVal) -> bool>,
+        pub hasOwn: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *const jsapi::jsid, *mut bool) -> bool>,
+        pub getOwnEnumerablePropertyKeys: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut *const jsapi::jsid) -> bool>,
+        pub nativeCall: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, bool, *const jsapi::JSVal, *mut jsapi::JSVal) -> bool>,
+        pub objectClassIs: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, u32, *mut bool) -> bool>,
+        pub className: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject) -> *const u8>,
+        pub fun_toString: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, bool) -> *mut jsapi::JSString>,
+        pub boxedValue_unbox: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut jsapi::JSVal) -> bool>,
+        pub defaultValue: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, u32, *mut jsapi::JSVal) -> bool>,
+        pub trace: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject, *mut jsapi::JSTracer)>,
+        pub finalize: Option<unsafe extern "C" fn(*mut jsapi::JSContext, *mut jsapi::JSObject)>,
+        pub objectMoved: Option<unsafe extern "C" fn(*mut jsapi::JSObject, *const jsapi::JSObject)>,
+        pub isCallable: Option<unsafe extern "C" fn(*mut jsapi::JSObject) -> bool>,
+        pub isConstructor: Option<unsafe extern "C" fn(*mut jsapi::JSObject) -> bool>,
     }
 
-    pub fn CreateProxyHandler(_traps: &ProxyTraps) -> *mut std::ffi::c_void { ptr::null_mut() }
-    pub fn GetProxyReservedSlot(_proxy: *mut jsapi::JSObject, _slot: u32) -> jsapi::JSVal { ptr::null_mut() }
+    pub fn CreateProxyHandler(_traps: &ProxyTraps, _extra: *const std::ffi::c_void) -> *mut std::ffi::c_void { ptr::null_mut() }
+    pub fn GetProxyReservedSlot(_proxy: *mut jsapi::JSObject, _slot: u32, _out: *mut jsapi::JSVal) {}
     pub fn JS_GetReservedSlot(_obj: *mut jsapi::JSObject, _slot: u32) -> jsapi::JSVal { ptr::null_mut() }
     pub fn SetProxyReservedSlot(_proxy: *mut jsapi::JSObject, _slot: u32, _val: jsapi::JSVal) {}
 
@@ -91,7 +119,14 @@ pub mod jsapi {
     pub type JSRuntime = *mut std::ffi::c_void;
     pub type JSPrincipals = std::ffi::c_void;
     pub type JSClass = JSClassDef;
-    pub type jsid = u64;
+    #[derive(Copy, Clone, PartialEq, Eq)]
+    #[repr(transparent)]
+    pub struct jsid(pub u64);
+    impl std::ops::Deref for jsid { type Target = u64; fn deref(&self) -> &u64 { &self.0 } }
+    impl std::fmt::Debug for jsid { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "jsid({})", self.0) } }
+    impl From<u64> for jsid { fn from(v: u64) -> jsid { jsid(v) } }
+    impl From<*const jsid> for jsid { fn from(p: *const jsid) -> jsid { unsafe { *p } } }
+    impl From<&jsid> for *const jsid { fn from(p: &jsid) -> *const jsid { p as *const jsid } }
     pub type JSVal = *mut std::ffi::c_void;
     pub type JSAutoRealm = *mut std::ffi::c_void;
     pub type JSAutoCompartment = *mut std::ffi::c_void;
@@ -117,7 +152,38 @@ pub mod jsapi {
     pub type MutableHandleObject<'a> = MutableHandle<'a, JSObject>;
     pub type MutableHandleValue<'a> = MutableHandle<'a, JSVal>;
     pub fn UndefinedHandleValue() -> *const JSVal { std::ptr::null() }
-    pub type CallArgs = *mut std::ffi::c_void;
+    #[derive(Copy, Clone)]
+    #[repr(C)]
+    pub struct CallArgs {
+        pub argc_: u32,
+        _constructing_: bool,
+        _pad_: [u8; 3],
+        argv_: *const JSVal,
+        rval_: *mut JSVal,
+    }
+    impl CallArgs {
+        pub unsafe fn from_vp(vp: *mut JSVal, argc: u32) -> Self {
+            CallArgs {
+                argc_: argc,
+                _constructing_: false,
+                _pad_: [0u8; 3],
+                // In SM, vp points to rval_, and argv_ follows after this/callee
+                argv_: vp.offset(2),
+                rval_: vp,
+            }
+        }
+        pub fn get(&self, index: u32) -> JSVal {
+            if (index as usize) < self.argc_ as usize {
+                unsafe { *self.argv_.offset(index as isize) }
+            } else {
+                std::ptr::null_mut()
+            }
+        }
+        pub fn rval(&self) -> *mut JSVal {
+            self.rval_
+        }
+        pub fn is_constructing(&self) -> bool { false }
+    }
     pub type ObjectOpResult = *mut std::ffi::c_void;
 
     pub struct PropertyDescriptor {
@@ -176,14 +242,25 @@ pub mod jsapi {
     pub type JSJitSetterCallArgs = *mut std::ffi::c_void;
 
     #[repr(C)]
-    pub struct JSJitInfo__bindgen_ty_1 { pub _unused: [u8; 0] }
+    pub struct JSJitInfo__bindgen_ty_1 {
+        pub method: Option<unsafe extern "C" fn(*mut JSContext, u32, *mut JSVal) -> bool>,
+        pub getter: Option<unsafe extern "C" fn(*mut JSContext, u32, *mut JSVal) -> bool>,
+        pub setter: Option<unsafe extern "C" fn(*mut JSContext, u32, *mut JSVal) -> bool>,
+    }
     #[repr(C)]
-    pub struct JSJitInfo__bindgen_ty_2 { pub _unused: [u8; 0] }
+    pub struct JSJitInfo__bindgen_ty_2 {
+        pub protoID: u16,
+    }
     #[repr(C)]
-    pub struct JSJitInfo__bindgen_ty_3 { pub _unused: [u8; 0] }
+    pub struct JSJitInfo__bindgen_ty_3 {
+        pub depth: u16,
+    }
 
     #[repr(C)]
     pub struct JSJitInfo {
+        pub __bindgen_anon_1: JSJitInfo__bindgen_ty_1,
+        pub __bindgen_anon_2: JSJitInfo__bindgen_ty_2,
+        pub __bindgen_anon_3: JSJitInfo__bindgen_ty_3,
         pub _bitfield_align_1: [u8; 0],
         pub _bitfield_1: __BindgenBitfieldUnit<[u8; 4usize]>,
     }
@@ -353,9 +430,9 @@ pub mod jsapi {
     pub fn GetRealmIteratorPrototype(_cx: *mut JSContext) -> JSObject { ptr::null_mut() }
     pub fn GetRealmObjectPrototype(_cx: *mut JSContext) -> JSObject { ptr::null_mut() }
     pub fn JS_AtomizeAndPinString(_cx: *mut JSContext, _s: *const u8) -> *mut JSString { ptr::null_mut() }
-    pub fn JS_ForwardGetPropertyTo(_cx: *mut JSContext, _obj: *mut JSObject, _id: jsid, _receiver: *mut JSObject, _vp: *mut JSVal) -> bool { false }
-    pub fn JS_GetPropertyDescriptorById(_cx: *mut JSContext, _obj: *mut JSObject, _id: jsid, _desc: *mut PropertyDescriptor) -> bool { false }
-    pub fn JS_HasPropertyById(_cx: *mut JSContext, _obj: *mut JSObject, _id: jsid, _found: *mut bool) -> bool { false }
+    pub fn JS_ForwardGetPropertyTo(_cx: *mut JSContext, _obj: *mut JSObject, _id: impl Into<jsid>, _receiver: *mut JSObject, _vp: *mut JSVal) -> bool { false }
+    pub fn JS_GetPropertyDescriptorById(_cx: *mut JSContext, _obj: *mut JSObject, _id: impl Into<jsid>, _desc: *mut PropertyDescriptor, _ignored: *mut JSObject, _found: *mut bool) -> bool { false }
+    pub fn JS_HasPropertyById(_cx: *mut JSContext, _obj: *mut JSObject, _id: impl Into<jsid>, _found: *mut bool) -> bool { false }
     pub fn JS_NewPlainObject(_cx: *mut JSContext) -> *mut JSObject { ptr::null_mut() }
     pub fn JS_SetReservedSlot(_obj: *mut JSObject, _index: u32, _val: JSVal) {}
     pub fn JS_NewObject(_cx: *mut JSContext, _clasp: *const JSClass) -> *mut JSObject { ptr::null_mut() }
@@ -513,7 +590,7 @@ pub mod rust {
         pub unsafe fn AppendToIdVector(_cx: *mut jsapi::JSContext, _v: *mut u32, _id: *const jsapi::jsid) -> bool { false }
         pub unsafe fn GetPropertyKeys(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _flags: u32, _ids: *mut *const jsapi::jsid) -> bool { false }
         pub unsafe fn JS_CopyOwnPropertiesAndPrivateFields(_cx: *mut jsapi::JSContext, _target: *mut jsapi::JSObject, _obj: *mut jsapi::JSObject) -> bool { false }
-        pub unsafe fn JS_DefinePropertyById2(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: jsapi::jsid, _val: jsapi::JSVal) -> bool { false }
+        pub unsafe fn JS_DefinePropertyById2(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: impl Into<jsapi::jsid>, _val: jsapi::JSVal) -> bool { false }
         pub unsafe fn JS_InitializePropertiesFromCompatibleNativeObject(_cx: *mut jsapi::JSContext, _dst: *mut jsapi::JSObject, _src: *mut jsapi::JSObject) -> bool { false }
         pub unsafe fn JS_NewObjectWithGivenProto(_cx: *mut jsapi::JSContext, _clasp: *const jsapi::JSClass, _proto: *mut jsapi::JSObject) -> *mut jsapi::JSObject { ptr::null_mut() }
         pub unsafe fn JS_NewObjectWithoutMetadata(_cx: *mut jsapi::JSContext, _clasp: *const jsapi::JSClass, _proto: *mut jsapi::JSObject) -> *mut jsapi::JSObject { ptr::null_mut() }
@@ -521,9 +598,9 @@ pub mod rust {
         pub unsafe fn JS_SetPrototype(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _proto: *mut jsapi::JSObject) -> bool { false }
         pub unsafe fn JS_WrapObject(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject) -> bool { false }
         pub unsafe fn NewProxyObject(_cx: *mut jsapi::JSContext, _handler: *const std::ffi::c_void, _priv: *mut jsapi::JSObject, _proto: *mut jsapi::JSObject, _options: *const std::ffi::c_void, _flag: bool) -> *mut jsapi::JSObject { ptr::null_mut() }
-        pub fn RUST_INTERNED_STRING_TO_JSID(_cx: *mut jsapi::JSContext, _s: *const u8) -> jsapi::jsid { 0 }
-        pub fn RUST_SYMBOL_TO_JSID(_cx: *mut jsapi::JSContext, _sym: jsapi::SymbolCode) -> jsapi::jsid { 0 }
-        pub fn int_to_jsid(_i: i32) -> jsapi::jsid { _i as u64 }
+        pub fn RUST_INTERNED_STRING_TO_JSID(_cx: *mut jsapi::JSContext, _s: *const u8) -> jsapi::jsid { jsapi::jsid(0) }
+        pub fn RUST_SYMBOL_TO_JSID(_cx: *mut jsapi::JSContext, _sym: jsapi::SymbolCode) -> jsapi::jsid { jsapi::jsid(0) }
+        pub fn int_to_jsid(_i: i32) -> jsapi::jsid { jsapi::jsid(_i as u64) }
 
         pub type Handle<T> = *const T;
         pub type HandleObject = *const jsapi::JSObject;
@@ -550,10 +627,10 @@ pub mod rust {
         pub fn SetDataPropertyDescriptor(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: jsapi::jsid, _attrs: u32) {}
         pub unsafe fn JS_GetPropertyById(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: jsapi::jsid, _vp: *mut jsapi::JSVal) -> bool { false }
         pub unsafe fn JS_HasProperty(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _name: *const u8, _found: *mut bool) -> bool { false }
-        pub unsafe fn JS_HasPropertyById(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: jsapi::jsid, _found: *mut bool) -> bool { false }
+        pub unsafe fn JS_HasPropertyById(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: impl Into<jsapi::jsid>, _found: *mut bool) -> bool { false }
         pub unsafe fn JS_HasOwnProperty(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _name: *const u8, _found: *mut bool) -> bool { false }
-        pub unsafe fn JS_ForwardGetPropertyTo(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: jsapi::jsid, _receiver: *mut jsapi::JSObject, _vp: *mut jsapi::JSVal) -> bool { false }
-        pub unsafe fn JS_DeletePropertyById(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: jsapi::jsid, _result: *mut jsapi::ObjectOpResult) -> bool { false }
+        pub unsafe fn JS_ForwardGetPropertyTo(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: impl Into<jsapi::jsid>, _receiver: *mut jsapi::JSObject, _vp: *mut jsapi::JSVal) -> bool { false }
+        pub unsafe fn JS_DeletePropertyById(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: impl Into<jsapi::jsid>, _result: *mut jsapi::ObjectOpResult) -> bool { false }
         pub unsafe fn JS_GetPendingException(_cx: *mut jsapi::JSContext, _vp: *mut jsapi::JSVal) -> bool { false }
         pub unsafe fn JS_SetPendingException(_cx: *mut jsapi::JSContext, _val: jsapi::JSVal) {}
         pub unsafe fn JS_IdToValue(_cx: *mut jsapi::JSContext, _id: jsapi::jsid, _vp: *mut jsapi::JSVal) -> bool { false }
@@ -572,11 +649,11 @@ pub mod rust {
         use super::super::conversions::{ConversionBehavior, ConversionResult};
 
         pub trait ToJSValConvertible {
-            unsafe fn to_jsval(&self, _cx: *mut jsapi::JSContext, _rval: *const jsapi::JSVal) {}
+            unsafe fn to_jsval(&self, _cx: *mut jsapi::JSContext, _rval: *mut jsapi::JSVal) -> Result<(), ()> { Ok(()) }
         }
         pub trait FromJSValConvertible: Sized {
             type Config;
-            unsafe fn from_jsval(_cx: *mut jsapi::JSContext, _val: jsapi::JSVal, _option: ()) -> Result<Self, ()>;
+            unsafe fn from_jsval(_cx: *mut jsapi::JSContext, _val: jsapi::JSVal, _option: Self::Config) -> Result<ConversionResult<Self>, ()>;
         }
     }
 
@@ -614,7 +691,7 @@ pub mod rust {
         pub unsafe fn JS_GetProperty(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _name: *const u8, _vp: *mut jsapi::JSVal) -> bool { false }
         pub unsafe fn GetFunctionRealm(_cx: *mut jsapi::JSContext, _fun: *mut jsapi::JSObject) -> *mut jsapi::JSObject { ptr::null_mut() }
         pub unsafe fn GetWellKnownSymbol(_cx: *mut jsapi::JSContext, _which: u32) -> jsapi::JSVal { ptr::null_mut() }
-        pub unsafe fn RUST_INTERNED_STRING_TO_JSID(_cx: *mut jsapi::JSContext, _s: *const u8) -> jsapi::jsid { 0 }
+        pub unsafe fn RUST_INTERNED_STRING_TO_JSID(_cx: *mut jsapi::JSContext, _s: *const u8) -> jsapi::jsid { jsapi::jsid(0) }
         pub unsafe fn JS_AtomizeAndPinString(_cx: *mut jsapi::JSContext, _s: *const u8) -> *mut jsapi::JSString { ptr::null_mut() }
         pub unsafe fn JS_NewObjectWithGivenProto(_cx: *mut jsapi::JSContext, _clasp: *const jsapi::JSClass, _proto: *mut jsapi::JSObject) -> *mut jsapi::JSObject { ptr::null_mut() }
         pub unsafe fn JS_DefineProperties(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _props: *const jsapi::JSPropertySpec) -> bool { false }
@@ -717,8 +794,8 @@ pub mod context {
     use super::*;
 
     pub type JSContext = jsapi::JSContext;
-    pub type RawJSContext = *mut jsapi::JSContext;
-    pub type SafeJSContext = *mut jsapi::JSContext;
+    pub type RawJSContext = jsapi::JSContext;
+    pub type SafeJSContext = jsapi::JSContext;
 
     pub type CallArgs = jsapi::CallArgs;
 
@@ -744,12 +821,13 @@ pub mod realms {
     pub struct AutoRealm;
     impl AutoRealm {
         pub unsafe fn new(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject) -> Self { Self }
+        pub unsafe fn new_from_handle<T>(_cx: T, _obj: *const jsapi::JSObject) -> Self { Self }
     }
 
     pub struct CurrentRealm;
     impl CurrentRealm {
         pub unsafe fn new(_cx: *mut jsapi::JSContext) -> Self { Self }
-        pub fn assert<T>(_cx: &mut T) -> Self { Self }
+        pub fn assert<T>(_: T) -> Self { Self }
     }
 }
 

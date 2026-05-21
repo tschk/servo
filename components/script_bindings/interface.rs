@@ -679,7 +679,7 @@ pub fn get_desired_proto(
         // were handed.
         rooted!(&in(cx) let mut proto_val = NullValue());
         if !js::rust::wrappers2::JS_GetProperty(
-            cx,
+            &mut *cx,
             original_new_target.handle(),
             c"prototype".as_ptr(),
             proto_val.handle_mut(),
@@ -694,14 +694,14 @@ pub fn get_desired_proto(
 
         // Fall back to getting the proto for our given proto id in the realm that
         // GetFunctionRealm(newTarget) returns.
-        let realm = js::rust::wrappers2::GetFunctionRealm(cx, new_target.handle());
+        let realm = js::rust::wrappers2::GetFunctionRealm(&mut *cx, new_target.handle());
 
         if realm.is_null() {
             return Err(());
         }
 
         {
-            let mut realm = AutoRealm::new(cx, NonNull::new(GetRealmGlobalOrNull(realm)).unwrap());
+            let mut realm = AutoRealm::new(&mut *cx, NonNull::new(GetRealmGlobalOrNull(realm)).unwrap());
             let (global, realm) = realm.global_and_reborrow();
             get_per_interface_object_handle(
                 realm,

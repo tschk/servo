@@ -495,19 +495,19 @@ fn ensure_cross_origin_property_holder(
     // Create a holder for the current Realm
     unsafe {
         out_holder.set(js::rust::wrappers2::JS_NewObjectWithGivenProto(
-            cx,
+            &mut *cx,
             ptr::null_mut(),
             HandleObject::null(),
         ));
 
         if out_holder.get().is_null() ||
             !js::rust::wrappers2::JS_DefineProperties(
-                cx,
+                &mut *cx,
                 out_holder.handle(),
                 cross_origin_properties.attributes.as_ptr(),
             ) ||
             !js::rust::wrappers2::JS_DefineFunctions(
-                cx,
+                &mut *cx,
                 out_holder.handle(),
                 cross_origin_properties.methods.as_ptr(),
             )
@@ -555,7 +555,7 @@ pub(crate) fn report_cross_origin_denial<D: DomTypes>(
         debug!("permission denied to {} on cross-origin object", access);
     }
     unsafe {
-        if !js::rust::wrappers2::JS_IsExceptionPending(cx) {
+        if !js::rust::wrappers2::JS_IsExceptionPending(&mut *cx) {
             let global = D::GlobalScope::from_current_realm(cx);
             // TODO: include `id` and `access` in the exception message
             <D as DomHelpers<D>>::throw_dom_exception(

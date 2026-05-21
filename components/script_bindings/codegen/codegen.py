@@ -3388,13 +3388,13 @@ rooted!(&in(cx) let mut proto = ptr::null_mut::<JSObject>());
 if let Some(given) = given_proto {
     proto.set(*given);
     if get_context_realm(cx) != get_object_realm(*given) {
-        assert!(JS_WrapObject(cx, proto.handle_mut()));
+        assert!(JS_WrapObject(&mut *cx, proto.handle_mut()));
     }
 } else {
     proto.set(*canonical_proto);
 }
 rooted!(&in(cx) let obj = JS_NewObjectWithGivenProto(
-    cx,
+    &mut *cx,
     &Class.get().base,
     proto.handle(),
 ));
@@ -3907,7 +3907,7 @@ assert!((*cache)[PrototypeList::Constructor::{properties['id']} as usize].is_nul
         if aliasedMembers:
             def defineAlias(alias: str) -> CGThing:
                 if alias == "@@iterator":
-                    symbolJSID = "RUST_SYMBOL_TO_JSID(GetWellKnownSymbol(cx, SymbolCode::iterator), \
+                    symbolJSID = "RUST_SYMBOL_TO_JSID(GetWellKnownSymbol(&mut *cx, SymbolCode::iterator), \
                                   iteratorId.handle_mut())"
                     getSymbolJSID: CGThing | None = CGGeneric(fill("rooted!(&in(cx) let mut iteratorId: jsid);\n${symbolJSID};\n",
                                                    symbolJSID=symbolJSID))
@@ -3930,7 +3930,7 @@ assert!((*cache)[PrototypeList::Constructor::{properties['id']} as usize].is_nul
                     #     match the enumerability of the property being aliased.
                     CGGeneric(fill(
                         """
-                        assert!(${defineFn}(cx, prototype.handle(), ${prop}, aliasedVal.handle(), ${enumFlags}));
+                        assert!(${defineFn}(&mut *cx, prototype.handle(), ${prop}, aliasedVal.handle(), ${enumFlags}));
                         """,
                         defineFn=defineFn,
                         prop=prop,
@@ -3941,7 +3941,7 @@ assert!((*cache)[PrototypeList::Constructor::{properties['id']} as usize].is_nul
                 return CGList([
                     CGGeneric(fill(
                         """
-                        assert!(JS_GetProperty(cx, prototype.handle(),
+                        assert!(JS_GetProperty(&mut *cx, prototype.handle(),
                                                ${prop} as *const u8 as *const _,
                                                aliasedVal.handle_mut()));
                         """,
@@ -4675,7 +4675,7 @@ class CGDefaultToJSONMethod(CGSpecializedMethod):
             use crate::inheritance::HasParent;
             let mut cx = JSContext::from_ptr(NonNull::new(cx).unwrap());
             
-            rooted!(&in(cx) let result = JS_NewPlainObject(cx));
+            rooted!(&in(cx) let result = JS_NewPlainObject(&mut *cx));
             if result.is_null() {
               return false;
             }
@@ -4858,7 +4858,7 @@ class CGSpecializedForwardingSetter(CGSpecializedSetter):
 let mut cx = JSContext::from_ptr(NonNull::new(cx).unwrap());
 
 rooted!(&in(cx) let mut v = UndefinedValue());
-if !JS_GetProperty(cx, obj, {str_to_cstr_ptr(attrName)}, v.handle_mut()) {{
+if !JS_GetProperty(&mut *cx, obj, {str_to_cstr_ptr(attrName)}, v.handle_mut()) {{
     return false;
 }}
 if !v.is_object() {{

@@ -275,13 +275,13 @@ pub fn call_setup<D: DomTypes, T: CallbackContainer<D>, R>(
     // Step 8: Prepare to run script with relevant settings.
     run_a_script::<D, R>(global, move || {
         let actual_callback = || {
-            let old_realm = unsafe { EnterRealm(cx, callback.callback()) };
-            let result = f(cx);
+            let old_realm = unsafe { EnterRealm(&mut *cx, callback.callback()) };
+            let result = f(&mut *cx);
             unsafe {
-                LeaveRealm(cx, old_realm);
+                LeaveRealm(&mut *cx, old_realm);
             }
             if handling == ExceptionHandling::Report {
-                let mut realm = enter_auto_realm::<D>(cx, &**global);
+                let mut realm = enter_auto_realm::<D>(&mut *cx, &**global);
                 let cx = &mut realm.current_realm();
 
                 let in_realm_proof = cx.into();

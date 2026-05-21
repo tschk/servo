@@ -157,10 +157,10 @@ fn js_traceable_derive(s: synstructure::Structure) -> proc_macro2::TokenStream {
                 }
                 return None;
             } else if attr.path().is_ident("custom_trace") {
-                return Some(quote!(<dyn crate::CustomTraceable>::trace(#binding, tracer);));
+                return Some(quote!(<_ as crate::CustomTraceable>::trace(#binding, tracer);));
             }
         }
-        Some(quote!(#binding.trace(tracer);))
+        Some(quote!(crate::JSTraceable::trace(#binding, tracer);))
     });
 
     let ast = s.ast();

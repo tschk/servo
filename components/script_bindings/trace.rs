@@ -64,7 +64,7 @@ pub(crate) unsafe fn trace_object(
         trace!("tracing {}", description);
         CallObjectTracer(
             tracer,
-            obj.ptr.get() as *mut _,
+            obj.get() as *mut _,
             GCTraceKindToAscii(TraceKind::Object),
         );
     }
@@ -360,7 +360,7 @@ where
     T: GCMethods + Copy,
 {
     pub fn handle(&self) -> Handle<'_, T> {
-        self.0.handle()
+        unsafe { Handle::from_raw((**self).handle()) }
     }
 }
 

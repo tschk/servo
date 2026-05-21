@@ -775,7 +775,7 @@ pub mod jsapi {
     pub fn JS_DropPrincipals(_cx: *mut JSContext, _p: *mut std::ffi::c_void) {}
     pub fn JS_HoldPrincipals<P>(_p: P) {}
     pub fn JS_DefinePropertyById<C, I, V, R>(_cx: C, _obj: *mut JSObject, _id: I, _val: V, _result: R) -> bool { false }
-    pub fn JS_IdToValue<C, I, V>(_cx: C, _id: I, _vp: V) -> bool { false }
+    pub fn JS_IdToValue(_cx: *mut JSContext, _id: jsid, _vp: *mut JSVal) -> bool { false }
     pub enum DOMProxyShadowsResult { Shadows, DoesntShadow, DoesntShadowUnique, ShadowsViaDirectExpando, ShadowsViaIndirectExpando, ShadowCheckFailed }
     pub fn GetStaticPrototype(_obj: *mut JSObject) -> *mut JSObject { ptr::null_mut() }
     pub fn SetDOMProxyInformation<F, C>(_domProxyHandlerFamily: F, _callback: C, _class: *const std::ffi::c_void) {}
@@ -1189,6 +1189,9 @@ pub mod context {
     impl std::ops::Deref for JSContext {
         type Target = NoGC;
         fn deref(&self) -> &NoGC { self.no_gc() }
+    }
+    impl std::ops::DerefMut for JSContext {
+        fn deref_mut(&mut self) -> &mut NoGC { Box::leak(Box::new(NoGC(()))) }
     }
 
     pub unsafe fn from_ptr(p: std::ptr::NonNull<RawJSContext>) -> JSContext { JSContext { ptr: p } }

@@ -32,15 +32,18 @@ macro_rules! new_jsjitinfo_bitfield_1 {
 macro_rules! rooted {
     (&in($cx:expr) let $($var:ident),+ = $init:expr) => {
         let mut __root = ::std::mem::MaybeUninit::uninit();
-        let $($var),+ = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, $init) };
+        let __init = $init;
+        let $($var),+ = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, __init) };
     };
     (&in($cx:expr) let mut $var:ident = $init:expr) => {
         let mut __root = ::std::mem::MaybeUninit::uninit();
-        let mut $var = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, $init) };
+        let __init = $init;
+        let mut $var = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, __init) };
     };
     (&in($cx:expr) let mut $var:ident: $ty:ty = $init:expr) => {
         let mut __root = ::std::mem::MaybeUninit::uninit();
-        let mut $var: $crate::gc::RootedGuard<'_, $ty> = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, $init) };
+        let __init = $init;
+        let mut $var: $crate::gc::RootedGuard<'_, $ty> = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, __init) };
     };
     (&in($cx:expr) let mut $var:ident: $ty:ty) => {
         let mut __root = ::std::mem::MaybeUninit::uninit();
@@ -48,15 +51,18 @@ macro_rules! rooted {
     };
     (in($cx:expr) let $($var:ident),+ = $init:expr) => {
         let mut __root = ::std::mem::MaybeUninit::uninit();
-        let $($var),+ = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, $init) };
+        let __init = $init;
+        let $($var),+ = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, __init) };
     };
     (in($cx:expr) let mut $var:ident = $init:expr) => {
         let mut __root = ::std::mem::MaybeUninit::uninit();
-        let mut $var = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, $init) };
+        let __init = $init;
+        let mut $var = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, __init) };
     };
     (in($cx:expr) let mut $var:ident: $ty:ty = $init:expr) => {
         let mut __root = ::std::mem::MaybeUninit::uninit();
-        let mut $var: $crate::gc::RootedGuard<'_, $ty> = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, $init) };
+        let __init = $init;
+        let mut $var: $crate::gc::RootedGuard<'_, $ty> = unsafe { $crate::gc::RootedGuard::new(&$cx, &mut __root, __init) };
     };
     (in($cx:expr) let mut $var:ident: $ty:ty) => {
         let mut __root = ::std::mem::MaybeUninit::uninit();

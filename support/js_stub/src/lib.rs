@@ -46,9 +46,9 @@ pub mod glue {
     pub fn SetDataPropertyDescriptor<D, V>(_desc: D, _value: V, _attrs: u32) {}
     pub fn AtomizeStringN(_cx: *mut jsapi::JSContext, _s: *const u8, _len: usize) -> *mut jsapi::JSString { ptr::null_mut() }
     pub fn CreateDOMGlobal(_cx: *mut jsapi::JSContext, _clasp: *const jsapi::JSClass, _principal: *mut std::ffi::c_void) -> *mut jsapi::JSObject { ptr::null_mut() }
-    pub fn CallJitGetterOp(_info: *const jsapi::JSJitInfo, _cx: *mut jsapi::JSContext, _obj: *const jsapi::JSObject, _this: *mut std::ffi::c_void, _argc: u32, _vp: *mut jsapi::JSVal) -> bool { false }
-    pub fn CallJitMethodOp(_info: *const jsapi::JSJitInfo, _cx: *mut jsapi::JSContext, _obj: *const jsapi::JSObject, _this: *mut std::ffi::c_void, _argc: u32, _vp: *mut jsapi::JSVal) -> bool { false }
-    pub fn CallJitSetterOp(_info: *const jsapi::JSJitInfo, _cx: *mut jsapi::JSContext, _obj: *const jsapi::JSObject, _this: *mut std::ffi::c_void, _argc: u32, _vp: *mut jsapi::JSVal) -> bool { false }
+    pub unsafe extern "C" fn CallJitGetterOp<'a>(_info: *const jsapi::JSJitInfo, _cx: *mut jsapi::JSContext, _obj: jsapi::HandleObject<'a>, _this: *mut std::ffi::c_void, _argc: u32, _vp: *mut jsapi::JSVal) -> bool { false }
+    pub unsafe extern "C" fn CallJitMethodOp<'a>(_info: *const jsapi::JSJitInfo, _cx: *mut jsapi::JSContext, _obj: jsapi::HandleObject<'a>, _this: *mut std::ffi::c_void, _argc: u32, _vp: *mut jsapi::JSVal) -> bool { false }
+    pub fn CallJitSetterOp<O>(_info: *const jsapi::JSJitInfo, _cx: *mut jsapi::JSContext, _obj: O, _this: *mut std::ffi::c_void, _argc: u32, _vp: *mut jsapi::JSVal) -> bool { false }
 
     #[repr(C)]
     pub struct ProxyTraps {
@@ -927,7 +927,7 @@ pub mod rust {
         pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: C, _obj: O, _id: I, _vp: V) -> bool { false }
         pub unsafe fn JS_HasProperty<C, O, N>(_cx: C, _obj: O, _name: N, _found: *mut bool) -> bool { false }
         pub unsafe fn JS_HasPropertyById<C, O, I>(_cx: C, _obj: O, _id: I, _found: *mut bool) -> bool { false }
-        pub unsafe fn JS_HasOwnProperty(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _name: *const u8, _found: *mut bool) -> bool { false }
+        pub unsafe fn JS_HasOwnProperty<C, O, N>(_cx: C, _obj: O, _name: N, _found: *mut bool) -> bool { false }
         pub unsafe fn JS_ForwardGetPropertyTo<C, O, I, R, V>(_cx: C, _obj: O, _id: I, _receiver: R, _vp: V) -> bool { false }
         pub unsafe fn JS_DeletePropertyById<C, O, I, R>(_cx: C, _obj: O, _id: I, _result: R) -> bool { false }
         pub unsafe fn JS_GetPendingException<C, V>(_cx: C, _vp: V) -> bool { false }
@@ -1227,6 +1227,21 @@ pub mod realms {
         pub fn assert<T>(_: T) -> Self { Self(std::marker::PhantomData) }
         pub unsafe fn raw_cx(&mut self) -> *mut jsapi::JSContext { ptr::null_mut() }
         pub unsafe fn raw_cx_no_gc(&self) -> *mut jsapi::JSContext { ptr::null_mut() }
+    }
+    impl<'a> std::ops::Deref for CurrentRealm<'a> {
+        type Target = crate::context::JSContext;
+        fn deref(&self) -> &crate::context::JSContext {
+            Box::leak(Box::new(unsafe {
+                crate::context::JSContext::from_ptr(std::ptr::NonNull::dangling())
+            }))
+        }
+    }
+    impl<'a> std::ops::DerefMut for CurrentRealm<'a> {
+        fn deref_mut(&mut self) -> &mut crate::context::JSContext {
+            Box::leak(Box::new(unsafe {
+                crate::context::JSContext::from_ptr(std::ptr::NonNull::dangling())
+            }))
+        }
     }
 }
 

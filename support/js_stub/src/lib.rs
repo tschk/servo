@@ -1087,6 +1087,7 @@ pub mod gc {
     pub fn remove_root(_obj: &dyn Traceable) {}
 
     unsafe impl Traceable for super::jsapi::JSVal {}
+    unsafe impl Traceable for () {}
     unsafe impl Traceable for u8 {}
     unsafe impl Traceable for u16 {}
     unsafe impl Traceable for u32 {}
@@ -1268,6 +1269,9 @@ pub mod conversions {
     pub use super::rust::conversions::{FromJSValConvertible, ToJSValConvertible};
 
     pub enum ConversionBehavior { Default, EnforceRange, Clamp }
+    impl Default for ConversionBehavior {
+        fn default() -> Self { Self::Default }
+    }
     pub enum ConversionResult<T> { Success(T), Failure(std::borrow::Cow<'static, std::ffi::CStr>) }
 
     pub fn jsstr_to_string<C, S>(_cx: C, _s: S) -> String {
@@ -1359,10 +1363,9 @@ pub mod conversions {
     impl<T> FromJSValConvertible for Vec<T>
     where
         T: FromJSValConvertible,
-        T::Config: Default,
     {
-        type Config = ();
-        unsafe fn from_jsval(_cx: *mut jsapi::JSContext, _val: jsapi::HandleValue, _option: ()) -> Result<ConversionResult<Self>, ()> {
+        type Config = T::Config;
+        unsafe fn from_jsval(_cx: *mut jsapi::JSContext, _val: jsapi::HandleValue, _option: Self::Config) -> Result<ConversionResult<Self>, ()> {
             Ok(ConversionResult::Success(Vec::new()))
         }
     }

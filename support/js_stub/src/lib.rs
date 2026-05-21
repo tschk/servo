@@ -437,7 +437,7 @@ pub mod jsapi {
         pub method: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, *const JSJitMethodCallArgs) -> bool>,
         pub getter: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, CallArgs) -> bool>,
         pub setter: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, CallArgs) -> bool>,
-        pub staticMethod: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, *const JSJitMethodCallArgs) -> bool>,
+        pub staticMethod: Option<unsafe extern "C" fn(*mut JSContext, u32, *mut JSVal) -> bool>,
         pub staticGetter: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, CallArgs) -> bool>,
         pub staticSetter: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, CallArgs) -> bool>,
     }
@@ -769,7 +769,7 @@ pub mod jsapi {
     pub fn JS_IsExceptionPending(_cx: *mut JSContext) -> bool { false }
     pub fn JS_ClearPendingException(_cx: *mut JSContext) {}
     pub fn JS_IsGlobalObject(_obj: *mut JSObject) -> bool { false }
-    pub fn JS_MayResolveStandardClass(_cx: *mut JSContext, _obj: *mut JSObject, _id: jsid, _resolved: *mut bool) -> bool { false }
+    pub fn JS_MayResolveStandardClass<N, I, O>(_names: N, _id: I, _maybe_obj: O) -> bool { false }
     pub fn JS_NewEnumerateStandardClasses<C, O, P>(_cx: C, _obj: O, _props: P, _enum_op: bool) -> bool { false }
     pub fn JS_ResolveStandardClass(_cx: *mut JSContext, _obj: *mut JSObject, _id: jsid, _resolved: *mut bool) -> bool { false }
     pub fn JS_DropPrincipals(_cx: *mut JSContext, _p: *mut std::ffi::c_void) {}
@@ -1465,7 +1465,7 @@ pub mod jsid {
         pub ptr: *const u8,
     }
     pub fn SymbolId(_value: super::jsapi::JSVal) -> super::jsapi::jsid { super::jsapi::jsid(0) }
-    pub fn StringId(value: *const u8) -> StringId { StringId { ptr: value } }
+    pub fn StringId<S>(_value: S) -> StringId { StringId { ptr: std::ptr::null() } }
 }
 
 pub mod realm {

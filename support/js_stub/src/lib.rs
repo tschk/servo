@@ -36,7 +36,7 @@ pub mod glue {
     pub fn IsWrapper(_obj: *mut jsapi::JSObject) -> bool { false }
     pub fn UnwrapObjectDynamic<O, C>(_obj: O, _cx: C, _stop: bool) -> *mut jsapi::JSObject { ptr::null_mut() }
     pub fn RUST_JSID_TO_STRING(_cx: *mut jsapi::JSContext, _id: *const jsapi::jsid) -> *mut jsapi::JSString { ptr::null_mut() }
-    pub fn AppendToIdVector<V, I>(_v: V, _id: I) -> bool { false }
+    pub fn AppendToIdVector<V>(_v: V, _id: jsapi::jsid) -> bool { false }
     pub fn GetProxyHandler(_proxy: *mut jsapi::JSObject) -> *const std::ffi::c_void { ptr::null() }
     pub fn NewProxyObject(_cx: *mut jsapi::JSContext, _handler: *const std::ffi::c_void, _priv: *mut jsapi::JSObject, _proto: *mut jsapi::JSObject, _options: *const std::ffi::c_void, _flag: bool) -> *mut jsapi::JSObject { ptr::null_mut() }
     pub fn GetProxyPrivate<O, V>(_proxy: O, _out: V) {}
@@ -765,13 +765,13 @@ pub mod jsapi {
     pub enum TraceKind { Object, String, Symbol, BigInt, Script, Shape, BaseShape, JitCode }
     pub fn GCTraceKindToAscii(_kind: TraceKind) -> *const u8 { b"Object\0".as_ptr() }
     pub fn StringIsArrayIndex(_s: *mut JSString, _indexp: *mut u32) -> bool { false }
-    pub type PropertyKey = *mut std::ffi::c_void;
+    pub type PropertyKey = jsid;
     pub fn JS_IsExceptionPending(_cx: *mut JSContext) -> bool { false }
     pub fn JS_ClearPendingException(_cx: *mut JSContext) {}
     pub fn JS_IsGlobalObject(_obj: *mut JSObject) -> bool { false }
     pub fn JS_MayResolveStandardClass<N, I, O>(_names: N, _id: I, _maybe_obj: O) -> bool { false }
     pub fn JS_NewEnumerateStandardClasses<C, O, P>(_cx: C, _obj: O, _props: P, _enum_op: bool) -> bool { false }
-    pub fn JS_ResolveStandardClass(_cx: *mut JSContext, _obj: *mut JSObject, _id: jsid, _resolved: *mut bool) -> bool { false }
+    pub fn JS_ResolveStandardClass<C, O, I, R>(_cx: C, _obj: O, _id: I, _resolved: R) -> bool { false }
     pub fn JS_DropPrincipals(_cx: *mut JSContext, _p: *mut std::ffi::c_void) {}
     pub fn JS_HoldPrincipals<P>(_p: P) {}
     pub fn JS_DefinePropertyById<C, I, V, R>(_cx: C, _obj: *mut JSObject, _id: I, _val: V, _result: R) -> bool { false }
@@ -1466,6 +1466,9 @@ pub mod jsid {
     }
     pub fn SymbolId(_value: super::jsapi::JSVal) -> super::jsapi::jsid { super::jsapi::jsid(0) }
     pub fn StringId<S>(_value: S) -> StringId { StringId { ptr: std::ptr::null() } }
+}
+impl<'a> From<jsapi::Handle<'a, jsid::StringId>> for jsapi::jsid {
+    fn from(_handle: jsapi::Handle<'a, jsid::StringId>) -> Self { jsapi::jsid(0) }
 }
 
 pub mod realm {

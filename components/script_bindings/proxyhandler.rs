@@ -173,7 +173,7 @@ pub(crate) fn get_expando_object(obj: RawHandleObject, mut expando: MutableHandl
     unsafe {
         assert!(is_dom_proxy(obj.get()));
         let val = &mut UndefinedValue();
-        GetProxyPrivate(obj.get(), val);
+        GetProxyPrivate(obj.get(), &mut *val);
         expando.set(if val.is_undefined() {
             ptr::null_mut()
         } else {
@@ -271,10 +271,10 @@ pub(crate) fn cross_origin_own_property_keys(
     // >    `e.[[Property]]` to `keys`.
     for key in cross_origin_properties.keys() {
         unsafe {
-            rooted!(&in(cx) let rooted = js::rust::wrappers2::JS_AtomizeAndPinString(cx, key));
+            rooted!(&in(cx) let rooted = js::rust::wrappers2::JS_AtomizeAndPinString(&mut *cx, key));
             rooted!(&in(cx) let mut rooted_jsid: jsid);
             js::rust::wrappers2::RUST_INTERNED_STRING_TO_JSID(
-                cx,
+                &mut *cx,
                 rooted.handle().get(),
                 rooted_jsid.handle_mut(),
             );
@@ -450,10 +450,10 @@ fn append_cross_origin_allowlisted_prop_keys(
     unsafe {
         rooted!(&in(cx) let mut id: jsid);
 
-        let jsstring = js::rust::wrappers2::JS_AtomizeAndPinString(cx, c"then".as_ptr());
+        let jsstring = js::rust::wrappers2::JS_AtomizeAndPinString(&mut *cx, c"then".as_ptr());
         rooted!(&in(cx) let rooted = jsstring);
         js::rust::wrappers2::RUST_INTERNED_STRING_TO_JSID(
-            cx,
+            &mut *cx,
             rooted.handle().get(),
             id.handle_mut(),
         );
@@ -461,7 +461,7 @@ fn append_cross_origin_allowlisted_prop_keys(
 
         for &allowed_code in ALLOWLISTED_SYMBOL_CODES.iter() {
             id.set(SymbolId(js::rust::wrappers2::GetWellKnownSymbol(
-                cx,
+                &mut *cx,
                 allowed_code,
             )));
             AppendToIdVector(props, id.handle());
@@ -679,7 +679,7 @@ pub(crate) fn cross_origin_get<D: DomTypes>(
     if !unsafe {
         js::rust::wrappers2::InvokeGetOwnPropertyDescriptor(
             GetProxyHandler(*proxy),
-            cx,
+            &mut *cx,
             proxy,
             id,
             descriptor.handle_mut(),
@@ -753,7 +753,7 @@ pub(crate) unsafe fn cross_origin_set<D: DomTypes>(
     let mut is_none = false;
     if !js::rust::wrappers2::InvokeGetOwnPropertyDescriptor(
         GetProxyHandler(*proxy),
-        cx,
+        &mut *cx,
         proxy,
         id,
         descriptor.handle_mut(),
@@ -788,7 +788,7 @@ pub(crate) unsafe fn cross_origin_set<D: DomTypes>(
     // > 3.2. Return true.
     rooted!(&in(cx) let mut ignored = UndefinedValue());
     if !js::rust::wrappers2::Call(
-        cx,
+        &mut *cx,
         receiver,
         setter_jsval.handle(),
         // FIXME: Our binding lacks `HandleValueArray(Handle<Value>)`

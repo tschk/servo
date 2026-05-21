@@ -8882,7 +8882,7 @@ class CallbackMethod(CallbackMember):
         return (f"{self.getCallableDecl()}"
                 f"rooted!(&in(cx) let rootedThis = {self.getThisObj()});\n"
                 f"let ok = {self.getCallGuard()}Call(\n"
-                "    cx, rootedThis.handle(), callable.handle(),\n"
+                "    &mut *cx, rootedThis.handle(), callable.handle(),\n"
                 "    &HandleValueArray {\n"
                 f"        length_: {argc} as ::libc::size_t,\n"
                 f"        elements_: {argv}\n"

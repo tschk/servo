@@ -165,6 +165,7 @@ pub mod jsapi {
         pub fn is_object(&self) -> bool { false }
         pub fn is_null(&self) -> bool { self.asBits_ == 0 }
         pub fn is_null_or_undefined(&self) -> bool { true }
+        pub fn is_number(&self) -> bool { false }
         pub fn is_undefined(&self) -> bool { self.asBits_ == 0 }
         pub fn to_number(&self) -> f64 { 0.0 }
         pub fn to_private(&self) -> *mut std::ffi::c_void { ptr::null_mut() }
@@ -885,7 +886,7 @@ pub mod rust {
         pub unsafe fn JS_NewStringCopyN(_cx: *mut jsapi::JSContext, _s: *const u8, _len: usize) -> *mut jsapi::JSString { ptr::null_mut() }
         pub unsafe fn JS_GetTwoByteStringCharsAndLength(_cx: *mut jsapi::JSContext, _s: *mut jsapi::JSString, _len: *mut usize) -> *const u16 { ptr::null() }
         pub unsafe fn JS_AtomizeStringN<S>(_cx: *mut jsapi::JSContext, _s: S, _len: usize) -> *mut jsapi::JSString { ptr::null_mut() }
-        pub unsafe fn Call(_cx: *mut jsapi::JSContext, _this: *mut jsapi::JSObject, _fun: *mut jsapi::JSObject, _args: *const jsapi::JSVal, _rval: *mut jsapi::JSVal) -> bool { false }
+        pub unsafe fn Call<C, T, F, A, R>(_cx: C, _this: T, _fun: F, _args: A, _rval: R) -> bool { false }
         pub unsafe fn AppendToIdVector<V, I>(_v: V, _id: I) -> bool { false }
         pub unsafe fn GetPropertyKeys<C, O, I>(_cx: C, _obj: O, _flags: u32, _ids: I) -> bool { false }
         pub unsafe fn JS_CopyOwnPropertiesAndPrivateFields(_cx: *mut jsapi::JSContext, _target: *mut jsapi::JSObject, _obj: *mut jsapi::JSObject) -> bool { false }
@@ -1056,6 +1057,11 @@ pub mod gc {
         pub fn handle_mut(&mut self) -> jsapi::MutableHandle<'_, T> { unsafe { jsapi::MutableHandle::from_raw(&mut self.value as *mut T) } }
         pub fn get(&self) -> T where T: Copy { self.value }
         pub fn set(&mut self, val: T) { self.value = val; }
+    }
+    impl<'a> RootedGuard<'a, Vec<jsapi::JSVal>> {
+        pub fn handle_mut_at(&mut self, index: usize) -> jsapi::MutableHandle<'_, jsapi::JSVal> {
+            unsafe { jsapi::MutableHandle::from_raw(&mut self.value[index] as *mut jsapi::JSVal) }
+        }
     }
     impl<'a, T> std::ops::Deref for RootedGuard<'a, T> {
         type Target = T;
@@ -1367,6 +1373,18 @@ pub mod conversions {
         type Config = T::Config;
         unsafe fn from_jsval(_cx: *mut jsapi::JSContext, _val: jsapi::HandleValue, _option: Self::Config) -> Result<ConversionResult<Self>, ()> {
             Ok(ConversionResult::Success(Vec::new()))
+        }
+    }
+    impl<T> FromJSValConvertible for Option<T>
+    where
+        T: FromJSValConvertible,
+    {
+        type Config = T::Config;
+        unsafe fn from_jsval(cx: *mut jsapi::JSContext, val: jsapi::HandleValue, option: Self::Config) -> Result<ConversionResult<Self>, ()> {
+            match T::from_jsval(cx, val, option)? {
+                ConversionResult::Success(value) => Ok(ConversionResult::Success(Some(value))),
+                ConversionResult::Failure(message) => Ok(ConversionResult::Failure(message)),
+            }
         }
     }
     impl ToJSValConvertible for jsapi::Heap<jsapi::JSVal> {

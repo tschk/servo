@@ -151,6 +151,7 @@ pub mod jsapi {
     impl jsid {
         pub fn is_string(&self) -> bool { false }
         pub fn is_int(&self) -> bool { false }
+        pub fn is_void(&self) -> bool { self.asBits_ == 0 }
         pub fn to_int(&self) -> i32 { 0 }
         pub fn to_string(&self) -> *mut JSString { ptr::null_mut() }
     }
@@ -786,7 +787,7 @@ pub mod jsapi {
     }
     pub type JSAtom = *mut std::ffi::c_void;
     pub type JSAtomState = *mut std::ffi::c_void;
-    pub fn AtomToLinearString(_atom: *mut std::ffi::c_void) -> *mut JSString { ptr::null_mut() }
+    pub fn AtomToLinearString<A>(_atom: A) -> *mut JSString { ptr::null_mut() }
     pub fn GetLinearStringCharAt(_s: *mut JSString, _index: usize) -> u16 { 0 }
     pub fn GetLinearStringLength(_s: *mut JSString) -> usize { 0 }
     pub fn JS_AtomizeStringN<S>(_cx: *mut JSContext, _s: S, _len: usize) -> *mut JSString { ptr::null_mut() }
@@ -876,7 +877,7 @@ pub mod rust {
         pub unsafe fn JS_NewGlobalObject(_cx: *mut jsapi::JSContext, _clasp: *const jsapi::JSClass, _principal: *mut std::ffi::c_void) -> *mut jsapi::JSObject { ptr::null_mut() }
         pub unsafe fn JS_DefineProperty<C, O, N, V>(_cx: C, _obj: O, _name: N, _val: V, _attrs: u32) -> bool { false }
         pub unsafe fn JS_GetProperty<C, O, N, V>(_cx: C, _obj: O, _name: N, _vp: V) -> bool { false }
-        pub unsafe fn JS_SetProperty(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _name: *const u8, _vp: *const jsapi::JSVal) -> bool { false }
+        pub unsafe fn JS_SetProperty<C, O, N, V>(_cx: C, _obj: O, _name: N, _vp: V) -> bool { false }
         pub unsafe fn JS_NewPlainObject(_cx: *mut jsapi::JSContext) -> *mut jsapi::JSObject { ptr::null_mut() }
         pub unsafe fn JS_NewFunction<C, N>(_cx: *mut jsapi::JSContext, _call: C, _nargs: u32, _flags: u16, _name: N) -> *mut jsapi::JSFunction { ptr::null_mut() }
         pub unsafe fn JS_GetFunctionObject(_fun: *mut jsapi::JSFunction) -> *mut jsapi::JSObject { ptr::null_mut() }
@@ -924,7 +925,7 @@ pub mod rust {
         pub fn JS_AlreadyHasOwnPropertyById<C, O, I>(_cx: C, _obj: O, _id: I, _found: *mut bool) -> bool { false }
         pub fn SetDataPropertyDescriptor<D, V>(_desc: D, _value: V, _attrs: u32) {}
         pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: C, _obj: O, _id: I, _vp: V) -> bool { false }
-        pub unsafe fn JS_HasProperty(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _name: *const u8, _found: *mut bool) -> bool { false }
+        pub unsafe fn JS_HasProperty<C, O, N>(_cx: C, _obj: O, _name: N, _found: *mut bool) -> bool { false }
         pub unsafe fn JS_HasPropertyById<C, O, I>(_cx: C, _obj: O, _id: I, _found: *mut bool) -> bool { false }
         pub unsafe fn JS_HasOwnProperty(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _name: *const u8, _found: *mut bool) -> bool { false }
         pub unsafe fn JS_ForwardGetPropertyTo<C, O, I, R, V>(_cx: C, _obj: O, _id: I, _receiver: R, _vp: V) -> bool { false }

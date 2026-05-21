@@ -421,7 +421,7 @@ const ALLOWLISTED_SYMBOL_CODES: &[SymbolCode] = &[
 ];
 
 pub(crate) fn is_cross_origin_allowlisted_prop(
-    cx: &mut js::context::JSContext,
+    cx: &mut CurrentRealm,
     id: RawHandleId,
 ) -> bool {
     unsafe {
@@ -642,10 +642,11 @@ pub(crate) fn maybe_cross_origin_get_prototype<D: DomTypes>(
     let proxy = unsafe { Handle::from_raw(proxy) };
     // > 1. If ! IsPlatformObjectSameOrigin(this) is true, then return ! OrdinaryGetPrototypeOf(this).
     if <D as DomHelpers<D>>::is_platform_object_same_origin(cx, proxy.into_handle()) {
-        let mut realm = AutoRealm::new_from_handle(cx, proxy);
-        let mut realm = realm.current_realm();
+        let mut auto_realm = AutoRealm::new_from_handle(cx, proxy);
+        let mut realm = auto_realm.current_realm();
         let global = D::GlobalScope::from_current_realm(&realm);
-        get_proto_object(&mut realm, global.reflector().get_jsobject(), unsafe {
+        let (_, safe_cx) = auto_realm.global_and_reborrow();
+        get_proto_object(safe_cx, global.reflector().get_jsobject(), unsafe {
             MutableHandleObject::from_raw(proto)
         });
         return !proto.is_null();

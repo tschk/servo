@@ -105,7 +105,7 @@ impl CanGc {
     }
 
     /// &mut SafeJSContext is always an indication that GC is possible.
-    pub fn from_cx(_cx: &mut SafeJSContext) -> CanGc {
+    pub fn from_cx<T>(_cx: &mut T) -> CanGc {
         CanGc::deprecated_note()
     }
 }

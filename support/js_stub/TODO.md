@@ -6,9 +6,12 @@ Remove mozjs SpiderMonkey entirely. Replace with rusty_v8-based stub crate
 All mono-browser features must keep working.
 
 ## Status
-`cargo check -p js` — **0 errors**, ~240 warnings (naming conventions).
-`cargo check -p servo-script-bindings` — **~41K errors** (down from ~78K),
-mostly cx pointer depth and JSJit*CallArgs type mismatches.
+`cargo check -p js` — **0 errors**, ~278 warnings (mozjs naming conventions).
+`cargo check -p servo-script-bindings` — still failing. The old missing `realm`,
+`D: Traceable`, raw `JSContext` pointer-depth, reserved-slot, JSJit call-arg,
+property descriptor, object-op, and realm-options classes are reduced. Current
+top failures are mostly repeated mozjs API-shape gaps plus generated safe-context
+reborrow sites (`cx` moved into wrapper calls before later `cx.into()` use).
 
 ---
 
@@ -155,26 +158,21 @@ mostly cx pointer depth and JSJit*CallArgs type mismatches.
 
 ## TODO — Remaining issues
 
-### A. cx pointer depth mismatch (~15K errors)
-**Root cause:** `RawJSContext = *mut JSContext` where `JSContext = *mut c_void`,
-giving `cx: *mut *mut *mut c_void` (triple pointer). The generated code derefs
-once (`*cx`) to get `*mut *mut c_void`, but Servo methods expect `&mut *mut c_void`
-and JS API functions expect `*mut *mut c_void`.
+### A. SafeJSContext reborrow generation
+**Root cause:** generated code passes `cx: &mut JSContext` by value into generic
+wrapper functions, then later uses `cx.into()`. Several generator sites now emit
+`&mut *cx`, but more patterns remain, especially `JS_NewObjectWithoutMetadata`,
+`JS_NewObjectWithGivenProto`, `JS_NewPlainObject`, and property-definition calls.
 
-**Options:**
-1. Make `jsapi::JSContext` an opaque struct (`pub struct JSContext { _unused: [u8; 0] }`)
-   instead of `pub type JSContext = *mut c_void`. Then `*mut JSContext` is a
-   single typed pointer, not a double void pointer.
-2. OR match all call sites precisely: keep `let cx = &mut cx` reborrow for Servo
-   method calls, strip `.raw_cx()` for FFI calls.
-3. OR make JSContext a `#[repr(transparent)]` newtype struct with `Deref`,
-   `from_ptr`, `raw_cx` methods — treat it like mozjs's safe wrapper.
+**Next step:** normalize codegen so every generated call that is not the final
+consumer receives a fresh reborrow (`&mut *cx`) or raw context (`cx.raw_cx()`),
+instead of moving `cx`.
 
-### B. JSJit*CallArgs type mismatch (~5K errors)
-**Status:** `JSJitGetterCallArgs`/`JSJitMethodCallArgs`/`JSJitSetterCallArgs`
-changed to `CallArgs` struct aliases. Generated code does `let args = &*args;`
-which derefs `*const CallArgs` → `&CallArgs`. Methods `get()`/`rval()`/`argc_`
-exist. **Needs full rebuild to verify.**
+### B. Rooting and trace boxes
+`RootedTraceableBox::from_box` now accepts rooted values used by Servo call
+sites, and `js::gc::RootedTraceableBox` exposes `handle`, `ptr`, `trace`, and
+`Deref` surfaces. Remaining errors are trait-bound mismatches in derived
+`JSTraceable` and generic containers.
 
 ### C. JSJitInfo field initialization (residual)
 `JSJitInfo__bindgen_ty_1` uses `Default::default()` spread in generated code.

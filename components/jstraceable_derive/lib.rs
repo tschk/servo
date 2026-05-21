@@ -167,13 +167,6 @@ fn js_traceable_derive(s: synstructure::Structure) -> proc_macro2::TokenStream {
     let name = &ast.ident;
     let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
     let mut where_clause = where_clause.unwrap_or(&parse_quote!(where)).clone();
-    for param in ast.generics.type_params() {
-        let ident = &param.ident;
-        where_clause
-            .predicates
-            .push(parse_quote!(#ident: crate::JSTraceable))
-    }
-
     let tokens = quote! {
         #asserts
 

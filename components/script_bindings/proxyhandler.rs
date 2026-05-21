@@ -161,7 +161,7 @@ pub(crate) unsafe extern "C" fn get_prototype_if_ordinary(
     _: *mut JSContext,
     proxy: RawHandleObject,
     is_ordinary: *mut bool,
-    proto: RawMutableHandleObject,
+    mut proto: RawMutableHandleObject,
 ) -> bool {
     *is_ordinary = true;
     proto.set(GetStaticPrototype(proxy.get()));
@@ -338,13 +338,13 @@ pub(crate) unsafe extern "C" fn maybe_cross_origin_set_prototype_rawcx(
     true
 }
 
-pub(crate) fn get_getter_object(d: &PropertyDescriptor, out: RawMutableHandleObject) {
+pub(crate) fn get_getter_object(d: &PropertyDescriptor, mut out: RawMutableHandleObject) {
     if d.hasGetter_() {
         out.set(d.getter_);
     }
 }
 
-pub(crate) fn get_setter_object(d: &PropertyDescriptor, out: RawMutableHandleObject) {
+pub(crate) fn get_setter_object(d: &PropertyDescriptor, mut out: RawMutableHandleObject) {
     if d.hasSetter_() {
         out.set(d.setter_);
     }
@@ -637,12 +637,12 @@ pub(crate) fn maybe_cross_origin_get_prototype<D: DomTypes>(
         global: HandleObject,
         rval: MutableHandleObject,
     ),
-    proto: RawMutableHandleObject,
+    mut proto: RawMutableHandleObject,
 ) -> bool {
     let proxy = unsafe { Handle::from_raw(proxy) };
     // > 1. If ! IsPlatformObjectSameOrigin(this) is true, then return ! OrdinaryGetPrototypeOf(this).
     if <D as DomHelpers<D>>::is_platform_object_same_origin(cx, proxy.into_handle()) {
-        let mut auto_realm = AutoRealm::new_from_handle(cx, proxy);
+        let mut auto_realm = unsafe { AutoRealm::new_from_handle(cx, proxy) };
         let mut realm = auto_realm.current_realm();
         let global = D::GlobalScope::from_current_realm(&realm);
         let (_, safe_cx) = auto_realm.global_and_reborrow();

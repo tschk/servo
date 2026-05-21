@@ -436,10 +436,13 @@ pub mod jsapi {
         pub method: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, *const JSJitMethodCallArgs) -> bool>,
         pub getter: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, CallArgs) -> bool>,
         pub setter: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, CallArgs) -> bool>,
+        pub staticMethod: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, *const JSJitMethodCallArgs) -> bool>,
+        pub staticGetter: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, CallArgs) -> bool>,
+        pub staticSetter: Option<for<'a> unsafe extern "C" fn(*mut JSContext, HandleObject<'a>, *mut std::ffi::c_void, CallArgs) -> bool>,
     }
     impl Default for JSJitInfo__bindgen_ty_1 {
         fn default() -> Self {
-            JSJitInfo__bindgen_ty_1 { method: None, getter: None, setter: None }
+            JSJitInfo__bindgen_ty_1 { method: None, getter: None, setter: None, staticMethod: None, staticGetter: None, staticSetter: None }
         }
     }
     #[repr(C)]
@@ -766,12 +769,12 @@ pub mod jsapi {
     pub fn JS_ClearPendingException(_cx: *mut JSContext) {}
     pub fn JS_IsGlobalObject(_obj: *mut JSObject) -> bool { false }
     pub fn JS_MayResolveStandardClass(_cx: *mut JSContext, _obj: *mut JSObject, _id: jsid, _resolved: *mut bool) -> bool { false }
-    pub fn JS_NewEnumerateStandardClasses(_cx: *mut JSContext, _obj: *mut JSObject, _props: *mut *const jsid, _enum_op: u32) -> bool { false }
+    pub fn JS_NewEnumerateStandardClasses<C, O, P>(_cx: C, _obj: O, _props: P, _enum_op: bool) -> bool { false }
     pub fn JS_ResolveStandardClass(_cx: *mut JSContext, _obj: *mut JSObject, _id: jsid, _resolved: *mut bool) -> bool { false }
     pub fn JS_DropPrincipals(_cx: *mut JSContext, _p: *mut std::ffi::c_void) {}
     pub fn JS_HoldPrincipals<P>(_p: P) {}
     pub fn JS_DefinePropertyById<C, I, V, R>(_cx: C, _obj: *mut JSObject, _id: I, _val: V, _result: R) -> bool { false }
-    pub fn JS_IdToValue(_cx: *mut JSContext, _id: jsid, _vp: *mut JSVal) -> bool { false }
+    pub fn JS_IdToValue<C, I, V>(_cx: C, _id: I, _vp: V) -> bool { false }
     pub enum DOMProxyShadowsResult { Shadows, DoesntShadow, DoesntShadowUnique, ShadowsViaDirectExpando, ShadowsViaIndirectExpando, ShadowCheckFailed }
     pub fn GetStaticPrototype(_obj: *mut JSObject) -> *mut JSObject { ptr::null_mut() }
     pub fn SetDOMProxyInformation<F, C>(_domProxyHandlerFamily: F, _callback: C, _class: *const std::ffi::c_void) {}
@@ -883,7 +886,7 @@ pub mod rust {
         pub unsafe fn JS_AtomizeStringN<S>(_cx: *mut jsapi::JSContext, _s: S, _len: usize) -> *mut jsapi::JSString { ptr::null_mut() }
         pub unsafe fn Call(_cx: *mut jsapi::JSContext, _this: *mut jsapi::JSObject, _fun: *mut jsapi::JSObject, _args: *const jsapi::JSVal, _rval: *mut jsapi::JSVal) -> bool { false }
         pub unsafe fn AppendToIdVector<V, I>(_v: V, _id: I) -> bool { false }
-        pub unsafe fn GetPropertyKeys(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _flags: u32, _ids: *mut *const jsapi::jsid) -> bool { false }
+        pub unsafe fn GetPropertyKeys<C, O, I>(_cx: C, _obj: O, _flags: u32, _ids: I) -> bool { false }
         pub unsafe fn JS_CopyOwnPropertiesAndPrivateFields(_cx: *mut jsapi::JSContext, _target: *mut jsapi::JSObject, _obj: *mut jsapi::JSObject) -> bool { false }
         pub unsafe fn JS_DefinePropertyById2<C, O, I, V>(_cx: C, _obj: O, _id: I, _val: V) -> bool { false }
         pub unsafe fn JS_InitializePropertiesFromCompatibleNativeObject(_cx: *mut jsapi::JSContext, _dst: *mut jsapi::JSObject, _src: *mut jsapi::JSObject) -> bool { false }
@@ -920,16 +923,16 @@ pub mod rust {
         pub fn JS_FireOnNewGlobalObject<O>(_cx: *mut jsapi::JSContext, _obj: O) {}
         pub fn JS_AlreadyHasOwnPropertyById<C, O, I>(_cx: C, _obj: O, _id: I, _found: *mut bool) -> bool { false }
         pub fn SetDataPropertyDescriptor<D, V>(_desc: D, _value: V, _attrs: u32) {}
-        pub unsafe fn JS_GetPropertyById(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _id: jsapi::jsid, _vp: *mut jsapi::JSVal) -> bool { false }
+        pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: C, _obj: O, _id: I, _vp: V) -> bool { false }
         pub unsafe fn JS_HasProperty(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _name: *const u8, _found: *mut bool) -> bool { false }
         pub unsafe fn JS_HasPropertyById<C, O, I>(_cx: C, _obj: O, _id: I, _found: *mut bool) -> bool { false }
         pub unsafe fn JS_HasOwnProperty(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject, _name: *const u8, _found: *mut bool) -> bool { false }
         pub unsafe fn JS_ForwardGetPropertyTo<C, O, I, R, V>(_cx: C, _obj: O, _id: I, _receiver: R, _vp: V) -> bool { false }
         pub unsafe fn JS_DeletePropertyById<C, O, I, R>(_cx: C, _obj: O, _id: I, _result: R) -> bool { false }
-        pub unsafe fn JS_GetPendingException(_cx: *mut jsapi::JSContext, _vp: *mut jsapi::JSVal) -> bool { false }
-        pub unsafe fn JS_SetPendingException(_cx: *mut jsapi::JSContext, _val: jsapi::JSVal) {}
-        pub unsafe fn JS_IdToValue(_cx: *mut jsapi::JSContext, _id: jsapi::jsid, _vp: *mut jsapi::JSVal) -> bool { false }
-        pub unsafe fn CallOriginalPromiseReject(_cx: *mut jsapi::JSContext, _args: *const jsapi::JSVal, _rval: *mut jsapi::JSVal) -> bool { false }
+        pub unsafe fn JS_GetPendingException<C, V>(_cx: C, _vp: V) -> bool { false }
+        pub unsafe fn JS_SetPendingException<C, V, B>(_cx: C, _val: V, _behavior: B) {}
+        pub unsafe fn JS_IdToValue<C, I, V>(_cx: C, _id: I, _vp: V) -> bool { false }
+        pub unsafe fn CallOriginalPromiseReject<C, V>(_cx: C, _value: V) -> *mut jsapi::JSObject { ptr::null_mut() }
         pub unsafe fn JS_DefineUCProperty2<C, O, N, V>(_cx: C, _obj: O, _name: N, _namelen: usize, _val: V, _attrs: u32) -> bool { false }
         pub unsafe fn ToJSON<C, V, O, T, W, D>(_cx: C, _val: V, _obj: O, _replacer: T, _callback: W, _data: D) -> bool { false }
         pub unsafe fn JS_GetOwnPropertyDescriptorById<C, O, I, D>(_cx: C, _obj: O, _id: I, _desc: D) -> bool { false }

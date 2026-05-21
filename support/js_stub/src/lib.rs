@@ -935,7 +935,7 @@ pub mod rust {
         pub unsafe fn CallOriginalPromiseReject<C, V>(_cx: C, _value: V) -> *mut jsapi::JSObject { ptr::null_mut() }
         pub unsafe fn JS_DefineUCProperty2<C, O, N, V>(_cx: C, _obj: O, _name: N, _namelen: usize, _val: V, _attrs: u32) -> bool { false }
         pub unsafe fn ToJSON<C, V, O, T, W, D>(_cx: C, _val: V, _obj: O, _replacer: T, _callback: W, _data: D) -> bool { false }
-        pub unsafe fn JS_GetOwnPropertyDescriptorById<C, O, I, D>(_cx: C, _obj: O, _id: I, _desc: D) -> bool { false }
+        pub unsafe fn JS_GetOwnPropertyDescriptorById<C>(_cx: C, _obj: *mut jsapi::JSObject, _id: jsapi::jsid, _desc: *mut jsapi::PropertyDescriptor, _found: *mut bool) -> bool { false }
     }
 
     pub struct Runtime;
@@ -1208,6 +1208,7 @@ pub mod realms {
         pub fn new<C, O>(_cx: C, _obj: O) -> Self { Self(std::marker::PhantomData) }
         pub unsafe fn new_from_handle<T, O>(_cx: T, _obj: O) -> Self { Self(std::marker::PhantomData) }
         pub fn current_realm(&mut self) -> CurrentRealm<'_> { CurrentRealm(std::marker::PhantomData) }
+        pub unsafe fn raw_cx(&mut self) -> *mut jsapi::JSContext { ptr::null_mut() }
         pub fn global_and_reborrow(&mut self) -> (jsapi::HandleObject<'static>, &'static mut crate::context::JSContext) {
             let cx = unsafe {
                 crate::context::JSContext::from_ptr(std::ptr::NonNull::dangling())

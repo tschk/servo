@@ -95,7 +95,7 @@ pub mod glue {
     pub fn UncheckedUnwrapObject(_obj: *mut jsapi::JSObject, _stopAtOuter: bool) -> *mut jsapi::JSObject { ptr::null_mut() }
     pub fn IsProxyHandlerFamily(_obj: *mut jsapi::JSObject) -> bool { false }
     pub fn GetProxyHandlerFamily() -> *const std::ffi::c_void { ptr::null() }
-    pub fn CreateRustJSPrincipals<C, P>(_callbacks: C, _private: P) -> *mut std::ffi::c_void { ptr::null_mut() }
+    pub fn CreateRustJSPrincipals<C>(_callbacks: C, _private: *mut std::ffi::c_void) -> *mut std::ffi::c_void { ptr::null_mut() }
     pub fn GetRustJSPrincipalsPrivate(_p: *mut std::ffi::c_void) -> *mut std::ffi::c_void { ptr::null_mut() }
     pub type JSPrincipalsCallbacks = std::ffi::c_void;
     pub fn GetProxyHandlerExtra(_proxy: *mut jsapi::JSObject) -> *mut std::ffi::c_void { ptr::null_mut() }
@@ -139,9 +139,12 @@ pub mod jsapi {
     pub type JSClass = JSClassDef;
     #[derive(Copy, Clone, PartialEq, Eq)]
     #[repr(transparent)]
-    pub struct jsid(pub u64);
-    impl std::ops::Deref for jsid { type Target = u64; fn deref(&self) -> &u64 { &self.0 } }
-    impl std::fmt::Debug for jsid { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "jsid({})", self.0) } }
+    pub struct jsid {
+        pub asBits_: u64,
+    }
+    pub const fn jsid(asBits_: u64) -> jsid { jsid { asBits_ } }
+    impl std::ops::Deref for jsid { type Target = u64; fn deref(&self) -> &u64 { &self.asBits_ } }
+    impl std::fmt::Debug for jsid { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "jsid({})", self.asBits_) } }
     impl From<u64> for jsid { fn from(v: u64) -> jsid { jsid(v) } }
     impl From<*const jsid> for jsid { fn from(p: *const jsid) -> jsid { unsafe { *p } } }
     impl From<&jsid> for *const jsid { fn from(p: &jsid) -> *const jsid { p as *const jsid } }
@@ -767,11 +770,11 @@ pub mod jsapi {
     pub fn JS_ResolveStandardClass(_cx: *mut JSContext, _obj: *mut JSObject, _id: jsid, _resolved: *mut bool) -> bool { false }
     pub fn JS_DropPrincipals(_cx: *mut JSContext, _p: *mut std::ffi::c_void) {}
     pub fn JS_HoldPrincipals<P>(_p: P) {}
-    pub fn JS_DefinePropertyById<C, O, I, V, R>(_cx: C, _obj: O, _id: I, _val: V, _result: R) -> bool { false }
+    pub fn JS_DefinePropertyById<C, I, V, R>(_cx: C, _obj: *mut JSObject, _id: I, _val: V, _result: R) -> bool { false }
     pub fn JS_IdToValue(_cx: *mut JSContext, _id: jsid, _vp: *mut JSVal) -> bool { false }
     pub enum DOMProxyShadowsResult { Shadows, DoesntShadow, DoesntShadowUnique, ShadowsViaDirectExpando, ShadowsViaIndirectExpando, ShadowCheckFailed }
     pub fn GetStaticPrototype(_obj: *mut JSObject) -> *mut JSObject { ptr::null_mut() }
-    pub fn SetDOMProxyInformation<F, C, P>(_domProxyHandlerFamily: F, _callback: C, _class: P) {}
+    pub fn SetDOMProxyInformation<F, C>(_domProxyHandlerFamily: F, _callback: C, _class: *const std::ffi::c_void) {}
     pub fn HideScriptedCaller(_cx: *mut JSContext) {}
     pub fn UnhideScriptedCaller(_cx: *mut JSContext) {}
     pub struct MemoryUse;
@@ -787,7 +790,7 @@ pub mod jsapi {
     pub enum ExceptionStackBehavior { Capture, DoNotCapture }
     pub fn GetCurrentRealmOrNull(_cx: *mut JSContext) -> *mut std::ffi::c_void { ptr::null_mut() }
     pub fn JS_ValueToSource(_cx: *mut JSContext, _val: JSVal) -> *mut JSString { ptr::null_mut() }
-    pub fn GetObjectProto<C, O, R>(_cx: C, _obj: O, _result: R) -> bool { false }
+    pub fn GetObjectProto<C, O>(_cx: C, _obj: O, _result: *mut *mut JSObject) -> bool { false }
 
     pub mod glue {
         pub use crate::rust::wrappers2::JS_GetOwnPropertyDescriptorById;
@@ -1013,8 +1016,8 @@ pub mod rust {
         pub unsafe fn JS_DefineFunctions<C, O>(_cx: C, _obj: O, _funcs: *const jsapi::JSFunctionSpec) -> bool { false }
         pub unsafe fn JS_GetOwnPropertyDescriptorById<C, O, I, D>(_cx: C, _obj: O, _id: I, _desc: D, _found: *mut bool) -> bool { false }
         pub unsafe fn InvokeGetOwnPropertyDescriptor<H, C, P, I, D>(_handler: H, _cx: C, _proxy: P, _id: I, _desc: D, _found: *mut bool) -> bool { false }
-        pub unsafe fn SetPropertyIgnoringNamedGetter<C, O, I, V, D, R>(_cx: C, _obj: O, _id: I, _v: V, _strict: bool, _desc: D, _result: R) -> bool { false }
-        pub unsafe fn Call(_cx: *mut jsapi::JSContext, _this: *mut jsapi::JSObject, _fun: *mut jsapi::JSObject, _args: *const jsapi::JSVal, _rval: *mut jsapi::JSVal) -> bool { false }
+        pub unsafe fn SetPropertyIgnoringNamedGetter<C, O, I, V, R, D, S>(_cx: C, _obj: O, _id: I, _v: V, _receiver: R, _desc: D, _result: S) -> bool { false }
+        pub unsafe fn Call<C, T, F, A, R>(_cx: C, _this: T, _fun: F, _args: A, _rval: R) -> bool { false }
         pub unsafe fn EnterRealm<C, O>(_cx: C, _realm: O) -> *mut std::ffi::c_void { ptr::null_mut() }
         pub unsafe fn LeaveRealm<C, R>(_cx: C, _old_realm: R) {}
     }
@@ -1430,8 +1433,16 @@ pub mod typedarray {
 // ── Misc modules ────────────────────────────────────────────────────────────
 
 pub mod jsid {
-    pub struct SymbolId(pub super::jsapi::JSVal);
-    pub type StringId = *const u8;
+    #[derive(Copy, Clone)]
+    pub struct SymbolId {
+        pub asBits_: u64,
+    }
+    #[derive(Copy, Clone)]
+    pub struct StringId {
+        pub ptr: *const u8,
+    }
+    pub fn SymbolId(_value: super::jsapi::JSVal) -> super::jsapi::jsid { super::jsapi::jsid(0) }
+    pub fn StringId(value: *const u8) -> StringId { StringId { ptr: value } }
 }
 
 pub mod realm {

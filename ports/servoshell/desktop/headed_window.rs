@@ -10,8 +10,11 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::env;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::Path;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use euclid::{Angle, Length, Point2D, Rect, Rotation3D, Scale, Size2D, UnknownUnit, Vector3D};
 use keyboard_types::ShortcutMatcher;
@@ -59,6 +62,8 @@ use crate::window::{
 };
 
 pub(crate) const INITIAL_WINDOW_TITLE: &str = "Servo";
+const DEFAULT_SOLILOQUY_RUNTIME_STATE_ENV: &str = "/run/soliloquy/runtime-state.env";
+const DEFAULT_SOLILOQUY_RUNTIME_EVENTS_FILE: &str = "/run/soliloquy/runtime-events.log";
 
 pub struct HeadedWindow {
     /// The egui interface that is responsible for showing the user interface elements of
@@ -102,6 +107,8 @@ pub struct HeadedWindow {
     visible_input_method: Cell<Option<EmbedderControlId>>,
     /// The position of the mouse cursor after the most recent `MouseMove` event.
     last_mouse_position: Cell<Option<Point2D<f32, DeviceIndependentPixel>>>,
+    soliloquy_first_frame_recorded: Cell<bool>,
+    soliloquy_interactive_recorded: Cell<bool>,
 }
 
 impl HeadedWindow {
@@ -238,6 +245,8 @@ impl HeadedWindow {
             dialogs: Default::default(),
             visible_input_method: Default::default(),
             last_mouse_position: Default::default(),
+            soliloquy_first_frame_recorded: Cell::new(false),
+            soliloquy_interactive_recorded: Cell::new(false),
         });
         eprintln!("[sol-servo] headed_window.struct build done");
 
@@ -574,6 +583,26 @@ impl HeadedWindow {
         self.gui.borrow().toolbar_height()
     }
 
+    fn record_soliloquy_browser_events(&self, window: &ServoShellWindow) {
+        if !self.winit_window.is_visible().unwrap_or(true) || window.active_webview().is_none() {
+            return;
+        }
+        let now_unix_ms = soliloquy_unix_ms();
+        let last_title = self.last_title.borrow();
+        let title = last_title.trim();
+        if !self.soliloquy_first_frame_recorded.replace(true) {
+            record_soliloquy_runtime_state("SOLILOQUY_FIRST_FRAME_UNIX_MS", now_unix_ms);
+            record_soliloquy_runtime_event("first_frame", "servo", &title, now_unix_ms);
+        }
+        if title.is_empty() || title == INITIAL_WINDOW_TITLE {
+            return;
+        }
+        if !self.soliloquy_interactive_recorded.replace(true) {
+            record_soliloquy_runtime_state("SOLILOQUY_BROWSER_INTERACTIVE_UNIX_MS", now_unix_ms);
+            record_soliloquy_runtime_event("browser_interactive", "servo", &title, now_unix_ms);
+        }
+    }
+
     pub(crate) fn handle_winit_window_event(
         &self,
         state: Rc<RunningAppState>,
@@ -593,6 +622,7 @@ impl HeadedWindow {
             let mut gui = self.gui.borrow_mut();
             gui.update(&state, &window, self);
             gui.paint(&self.winit_window);
+            self.record_soliloquy_browser_events(&window);
         }
 
         let forward_mouse_event_to_egui = |point: Option<PhysicalPosition<f64>>| {
@@ -1410,4 +1440,62 @@ impl TouchEventSimulator {
         )));
         true
     }
+}
+
+fn record_soliloquy_runtime_state(key: &str, value: u128) {
+    let path = env::var("SOLILOQUY_RUNTIME_STATE_ENV")
+        .unwrap_or_else(|_| DEFAULT_SOLILOQUY_RUNTIME_STATE_ENV.to_string());
+    let path = Path::new(&path);
+    if let Some(parent) = path.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    let mut next = String::new();
+    let prefix = format!("{key}=");
+    for line in existing.lines() {
+        if !line.starts_with(&prefix) {
+            next.push_str(line);
+            next.push('\n');
+        }
+    }
+    next.push_str(&format!("{key}={value}\n"));
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+    if fs::write(&tmp, next).is_ok() {
+        let _ = fs::rename(tmp, path);
+    }
+}
+
+fn record_soliloquy_runtime_event(kind: &str, source: &str, detail: &str, unix_ms: u128) {
+    let path = env::var("SOLILOQUY_RUNTIME_EVENTS_FILE")
+        .unwrap_or_else(|_| DEFAULT_SOLILOQUY_RUNTIME_EVENTS_FILE.to_string());
+    let path = Path::new(&path);
+    if let Some(parent) = path.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    let _ = writeln!(
+        file,
+        "{}\t{}\t{}\t{}",
+        unix_ms,
+        soliloquy_event_field(kind),
+        soliloquy_event_field(source),
+        soliloquy_event_field(detail)
+    );
+}
+
+fn soliloquy_event_field(value: &str) -> String {
+    value.replace(['\t', '\n'], " ")
+}
+
+fn soliloquy_unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
 }

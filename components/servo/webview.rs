@@ -38,6 +38,7 @@ use crate::clipboard_delegate::{ClipboardDelegate, DefaultClipboardDelegate};
 use crate::gamepad_delegate::{DefaultGamepadDelegate, GamepadDelegate};
 use crate::responders::IpcResponder;
 use crate::servo::PendingHandledInputEvent;
+use crate::soliloquy_bridge::record_webview_navigation_request;
 use crate::webview_delegate::{CreateNewWebViewRequest, DefaultWebViewDelegate, WebViewDelegate};
 use crate::{
     ColorPicker, ContextMenu, EmbedderControl, InputMethodControl, SelectElement, Servo,
@@ -213,6 +214,7 @@ impl WebView {
                     Url::parse("about:blank")
                         .expect("Should always be able to parse 'about:blank'."),
                 );
+                record_webview_navigation_request(webview.id(), url.to_string());
 
                 servo
                     .constellation_proxy()
@@ -458,6 +460,7 @@ impl WebView {
     }
 
     pub fn load(&self, url: Url) {
+        record_webview_navigation_request(self.id(), url.to_string());
         self.inner()
             .servo
             .constellation_proxy()
@@ -469,6 +472,7 @@ impl WebView {
 
     /// Load a [`UrlRequest`] into this [`WebView`].
     pub fn load_request(&self, url_request: UrlRequest) {
+        record_webview_navigation_request(self.id(), url_request.url.to_string());
         self.inner()
             .servo
             .constellation_proxy()

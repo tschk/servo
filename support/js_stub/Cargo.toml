@@ -6,6 +6,8 @@ license = "MPL-2.0"
 description = "V8-backed JS stub replacing mozjs SpiderMonkey FFI"
 
 [dependencies]
+crossbeam-channel = { workspace = true }
+indexmap = { workspace = true }
 rusty_v8 = { workspace = true, optional = true }
 
 [features]

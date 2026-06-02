@@ -50,7 +50,7 @@ impl SoliloquyJavascriptBackend {
                 {
                     Self::Mozjs
                 }
-            }
+            },
         }
     }
 
@@ -174,9 +174,11 @@ impl SoliloquyV8IsolateOwner {
     #[cfg(feature = "soliloquy_v8")]
     fn rusty_v8() -> Self {
         SOLILOQUY_V8_INIT.call_once(|| {
-            let platform = v8::new_default_platform(0, false).make_shared();
-            v8::V8::initialize_platform(platform);
-            v8::V8::initialize();
+            if std::panic::catch_unwind(v8::V8::get_current_platform).is_err() {
+                let platform = v8::new_default_platform(0, false).make_shared();
+                v8::V8::initialize_platform(platform);
+                v8::V8::initialize();
+            }
         });
 
         SOLILOQUY_V8_ISOLATE.with(|isolate| {

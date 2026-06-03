@@ -86,3 +86,15 @@ macro_rules! rooted_vec {
         let $name: Vec<_> = $iter.collect();
     };
 }
+
+#[macro_export]
+macro_rules! glue_stub {
+    (pub fn $name:ident($($arg:ident : $ty:ty),*) -> $ret:ty) => {
+        pub fn $name($($arg: $ty),*) -> $ret {
+            Default::default()
+        }
+    };
+    (pub fn $name:ident($($arg:ident : $ty:ty),*)) => {
+        pub fn $name($($arg: $ty),*) {}
+    };
+}

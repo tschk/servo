@@ -7883,7 +7883,7 @@ impl{self.generic} Clone for {self.makeClassName(self.dictionary)}{self.genericS
             "    rooted!(&in(cx) let mut rval = UndefinedValue());\n"
             "    if get_dictionary_property(cx, object.handle(), "
             f'c"{member.identifier.name}", '
-            "rval.handle_mut(), can_gc)? && !rval.is_undefined() {\n"
+            "rval.handle_mut())? && !rval.is_undefined() {\n"
             f"{indent(conversion)}\n"
             "    } else {\n"
             f"{indent(default)}\n"

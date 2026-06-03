@@ -5045,6 +5045,13 @@ pub mod rust {
                 _val: super::HandleValue,
                 _option: Self::Config,
             ) -> Result<ConversionResult<Self>, ()>;
+            fn safe_from_jsval(
+                cx: &mut crate::context::JSContext,
+                val: super::HandleValue,
+                option: Self::Config,
+            ) -> Result<ConversionResult<Self>, ()> {
+                unsafe { Self::from_jsval(cx.raw_cx(), val, option) }
+            }
         }
     }
 

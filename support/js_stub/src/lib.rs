@@ -5341,6 +5341,15 @@ pub mod rust {
         use super::super::jsapi;
         use std::ptr;
 
+        pub use super::super::jsapi::{
+            GetRealmObjectPrototype, JS_GetLatin1StringCharsAndLength,
+            JS_GetTwoByteStringCharsAndLength, JS_NewPlainObject,
+        };
+        pub use super::wrappers::{
+            GetPropertyKeys, JS_CopyOwnPropertiesAndPrivateFields, JS_HasProperty, JS_IdToValue,
+            JS_InitializePropertiesFromCompatibleNativeObject, NewProxyObject,
+        };
+
         pub unsafe fn JS_GetRuntime(_cx: *mut jsapi::JSContext) -> *mut std::ffi::c_void {
             ptr::null_mut()
         }
@@ -6186,6 +6195,8 @@ pub mod gc {
     pub type HandleValue<'a> = super::jsapi::Handle<'a, super::jsapi::JSVal>;
     pub type MutableHandleValue<'a> = super::jsapi::MutableHandle<'a, super::jsapi::JSVal>;
     pub type HandleObject<'a> = super::jsapi::Handle<'a, *mut super::jsapi::JSObject>;
+    pub type MutableHandleObject<'a> =
+        super::jsapi::MutableHandle<'a, *mut super::jsapi::JSObject>;
     pub type Handle<'a, T> = super::jsapi::Handle<'a, T>;
     pub type RootedVec<T> = Vec<T>;
     pub type StackGCVector<T> = Vec<T>;

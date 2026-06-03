@@ -611,7 +611,7 @@ pub fn is_array_like<D: crate::DomTypes>(
     value: HandleValue,
 ) -> bool {
     let mut is_array = false;
-    assert!(unsafe { IsArrayObject(cx, value, &mut is_array) });
+    assert!(unsafe { IsArrayObject(&mut *cx, value, &mut is_array) });
     if is_array {
         return true;
     }

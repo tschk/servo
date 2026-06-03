@@ -880,7 +880,7 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
 
     # A helper function for types that implement FromJSValConvertible trait
     def fromJSValTemplate(config: str, errorHandler: str, exceptionCode: str) -> str:
-        return f"""match FromJSValConvertible::safe_from_jsval(cx, ${{val}}, {config}) {{
+        return f"""match FromJSValConvertible::safe_from_jsval(&mut cx, ${{val}}, {config}) {{
     Ok(ConversionResult::Success(value)) => value,
     Ok(ConversionResult::Failure(error)) => {{
         {errorHandler}
@@ -1025,7 +1025,7 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
 
         templateBody = fill(
             """
-            match ${function}($${val}, cx) {
+            match ${function}($${val}, SafeJSContext::from(&mut *cx)) {
                 Ok(val) => val,
                 Err(()) => {
                     $*{failureCode}
@@ -3240,7 +3240,7 @@ class CGConstructorEnabled(CGAbstractMethod):
     def __init__(self, descriptor: Descriptor) -> None:
         CGAbstractMethod.__init__(self, descriptor,
                                   'ConstructorEnabled', 'bool',
-                                  [Argument("&mut JSContext", "cx"),
+                                  [Argument("&mut JSContext", "mut cx"),
                                    Argument("HandleObject", "aObj")],
                                   templateArgs=['D: DomTypes'],
                                   pub=True)
@@ -3344,7 +3344,7 @@ class CGWrapMethod(CGAbstractMethod):
     def __init__(self, descriptor: Descriptor) -> None:
         assert not descriptor.interface.isCallback()
         assert not descriptor.isGlobal()
-        args = [Argument('&mut JSContext', 'cx'),
+        args = [Argument('&mut JSContext', 'mut cx'),
                 Argument('&D::GlobalScope', 'scope'),
                 Argument('Option<HandleObject>', 'given_proto'),
                 Argument(f"Box<{descriptor.concreteType}>", 'object')]
@@ -3399,7 +3399,7 @@ class CGWrapGlobalMethod(CGAbstractMethod):
     def __init__(self, descriptor: Descriptor, properties: PropertyArrays) -> None:
         assert not descriptor.interface.isCallback()
         assert descriptor.isGlobal()
-        args = [Argument('&mut JSContext', 'cx'),
+        args = [Argument('&mut JSContext', 'mut cx'),
                 Argument(f"Box<{descriptor.concreteType}>", 'object')]
         retval = f'DomRoot<{descriptor.concreteType}>'
         CGAbstractMethod.__init__(self, descriptor, 'Wrap', retval, args,
@@ -3414,7 +3414,7 @@ class CGWrapGlobalMethod(CGAbstractMethod):
             ("define_guarded_methods", self.properties.methods),
             ("define_guarded_constants", self.properties.consts)
         ]
-        members = [f"{function}::<D>(cx.into(), obj.handle(), {array.variableName()}.get(), obj.handle());"
+        members = [f"{function}::<D>(SafeJSContext::from(&mut *cx), obj.handle(), {array.variableName()}.get(), obj.handle());"
                    for (function, array) in pairs if array.length() > 0]
         membersStr = "\n".join(members)
         name = self.descriptor.name
@@ -3426,7 +3426,7 @@ unsafe {{
 
     rooted!(&in(cx) let mut obj = ptr::null_mut::<JSObject>());
     create_global_object::<D>(
-        cx.into(),
+        SafeJSContext::from(&mut *cx),
         &Class.get().base,
         raw.as_ptr() as *const libc::c_void,
         {TRACE_HOOK_NAME}::<D>,
@@ -3438,12 +3438,12 @@ unsafe {{
     let root = raw.reflect_with(obj.get());
     root.reflector().set_proto_id(PrototypeList::ID::{name} as u16);
 
-    let _ac = JSAutoRealm::new(cx, obj.get());
+    let _ac = JSAutoRealm::new(&mut *cx, obj.get());
     rooted!(&in(cx) let mut canonical_proto = ptr::null_mut::<JSObject>());
-    GetProtoObject::<D>(cx, obj.handle(), canonical_proto.handle_mut());
-    assert!(JS_SetPrototype(cx, obj.handle(), canonical_proto.handle()));
+    GetProtoObject::<D>(&mut *cx, obj.handle(), canonical_proto.handle_mut());
+    assert!(JS_SetPrototype(&mut *cx, obj.handle(), canonical_proto.handle()));
     let mut immutable = false;
-    assert!(JS_SetImmutablePrototype(cx, obj.handle(), &mut immutable));
+    assert!(JS_SetImmutablePrototype(&mut *cx, obj.handle(), &mut immutable));
     assert!(immutable);
 
     {membersStr}
@@ -3653,7 +3653,7 @@ class CGCollectJSONAttributesMethod(CGAbstractMethod):
     Generate the CollectJSONAttributes method for an interface descriptor
     """
     def __init__(self, descriptor: Descriptor, toJSONMethod: IDLType | None) -> None:
-        args = [Argument('&mut JSContext', 'cx'),
+        args = [Argument('&mut JSContext', 'mut cx'),
                 Argument('RawHandleObject', 'obj'),
                 Argument('*mut libc::c_void', 'this'),
                 Argument('HandleObject', 'result')]
@@ -3702,7 +3702,7 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
     properties should be a PropertyArrays instance.
     """
     def __init__(self, descriptor: Descriptor, properties: PropertyArrays, haveUnscopables: bool, haveLegacyWindowAliases: bool) -> None:
-        args = [Argument('&mut JSContext', 'cx'), Argument('HandleObject', 'global'),
+        args = [Argument('&mut JSContext', 'mut cx'), Argument('HandleObject', 'global'),
                 Argument('*mut ProtoOrIfaceArray', 'cache')]
         CGAbstractMethod.__init__(self, descriptor, 'CreateInterfaceObjects', 'void', args,
                                   unsafe=True, templateArgs=['D: DomTypes'])
@@ -3969,7 +3969,7 @@ class CGGetPerInterfaceObject(CGAbstractMethod):
     constructor object).
     """
     def __init__(self, descriptor: Descriptor, name: str, idPrefix: str = "", pub: bool = False) -> None:
-        args = [Argument('&mut JSContext', 'cx'),
+        args = [Argument('&mut JSContext', 'mut cx'),
                 Argument('HandleObject', 'global'),
                 Argument('MutableHandleObject', 'mut rval')]
         CGAbstractMethod.__init__(self, descriptor, name,
@@ -4114,7 +4114,7 @@ class CGDefineDOMInterfaceMethod(CGAbstractMethod):
     def __init__(self, descriptor: Descriptor) -> None:
         assert descriptor.interface.hasInterfaceObject()
         args = [
-            Argument('&mut JSContext', 'cx'),
+            Argument('&mut JSContext', 'mut cx'),
             Argument('HandleObject', 'global'),
         ]
         CGAbstractMethod.__init__(self, descriptor, 'DefineDOMInterface',
@@ -4209,7 +4209,7 @@ class CGCallGenerator(CGThing):
         # Build up our actual call
         self.cgRoot = CGList([], "\n")
         if nativeMethodName in descriptor.cx_no_gcMethods or nativeMethodName in descriptor.cxMethods:
-            args.prepend(CGGeneric("cx"))
+            args.prepend(CGGeneric("&mut cx"))
         elif nativeMethodName in descriptor.realmMethods:
             self.cgRoot.append(CGList([
                 CGGeneric("let mut realm = CurrentRealm::assert(cx);"),
@@ -4218,9 +4218,9 @@ class CGCallGenerator(CGThing):
             args.prepend(CGGeneric("cx"))
         else:
             if "cx" not in argsPre and needsCx:
-                args.prepend(CGGeneric("cx"))
+                args.prepend(CGGeneric("&mut cx"))
             if nativeMethodName in descriptor.inRealmMethods:
-                args.append(CGGeneric("InRealm::already(&AlreadyInRealm::assert_for_cx(cx))"))
+                args.append(CGGeneric("InRealm::already(&AlreadyInRealm::assert_for_cx(SafeJSContext::from(&mut cx)))"))
             if nativeMethodName in descriptor.canGcMethods:
                 args.append(CGGeneric("CanGc::deprecated_note()"))
         if rootType:
@@ -4252,19 +4252,19 @@ class CGCallGenerator(CGThing):
         ]))
 
         if hasCEReactions:
-            self.cgRoot.append(CGGeneric("<D as DomHelpers<D>>::pop_current_element_queue(cx);\n"))
+            self.cgRoot.append(CGGeneric("<D as DomHelpers<D>>::pop_current_element_queue(&mut cx);\n"))
 
         if isFallible:
             if static:
                 glob = "global.upcast::<D::GlobalScope>()"
             else:
-                glob = "&this.global_(InRealm::already(&AlreadyInRealm::assert_for_cx(cx)))"
+                glob = "&this.global_(InRealm::already(&AlreadyInRealm::assert_for_cx(SafeJSContext::from(&mut cx))))"
 
             self.cgRoot.append(CGGeneric(
                 "let result = match result {\n"
                 "    Ok(result) => result,\n"
                 "    Err(e) => {\n"
-                f"        <D as DomHelpers<D>>::throw_dom_exception(cx, {glob}, e, CanGc::deprecated_note());\n"
+                f"        <D as DomHelpers<D>>::throw_dom_exception(SafeJSContext::from(&mut cx), {glob}, e, CanGc::deprecated_note());\n"
                 f"        return{errorResult};\n"
                 "    },\n"
                 "};"))
@@ -5603,7 +5603,7 @@ class CGUnionConversionStruct(CGThing):
         def get_match(name: str) -> str:
             generic = "::<D>" if containsDomInterface(self.type) else ""
             return (
-                f"match {self.type}{generic}::TryConvertTo{name}(SafeJSContext::from_ptr(cx), value) {{\n"
+                f"match {self.type}{generic}::TryConvertTo{name}(&mut *cx, value) {{\n"
                 "    Err(_) => return Err(()),\n"
                 f"    Ok(Some(value)) => return Ok(ConversionResult::Success({self.type}::{name}(value))),\n"
                 "    Ok(None) => (),\n"
@@ -5765,7 +5765,7 @@ class CGUnionConversionStruct(CGThing):
 
         return CGWrapper(
             CGIndenter(jsConversion, 4),
-            pre=f"unsafe fn TryConvertTo{t.name}(cx: &mut JSContext, value: HandleValue) -> {returnType} {{\n",
+            pre=f"unsafe fn TryConvertTo{t.name}(mut cx: &mut JSContext, value: HandleValue) -> {returnType} {{\n",
             post="\n}")
 
     def define(self) -> str:
@@ -6957,7 +6957,7 @@ let global = D::GlobalScope::from_object(JS_CALLEE(cx, vp).to_object());
             assert len(signatures) == 1
             constructorCall = f"""
                 <D as DomHelpers<D>>::call_html_constructor::<D::{self.descriptor.name}>(
-                    cx,
+                    &mut cx,
                     &args,
                     &global,
                     PrototypeList::ID::{MakeNativeName(self.descriptor.name)},
@@ -6992,7 +6992,7 @@ let global = D::GlobalScope::from_object(JS_CALLEE(cx, vp).to_object());
                 PrototypeList::ID::{MakeNativeName(self.descriptor.name)},
                 \"{ctorName}\",
                 CreateInterfaceObjects::<D>,
-                |cx: &mut JSContext, args: &CallArgs, global: &D::GlobalScope, desired_proto: HandleObject| {{
+                |mut cx: &mut JSContext, args: &CallArgs, global: &D::GlobalScope, desired_proto: HandleObject| {{
                     {constructor.define()}
                 }}
             )
@@ -7784,7 +7784,7 @@ impl{self.generic} Clone for {self.makeClassName(self.dictionary)}{self.genericS
         return (
             f"impl{self.generic} {selfName}{self.genericSuffix} {{\n"
             f"{CGIndenter(CGGeneric(self.makeEmpty()), indentLevel=4).define()}\n"
-            "    pub fn new(cx: &mut JSContext, val: HandleValue) \n"
+            "    pub fn new(mut cx: &mut JSContext, val: HandleValue) \n"
             f"                      -> Result<ConversionResult<{actualType}>, ()> {{\n"
             f"        {unsafe_if_necessary} {{\n"
             "            let object = if val.get().is_null_or_undefined() {\n"
@@ -8555,8 +8555,8 @@ class CGCallback(CGClass):
 
         # And the cx argument
         method.args[0].argType = "&mut JSContext"
-        args.insert(0, Argument("&mut JSContext", "cx"))
-        argsWithoutThis.insert(0, Argument("&mut JSContext", "cx"))
+        args.insert(0, Argument("&mut JSContext", "mut cx"))
+        argsWithoutThis.insert(0, Argument("&mut JSContext", "mut cx"))
 
         # And the self argument
         method.args.insert(0, Argument(None, "&self"))
@@ -9080,7 +9080,7 @@ class CGIterableMethodGenerator(CGGeneric):
             return
         CGGeneric.__init__(self, fill(
             """
-            let realm = AlreadyInRealm::assert_for_cx(cx);
+            let realm = AlreadyInRealm::assert_for_cx(SafeJSContext::from(&mut cx));
             let result = ${iterClass}::new(this, IteratorType::${itrMethod}, InRealm::already(&realm));
             """,
             iterClass=iteratorNativeType(descriptor, True),

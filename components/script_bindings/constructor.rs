@@ -19,6 +19,7 @@ use crate::guard::Guard;
 use crate::interface::{create_callback_interface_object, get_desired_proto};
 use crate::js::rust::GCMethods;
 use crate::namespace::{NamespaceObjectClass, create_namespace_object};
+use crate::script_runtime::JSContext as SafeJSContext;
 use crate::utils::ProtoOrIfaceArray;
 
 pub(crate) unsafe fn call_default_constructor<D: crate::DomTypes>(
@@ -91,16 +92,16 @@ pub(crate) unsafe fn create_namespace_interface_objects<D: DomTypes>(
     rooted!(&in(cx) let mut proto: *mut JSObject = std::ptr::null_mut());
     unsafe {
         if init.is_proto_hack {
-            proto.set(GetRealmObjectPrototype(cx))
+            proto.set(GetRealmObjectPrototype(&mut *cx))
         } else {
-            proto.set(JS_NewPlainObject(cx))
+            proto.set(JS_NewPlainObject(&mut *cx))
         };
     }
 
     assert!(!proto.is_null());
     rooted!(&in(cx) let mut namespace = ptr::null_mut::<JSObject>());
     create_namespace_object::<D>(
-        cx.into(),
+        SafeJSContext::from(&mut *cx),
         global,
         proto.handle(),
         init.namespace_object_class,

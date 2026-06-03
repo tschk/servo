@@ -253,7 +253,7 @@ pub fn get_dictionary_property(
     }
 
     let mut found = false;
-    if unsafe { !JS_HasProperty(cx, object, property.as_ptr(), &mut found) } {
+    if unsafe { !JS_HasProperty(&mut *cx, object, property.as_ptr(), &mut found) } {
         return Err(());
     }
 
@@ -261,7 +261,7 @@ pub fn get_dictionary_property(
         return Ok(false);
     }
 
-    if unsafe { !JS_GetProperty(cx, object, property.as_ptr(), rval) } {
+    if unsafe { !JS_GetProperty(&mut *cx, object, property.as_ptr(), rval) } {
         return Err(());
     }
 

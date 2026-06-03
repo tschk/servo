@@ -67,7 +67,7 @@ pub(crate) unsafe fn wrap<T: MutDomObject, D: DomTypes>(
 
             if config.is_maybe_cross_origin_object {
                 obj.set(NewProxyObject(
-                    cx,
+                    &mut *cx,
                     handler,
                     Handle::undefined(),
                     ptr::null_mut(),
@@ -76,7 +76,7 @@ pub(crate) unsafe fn wrap<T: MutDomObject, D: DomTypes>(
                 ));
             } else {
                 obj.set(NewProxyObject(
-                    cx,
+                    &mut *cx,
                     handler,
                     Handle::undefined(),
                     canonical_proto.get(),
@@ -96,13 +96,13 @@ pub(crate) unsafe fn wrap<T: MutDomObject, D: DomTypes>(
             if let Some(given) = given_proto {
                 proto.set(*given);
                 if get_context_realm(cx.raw_cx()) != get_object_realm(*given) {
-                    assert!(JS_WrapObject(cx, proto.handle_mut()));
+                    assert!(JS_WrapObject(&mut *cx, proto.handle_mut()));
                 }
             } else {
                 proto.set(*canonical_proto);
             }
             obj.set(JS_NewObjectWithGivenProto(
-                cx,
+                &mut *cx,
                 config.class.unwrap(),
                 proto.handle(),
             ));

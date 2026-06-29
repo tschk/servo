@@ -925,11 +925,11 @@ pub(crate) unsafe extern "C" fn host_import_module_dynamically(
     let cx = &mut cx;
     let promise = Promise::new_with_js_promise(cx, unsafe { Handle::from_raw(promise) });
 
-    let jsstr = unsafe { GetModuleRequestSpecifier(cx, Handle::from_raw(specifier)) };
-    let module_type = unsafe { GetModuleRequestType(cx, Handle::from_raw(specifier)) };
-    let specifier = unsafe { jsstr_to_string(cx, NonNull::new(jsstr).unwrap()) };
+    let jsstr = unsafe { GetModuleRequestSpecifier(&mut *cx, Handle::from_raw(specifier)) };
+    let module_type = unsafe { GetModuleRequestType(&mut *cx, Handle::from_raw(specifier)) };
+    let specifier = unsafe { jsstr_to_string(&mut *cx, NonNull::new(jsstr).unwrap()) };
 
-    let mut realm = CurrentRealm::assert(cx);
+    let mut realm = CurrentRealm::assert(&mut *cx);
     let payload = Payload::PromiseRecord(promise);
     host_load_imported_module(
         &mut realm,

@@ -2562,7 +2562,7 @@ pub(crate) fn pipe_through(
     // Step 2. Assert: `! IsWritableStreamLocked(transform.[[writable]])` is false.
 
     // Above is done in `pipe_to` below.
-    let mut realm = CurrentRealm::assert(cx);
+    let mut realm = CurrentRealm::assert(&mut *cx);
     // Step 4. Let promise be ! ReadableStreamPipeTo(readable,
     // transform.[[writable]], preventClose, preventAbort, preventCancel, signalArg).
     let promise = source.pipe_to(

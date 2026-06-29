@@ -502,7 +502,7 @@ impl OffscreenCanvasMethods<crate::DomTypeHolder> for OffscreenCanvas {
         options: &ImageEncodeOptions,
     ) -> Rc<Promise> {
         // Step 5. Let result be a new promise object.
-        let mut realm = CurrentRealm::assert(cx);
+        let mut realm = CurrentRealm::assert(&mut *cx);
         let promise = Promise::new_in_realm(&mut realm);
 
         // Step 1. If the value of this's [[Detached]] internal slot is true,

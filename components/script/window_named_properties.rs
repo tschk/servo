@@ -199,7 +199,7 @@ unsafe extern "C" fn get_prototype_if_ordinary(
     _cx: *mut JSContext,
     proxy: HandleObject,
     is_ordinary: *mut bool,
-    proto: MutableHandleObject,
+    mut proto: MutableHandleObject,
 ) -> bool {
     unsafe {
         *is_ordinary = true;

@@ -92,7 +92,7 @@ pub(crate) fn load_requested_modules(
     // Not required, since we implement it as an `Option`
 
     // Step 2. Let pc be ! NewPromiseCapability(%Promise%).
-    let mut realm = CurrentRealm::assert(cx);
+    let mut realm = CurrentRealm::assert(&mut *cx);
     let promise = Promise::new_in_realm(&mut realm);
 
     // Step 3. Let state be the GraphLoadingState Record
@@ -168,7 +168,7 @@ fn inner_module_loading(
                     unsafe { jsstr_to_string(cx, std::ptr::NonNull::new(jsstr).unwrap()) };
                 let module_type = unsafe { GetRequestedModuleType(cx, module_handle, index) };
 
-                let realm = CurrentRealm::assert(cx);
+                let realm = CurrentRealm::assert(&mut *cx);
                 let global = GlobalScope::from_current_realm(&realm);
 
                 // ii. Else if module.[[LoadedModules]] contains a LoadedModuleRequest Record record
@@ -303,7 +303,7 @@ fn continue_dynamic_import(
         return;
     }
 
-    let realm = CurrentRealm::assert(cx);
+    let realm = CurrentRealm::assert(&mut *cx);
     let global = GlobalScope::from_current_realm(&realm);
 
     // Step 2. Let module be moduleCompletion.[[Value]].
@@ -410,7 +410,7 @@ pub(crate) fn host_load_imported_module(
     payload: Payload,
 ) {
     // Step 1. Let settingsObject be the current settings object.
-    let realm = CurrentRealm::assert(cx);
+    let realm = CurrentRealm::assert(&mut *cx);
     let mut global_scope = GlobalScope::from_current_realm(&realm);
 
     // TODO Step 2. If settingsObject's global object implements WorkletGlobalScope or ServiceWorkerGlobalScope and loadState is undefined, then:
@@ -502,7 +502,7 @@ pub(crate) fn host_load_imported_module(
 
     let on_single_fetch_complete =
         move |cx: &mut JSContext, module_tree: Option<Rc<ModuleTree>>| {
-            let mut realm = CurrentRealm::assert(cx);
+            let mut realm = CurrentRealm::assert(&mut *cx);
             let cx = &mut realm;
 
             // Step 1. Let completion be null.

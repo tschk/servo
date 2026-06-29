@@ -77,7 +77,7 @@ impl MediaDevicesMethods<crate::DomTypeHolder> for MediaDevices {
     /// <https://w3c.github.io/mediacapture-main/#dom-mediadevices-enumeratedevices>
     fn EnumerateDevices(&self, cx: &mut JSContext) -> Rc<Promise> {
         // Step 1.
-        let mut realm = CurrentRealm::assert(cx);
+        let mut realm = CurrentRealm::assert(&mut *cx);
         let p = Promise::new_in_realm(&mut realm);
 
         // Step 2.

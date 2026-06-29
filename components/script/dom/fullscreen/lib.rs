@@ -154,7 +154,7 @@ impl Document {
 
         // Step 1
         // > Let promise be a new promise
-        let mut realm = CurrentRealm::assert(cx);
+        let mut realm = CurrentRealm::assert(&mut *cx);
         let promise = Promise::new_in_realm(&mut realm);
 
         // Step 2

@@ -381,7 +381,7 @@ pub(crate) trait GlobalCspReporting {
 
 #[expect(unsafe_code)]
 fn compute_scripted_caller_source_position(cx: &mut JSContext) -> SourcePosition {
-    match unsafe { describe_scripted_caller(cx.raw_cx()) } {
+    match unsafe { describe_scripted_caller(cx) } {
         Ok(scripted_caller) => SourcePosition {
             source_file: scripted_caller.filename,
             line_number: scripted_caller.line,

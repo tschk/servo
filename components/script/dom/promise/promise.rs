@@ -402,7 +402,7 @@ impl FromJSValConvertibleRc for Promise {
             return Ok(ConversionResult::Failure(c"null not allowed".into()));
         }
 
-        let realm = CurrentRealm::assert(cx);
+        let realm = CurrentRealm::assert(&mut *cx);
         let global_scope = GlobalScope::from_current_realm(&realm);
 
         let promise = Promise::new_resolved(cx, &global_scope, value);

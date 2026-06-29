@@ -84,7 +84,7 @@ impl MicrotaskQueue {
     #[expect(unsafe_code)]
     pub(crate) fn enqueue(&self, job: Microtask, cx: JSContext) {
         self.microtask_queue.borrow_mut().push(job);
-        unsafe { JobQueueMayNotBeEmpty(*cx) };
+        unsafe { JobQueueMayNotBeEmpty(&cx) };
     }
 
     /// <https://html.spec.whatwg.org/multipage/#perform-a-microtask-checkpoint>

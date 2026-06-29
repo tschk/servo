@@ -80,13 +80,39 @@ macro_rules! auto_root {
 #[macro_export]
 macro_rules! rooted_vec {
     (let mut $name:ident) => {
-        let mut $name = Vec::new();
+        let mut __rootable_vec = $crate::gc::RootableVec::new_unrooted();
+        let mut $name = $crate::gc::RootedVec::new(&mut __rootable_vec);
     };
     (let mut $name:ident <- $iter:expr) => {
-        let mut $name: Vec<_> = $iter.collect();
+        let mut __rootable_vec = $crate::gc::RootableVec::new_unrooted();
+        let mut $name = $crate::gc::RootedVec::from_iter(&mut __rootable_vec, $iter);
     };
     (let $name:ident <- $iter:expr) => {
-        let $name: Vec<_> = $iter.collect();
+        let mut __rootable_vec = $crate::gc::RootableVec::new_unrooted();
+        let $name = $crate::gc::RootedVec::from_iter(&mut __rootable_vec, $iter);
+    };
+}
+
+#[macro_export]
+macro_rules! typedarray {
+    (&in($cx:expr) $($t:tt)*) => {
+        typedarray!(in(unsafe { $cx.raw_cx() }) $($t)*);
+    };
+    (in($cx:expr) let $name:ident : $ty:ident = $init:expr) => {
+        let mut __array =
+            $crate::typedarray::$ty::from($init).map($crate::rust::CustomAutoRooter::new);
+        let $name = match __array.as_mut() {
+            Some(rooter) => Ok(rooter.root($cx)),
+            None => Err($crate::rust::typedarray_err_dummy()),
+        };
+    };
+    (in($cx:expr) let mut $name:ident : $ty:ident = $init:expr) => {
+        let mut __array =
+            $crate::typedarray::$ty::from($init).map($crate::rust::CustomAutoRooter::new);
+        let mut $name = match __array.as_mut() {
+            Some(rooter) => Ok(rooter.root($cx)),
+            None => Err($crate::rust::typedarray_err_dummy()),
+        };
     };
 }
 

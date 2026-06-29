@@ -102,16 +102,16 @@ macro_rules! typedarray {
         let mut __array =
             $crate::typedarray::$ty::from($init).map($crate::rust::CustomAutoRooter::new);
         let $name = match __array.as_mut() {
-            Some(rooter) => Ok(rooter.root($cx)),
-            None => Err($crate::rust::typedarray_err_dummy()),
+            Some(rooter) => Some(rooter.root($cx)),
+            None => None,
         };
     };
     (in($cx:expr) let mut $name:ident : $ty:ident = $init:expr) => {
         let mut __array =
             $crate::typedarray::$ty::from($init).map($crate::rust::CustomAutoRooter::new);
         let mut $name = match __array.as_mut() {
-            Some(rooter) => Ok(rooter.root($cx)),
-            None => Err($crate::rust::typedarray_err_dummy()),
+            Some(rooter) => Some(rooter.root($cx)),
+            None => None,
         };
     };
 }

@@ -3510,6 +3510,7 @@ pub mod jsapi {
     ) -> *const u16 {
         crate::v8_glue::two_byte_chars_and_len(s, len)
     }
+
     #[cfg(not(feature = "v8"))]
     pub fn JS_NewStringCopyN<C, S>(_cx: C, _s: S, _len: usize) -> *mut JSString {
         ptr::null_mut()
@@ -5475,8 +5476,8 @@ pub mod rust {
     {
         Ok(())
     }
-    pub fn describe_scripted_caller<C: ?Sized>(_cx: &C) -> Option<ScriptedCaller> {
-        None
+    pub fn describe_scripted_caller<C: ?Sized>(_cx: &C) -> Result<ScriptedCaller, ()> {
+        Err(())
     }
     pub fn error_info_from_exception_stack<C: ?Sized>(
         _cx: &C,
@@ -6183,6 +6184,7 @@ pub mod rust {
             <T as super::gc::Traceable>::trace(self, tr);
         }
     }
+
     pub trait IntoHandle {
         type Target;
         fn into_handle(self) -> Self::Target;

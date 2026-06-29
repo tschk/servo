@@ -24,6 +24,7 @@ use crate::dom::servoparser::{ParsingAlgorithm, Sink};
 #[cfg_attr(crown, crown::unrooted_must_root_lint::must_root)]
 pub(crate) struct Tokenizer {
     #[ignore_malloc_size_of = "Defined in xml5ever"]
+    #[custom_trace]
     inner: XmlTokenizer<XmlTreeBuilder<Dom<Node>, Sink>>,
 }
 

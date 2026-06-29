@@ -42,6 +42,7 @@ use crate::dom::shadowroot::ShadowRoot;
 #[cfg_attr(crown, crown::unrooted_must_root_lint::must_root)]
 pub(crate) struct Tokenizer {
     #[ignore_malloc_size_of = "Defined in html5ever"]
+    #[custom_trace]
     inner: HtmlTokenizer<TreeBuilder<Dom<Node>, Sink>>,
 }
 

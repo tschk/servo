@@ -122,7 +122,9 @@ pub struct TextInput<T: ClipboardProvider> {
     /// The maximum number of UTF-16 code units this text input is allowed to hold.
     ///
     /// <https://html.spec.whatwg.org/multipage/#attr-fe-maxlength>
+    #[custom_trace]
     max_length: Option<Utf16CodeUnitLength>,
+    #[custom_trace]
     min_length: Option<Utf16CodeUnitLength>,
 
     /// Was last change made by set_content?

@@ -408,7 +408,7 @@ impl CustomElementRegistryMethods<crate::DomTypeHolder> for CustomElementRegistr
         // Steps 14.1 - 14.2: Get the value of the prototype.
         rooted!(&in(cx) let mut prototype = UndefinedValue());
         {
-            let mut realm = AutoRealm::new_from_handle(cx, constructor.handle());
+            let mut realm = unsafe { AutoRealm::new_from_handle(&mut *cx, constructor.handle()) };
             if let Err(error) =
                 self.check_prototype(&mut realm, constructor.handle(), prototype.handle_mut())
             {
@@ -424,7 +424,7 @@ impl CustomElementRegistryMethods<crate::DomTypeHolder> for CustomElementRegistr
         // if one of the callback getters throws an exception.
         rooted!(&in(cx) let proto_object = prototype.to_object());
         let mut callbacks = {
-            let mut realm = AutoRealm::new_from_handle(cx, proto_object.handle());
+            let mut realm = unsafe { AutoRealm::new_from_handle(&mut *cx, proto_object.handle()) };
             match self.get_callbacks(&mut realm, proto_object.handle()) {
                 Ok(callbacks) => callbacks,
                 Err(error) => {
@@ -438,7 +438,7 @@ impl CustomElementRegistryMethods<crate::DomTypeHolder> for CustomElementRegistr
         // is not null.
         let observed_attributes: Vec<DOMString> = if callbacks.attribute_changed_callback.is_some()
         {
-            let mut realm = AutoRealm::new_from_handle(cx, constructor.handle());
+            let mut realm = unsafe { AutoRealm::new_from_handle(&mut *cx, constructor.handle()) };
             match get_property(
                 &mut realm,
                 constructor.handle(),
@@ -457,7 +457,7 @@ impl CustomElementRegistryMethods<crate::DomTypeHolder> for CustomElementRegistr
 
         // Steps 14.6 - 14.10: Handle `disabledFeatures`.
         let (disable_internals, disable_shadow) = {
-            let mut realm = AutoRealm::new_from_handle(cx, constructor.handle());
+            let mut realm = unsafe { AutoRealm::new_from_handle(&mut *cx, constructor.handle()) };
             match get_property::<Vec<DOMString>>(
                 &mut realm,
                 constructor.handle(),
@@ -480,7 +480,7 @@ impl CustomElementRegistryMethods<crate::DomTypeHolder> for CustomElementRegistr
 
         // Step 14.11 - 14.12: Handle `formAssociated`.
         let form_associated: bool = {
-            let mut realm = AutoRealm::new_from_handle(cx, constructor.handle());
+            let mut realm = unsafe { AutoRealm::new_from_handle(&mut *cx, constructor.handle()) };
             match get_property(&mut realm, constructor.handle(), c"formAssociated", ()) {
                 Ok(flag) => flag.unwrap_or_default(),
                 Err(error) => {
@@ -492,7 +492,7 @@ impl CustomElementRegistryMethods<crate::DomTypeHolder> for CustomElementRegistr
 
         // Steps 14.13: Add the `formAssociated` callbacks.
         if form_associated {
-            let mut realm = AutoRealm::new_from_handle(cx, proto_object.handle());
+            let mut realm = unsafe { AutoRealm::new_from_handle(&mut *cx, proto_object.handle()) };
             unsafe {
                 if let Err(error) = self.add_form_associated_callbacks(
                     &mut realm,

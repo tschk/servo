@@ -363,7 +363,7 @@ where
             },
             BufferSource::ArrayBuffer(buffer) => unsafe {
                 ArrayBufferClone(
-                    cx,
+                    &mut *cx,
                     Handle::from_raw(buffer.handle()),
                     byte_offset,
                     byte_length,

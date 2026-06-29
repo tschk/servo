@@ -164,8 +164,8 @@ impl Console {
 
 #[expect(unsafe_code)]
 fn handle_value_to_string(cx: &mut JSContext, value: HandleValue) -> DOMString {
-    match std::ptr::NonNull::new(unsafe { JS_ValueToSource(cx, value) }) {
-        Some(js_str) => unsafe { jsstr_to_string(cx, js_str) }.into(),
+    match std::ptr::NonNull::new(unsafe { JS_ValueToSource(&mut *cx, value) }) {
+        Some(js_str) => unsafe { jsstr_to_string(&mut *cx, js_str) }.into(),
         None => "<error converting value to string>".into(),
     }
 }
@@ -183,7 +183,7 @@ fn console_argument_from_handle_value(
     ) -> Result<DebuggerValue, ()> {
         if handle_value.is_string() {
             let js_string = ptr::NonNull::new(handle_value.to_string()).unwrap();
-            let dom_string = unsafe { jsstr_to_string(cx, js_string) };
+            let dom_string = unsafe { jsstr_to_string(&mut *cx, js_string) };
             return Ok(DebuggerValue::StringValue(dom_string));
         }
 
@@ -257,8 +257,8 @@ fn console_map_object_from_handle_value(
     handle_object: HandleObject,
     seen: &mut Vec<u64>,
 ) -> Option<(String, ObjectPreview)> {
-    rooted!(&in(cx) let mut iterator = UndefinedValue());
-    if !unsafe { MapEntries(cx, handle_object, iterator.handle_mut()) } {
+    rooted!(&in(&mut *cx) let mut iterator = UndefinedValue());
+    if !unsafe { MapEntries(&mut *cx, handle_object, iterator.handle_mut()) } {
         return None;
     }
 
@@ -268,13 +268,13 @@ fn console_map_object_from_handle_value(
             return Err(().into());
         }
 
-        rooted!(&in(cx) let entry_object = entry.to_object());
-        rooted!(&in(cx) let mut key = UndefinedValue());
-        rooted!(&in(cx) let mut value = UndefinedValue());
+        rooted!(&in(&mut *cx) let entry_object = entry.to_object());
+        rooted!(&in(&mut *cx) let mut key = UndefinedValue());
+        rooted!(&in(&mut *cx) let mut value = UndefinedValue());
 
         // Each map entry is a [key, value] pair.
-        if !unsafe { JS_GetElement(cx, entry_object.handle(), 0, key.handle_mut()) } ||
-            !unsafe { JS_GetElement(cx, entry_object.handle(), 1, value.handle_mut()) }
+        if !unsafe { JS_GetElement(&mut *cx, entry_object.handle(), 0, key.handle_mut()) } ||
+            !unsafe { JS_GetElement(&mut *cx, entry_object.handle(), 1, value.handle_mut()) }
         {
             return Err(().into());
         }
@@ -292,7 +292,7 @@ fn console_map_object_from_handle_value(
         "Map".into(),
         ObjectPreview {
             kind: "MapLike".into(),
-            size: Some(unsafe { MapSize(cx, handle_object) }),
+            size: Some(unsafe { MapSize(&mut *cx, handle_object) }),
             entries: Some(entries),
             own_properties_length: Some(0),
             own_properties: None,
@@ -309,9 +309,9 @@ fn console_object_from_handle_value(
     handle_value: HandleValue,
     seen: &mut Vec<u64>,
 ) -> Option<(String, ObjectPreview)> {
-    rooted!(&in(cx) let object = handle_value.to_object());
+    rooted!(&in(&mut *cx) let object = handle_value.to_object());
     let mut object_class = ESClass::Other;
-    if !unsafe { GetBuiltinClass(cx, object.handle(), &mut object_class as *mut _) } {
+    if !unsafe { GetBuiltinClass(&mut *cx, object.handle(), &mut object_class as *mut _) } {
         return None;
     }
     if object_class != ESClass::Object &&
@@ -333,7 +333,7 @@ fn console_object_from_handle_value(
     // Objects with either generic JavaScript object formatting or optimally useful formatting applied.
     if !unsafe {
         GetPropertyKeys(
-            cx,
+            &mut *cx,
             object.handle(),
             jsapi::JSITER_OWNONLY | jsapi::JSITER_SYMBOLS | jsapi::JSITER_HIDDEN,
             ids.handle_mut(),
@@ -343,13 +343,13 @@ fn console_object_from_handle_value(
     }
 
     for id in ids.iter() {
-        rooted!(&in(cx) let id = *id);
-        rooted!(&in(cx) let mut descriptor = PropertyDescriptor::default());
+        rooted!(&in(&mut *cx) let id = *id);
+        rooted!(&in(&mut *cx) let mut descriptor = PropertyDescriptor::default());
 
         let mut is_none = false;
         if !unsafe {
             JS_GetOwnPropertyDescriptorById(
-                cx,
+                &mut *cx,
                 object.handle(),
                 id.handle(),
                 descriptor.handle_mut(),
@@ -369,7 +369,7 @@ fn console_object_from_handle_value(
         let value = if is_accessor {
             accessor_value_from_property_descriptor(&descriptor)
         } else {
-            rooted!(&in(cx) let property = descriptor.value_);
+            rooted!(&in(&mut *cx) let property = descriptor.value_);
             console_argument_from_handle_value(cx, property.handle(), seen)
         };
 
@@ -380,18 +380,18 @@ fn console_object_from_handle_value(
         }
 
         let key = if id.is_string() {
-            rooted!(&in(cx) let mut key_value = UndefinedValue());
-            if !unsafe { JS_IdToValue(cx, id.handle().get(), key_value.handle_mut()) } {
+            rooted!(&in(&mut *cx) let mut key_value = UndefinedValue());
+            if !unsafe { JS_IdToValue(&mut *cx, id.handle().get(), key_value.handle_mut()) } {
                 continue;
             }
-            rooted!(&in(cx) let js_string = key_value.to_string());
+            rooted!(&in(&mut *cx) let js_string = key_value.to_string());
             let Some(js_string) = NonNull::new(js_string.get()) else {
                 continue;
             };
-            unsafe { jsstr_to_string(cx, js_string) }
+            unsafe { jsstr_to_string(&mut *cx, js_string) }
         } else if id.is_symbol() || id.is_int() {
-            rooted!(&in(cx) let mut key_value = UndefinedValue());
-            if !unsafe { JS_IdToValue(cx, id.handle().get(), key_value.handle_mut()) } {
+            rooted!(&in(&mut *cx) let mut key_value = UndefinedValue());
+            if !unsafe { JS_IdToValue(&mut *cx, id.handle().get(), key_value.handle_mut()) } {
                 continue;
             }
             handle_value_to_string(cx, key_value.handle()).to_string()
@@ -412,7 +412,7 @@ fn console_object_from_handle_value(
     let (class, kind, function, array_length, items) = match object_class {
         ESClass::Array => {
             let mut len = 0u32;
-            if !unsafe { GetArrayLength(cx, object.handle(), &mut len) } {
+            if !unsafe { GetArrayLength(&mut *cx, object.handle(), &mut len) } {
                 return None;
             }
             items.sort_by_key(|(index, _)| *index);
@@ -426,18 +426,18 @@ fn console_object_from_handle_value(
             )
         },
         ESClass::Function => {
-            rooted!(&in(cx) let fun = unsafe { JS_ValueToFunction(cx, handle_value.get()) });
-            rooted!(&in(cx) let mut name = std::ptr::null_mut::<jsapi::JSString>());
-            rooted!(&in(cx) let mut display_name = std::ptr::null_mut::<jsapi::JSString>());
+            rooted!(&in(&mut *cx) let fun = unsafe { JS_ValueToFunction(&mut *cx, handle_value.get()) });
+            rooted!(&in(&mut *cx) let mut name = std::ptr::null_mut::<jsapi::JSString>());
+            rooted!(&in(&mut *cx) let mut display_name = std::ptr::null_mut::<jsapi::JSString>());
             let arity;
             unsafe {
-                JS_GetFunctionId(cx, fun.handle(), name.handle_mut());
-                JS_GetFunctionDisplayId(cx, fun.handle(), display_name.handle_mut());
+                JS_GetFunctionId(&mut *cx, fun.handle(), name.handle_mut());
+                JS_GetFunctionDisplayId(&mut *cx, fun.handle(), display_name.handle_mut());
                 arity = JS_GetFunctionArity(fun.get());
             }
-            let name = ptr::NonNull::new(*name).map(|name| unsafe { jsstr_to_string(cx, name) });
+            let name = ptr::NonNull::new(*name).map(|name| unsafe { jsstr_to_string(&mut *cx, name) });
             let display_name = ptr::NonNull::new(*display_name)
-                .map(|display_name| unsafe { jsstr_to_string(cx, display_name) });
+                .map(|display_name| unsafe { jsstr_to_string(&mut *cx, display_name) });
 
             // TODO: We should get the actual argument names from the function
             // It's not trivial since we can't access the debugger API here
@@ -481,16 +481,16 @@ fn console_object_from_handle_value(
 pub(crate) fn stringify_handle_value(cx: &mut JSContext, message: HandleValue) -> DOMString {
     if message.is_string() {
         let jsstr = std::ptr::NonNull::new(message.to_string()).unwrap();
-        return unsafe { jsstr_to_string(cx, jsstr) }.into();
+        return unsafe { jsstr_to_string(&mut *cx, jsstr) }.into();
     }
     fn stringify_object_from_handle_value(
         cx: &mut JSContext,
         value: HandleValue,
         parents: Vec<u64>,
     ) -> DOMString {
-        rooted!(&in(cx) let mut obj = value.to_object());
+        rooted!(&in(&mut *cx) let mut obj = value.to_object());
         let mut object_class = ESClass::Other;
-        if !unsafe { GetBuiltinClass(cx, obj.handle(), &mut object_class as *mut _) } {
+        if !unsafe { GetBuiltinClass(&mut *cx, obj.handle(), &mut object_class as *mut _) } {
             return DOMString::from("/* invalid */");
         }
         let mut ids = unsafe { IdVector::new(&mut *cx) };
@@ -516,8 +516,8 @@ pub(crate) fn stringify_handle_value(cx: &mut JSContext, message: HandleValue) -
         let mut explicit_keys = object_class == ESClass::Object;
         let mut props = Vec::with_capacity(ids.len());
         for id in ids.iter().take(MAX_LOG_CHILDREN) {
-            rooted!(&in(cx) let id = *id);
-            rooted!(&in(cx) let mut desc = PropertyDescriptor::default());
+            rooted!(&in(&mut *cx) let id = *id);
+            rooted!(&in(&mut *cx) let mut desc = PropertyDescriptor::default());
 
             let mut is_none = false;
             if !unsafe {
@@ -532,8 +532,8 @@ pub(crate) fn stringify_handle_value(cx: &mut JSContext, message: HandleValue) -
                 return DOMString::from("/* invalid */");
             }
 
-            rooted!(&in(cx) let mut property = UndefinedValue());
-            if !unsafe { JS_GetPropertyById(cx, obj.handle(), id.handle(), property.handle_mut()) }
+            rooted!(&in(&mut *cx) let mut property = UndefinedValue());
+            if !unsafe { JS_GetPropertyById(&mut *cx, obj.handle(), id.handle(), property.handle_mut()) }
             {
                 return DOMString::from("/* invalid */");
             }
@@ -552,8 +552,8 @@ pub(crate) fn stringify_handle_value(cx: &mut JSContext, message: HandleValue) -
             let value_string = stringify_inner(cx, property.handle(), parents.clone());
             if explicit_keys {
                 let key = if id.is_string() || id.is_symbol() || id.is_int() {
-                    rooted!(&in(cx) let mut key_value = UndefinedValue());
-                    if !unsafe { JS_IdToValue(cx, id.handle().get(), key_value.handle_mut()) } {
+                    rooted!(&in(&mut *cx) let mut key_value = UndefinedValue());
+                    if !unsafe { JS_IdToValue(&mut *cx, id.handle().get(), key_value.handle_mut()) } {
                         return DOMString::from("/* invalid */");
                     }
                     handle_value_to_string(cx, key_value.handle())
@@ -606,20 +606,20 @@ fn maybe_stringify_dom_object(cx: &mut JSContext, value: HandleValue) -> Option<
     // since their properties generally live on the prototype object.
     // Instead, fall back to the output of JSON.stringify combined
     // with the class name extracted from the output of toString().
-    rooted!(&in(cx) let obj = value.to_object());
+    rooted!(&in(&mut *cx) let obj = value.to_object());
     let is_dom_class = unsafe { get_dom_class(obj.get()).is_ok() };
     if !is_dom_class {
         return None;
     }
-    rooted!(&in(cx) let class_name = unsafe { ToString(cx, value) });
+    rooted!(&in(&mut *cx) let class_name = unsafe { ToString(&mut *cx, value) });
     let Some(class_name) = NonNull::new(class_name.get()) else {
         return Some("<error converting DOM object to string>".into());
     };
-    let class_name = unsafe { jsstr_to_string(cx, class_name) }
+    let class_name = unsafe { jsstr_to_string(&mut *cx, class_name) }
         .replace("[object ", "")
         .replace("]", "");
     let mut repr = format!("{} ", class_name);
-    rooted!(&in(cx) let mut value = value.get());
+    rooted!(&in(&mut *cx) let mut value = value.get());
 
     #[expect(unsafe_code)]
     unsafe extern "C" fn stringified(
@@ -633,7 +633,7 @@ fn maybe_stringify_dom_object(cx: &mut JSContext, value: HandleValue) -> Option<
         true
     }
 
-    rooted!(&in(cx) let space = Int32Value(2));
+    rooted!(&in(&mut *cx) let space = Int32Value(2));
     let stringify_result = unsafe {
         JS_Stringify(
             cx,
@@ -662,7 +662,7 @@ fn apply_sprintf_substitutions(cx: &mut JSContext, messages: &[HandleValue]) -> 
     debug_assert!(!messages.is_empty() && messages[0].is_string());
 
     let js_string = ptr::NonNull::new(messages[0].to_string()).unwrap();
-    let format_string = unsafe { jsstr_to_string(cx, js_string) };
+    let format_string = unsafe { jsstr_to_string(&mut *cx, js_string) };
 
     let mut result = String::new();
     let mut arg_index = 1usize;
@@ -1021,7 +1021,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
     const MAX_FRAME_COUNT: u32 = 128;
 
     let mut frames = vec![];
-    rooted!(&in(cx) let mut handle =  ptr::null_mut());
+    rooted!(&in(&mut *cx) let mut handle =  ptr::null_mut());
     let captured_js_stack =
         unsafe { CapturedJSStack::new(&mut *cx, handle, Some(MAX_FRAME_COUNT)) };
     let Some(captured_js_stack) = captured_js_stack else {
@@ -1029,7 +1029,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
     };
 
     captured_js_stack.for_each_stack_frame(|frame| {
-        rooted!(&in(cx) let mut result: *mut jsapi::JSString = ptr::null_mut());
+        rooted!(&in(&mut *cx) let mut result: *mut jsapi::JSString = ptr::null_mut());
 
         // Get function name
         unsafe {
@@ -1042,7 +1042,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
             );
         }
         let function_name = if let Some(nonnull_result) = ptr::NonNull::new(*result) {
-            unsafe { jsstr_to_string(cx, nonnull_result) }
+            unsafe { jsstr_to_string(&mut *cx, nonnull_result) }
         } else {
             "<anonymous>".into()
         };
@@ -1059,7 +1059,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
             );
         }
         let filename = if let Some(nonnull_result) = ptr::NonNull::new(*result) {
-            unsafe { jsstr_to_string(cx, nonnull_result) }
+            unsafe { jsstr_to_string(&mut *cx, nonnull_result) }
         } else {
             "<anonymous>".into()
         };

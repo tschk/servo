@@ -192,7 +192,7 @@ impl WindowProxy {
                 0
             );
 
-            let mut realm = AutoRealm::new_from_handle(cx, window_jsobject);
+            let mut realm = unsafe { AutoRealm::new_from_handle(&mut *cx, window_jsobject) };
             let cx = &mut realm;
 
             // Create a new window proxy.
@@ -269,7 +269,7 @@ impl WindowProxy {
                 0
             );
 
-            let mut realm = AutoRealm::new_from_handle(cx, window_jsobject);
+            let mut realm = unsafe { AutoRealm::new_from_handle(&mut *cx, window_jsobject) };
             let cx = &mut realm;
 
             // Create a new window proxy.
@@ -738,7 +738,7 @@ impl WindowProxy {
                 0
             );
 
-            let mut realm = AutoRealm::new_from_handle(cx, window_jsobject);
+            let mut realm = unsafe { AutoRealm::new_from_handle(&mut *cx, window_jsobject) };
             let cx = &mut realm;
 
             // The old window proxy no longer owns this browsing context.

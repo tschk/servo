@@ -111,7 +111,7 @@ fn html_constructor(
     }
 
     {
-        let mut realm = AutoRealm::new_from_handle(cx, callee.handle());
+        let mut realm = unsafe { AutoRealm::new_from_handle(&mut *cx, callee.handle()) };
         let (global_object, cx) = realm.global_and_reborrow();
         rooted!(&in(cx) let mut constructor = ptr::null_mut::<JSObject>());
 

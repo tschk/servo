@@ -53,7 +53,7 @@ impl RecordKey for USVString {
 
     fn from_id(cx: &mut JSContext, id: HandleId) -> Result<ConversionResult<Self>, ()> {
         rooted!(&in(cx) let mut jsid_value = UndefinedValue());
-        unsafe { JS_IdToValue(crate::script_runtime::copy_cx(cx), id.get(), jsid_value.handle_mut()) };
+        unsafe { JS_IdToValue(cx, id.get(), jsid_value.handle_mut()) };
 
         USVString::safe_from_jsval(cx, jsid_value.handle(), ())
     }
@@ -66,7 +66,7 @@ impl RecordKey for ByteString {
 
     fn from_id(cx: &mut JSContext, id: HandleId) -> Result<ConversionResult<Self>, ()> {
         rooted!(&in(cx) let mut jsid_value = UndefinedValue());
-        unsafe { JS_IdToValue(crate::script_runtime::copy_cx(cx), id.get(), jsid_value.handle_mut()) };
+        unsafe { JS_IdToValue(cx, id.get(), jsid_value.handle_mut()) };
 
         ByteString::safe_from_jsval(cx, jsid_value.handle(), ())
     }
@@ -134,7 +134,7 @@ where
         let mut ids = unsafe { IdVector::new(cx) };
         if unsafe {
             !GetPropertyKeys(
-                crate::script_runtime::copy_cx(cx),
+                cx,
                 object.handle(),
                 JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS,
                 ids.handle_mut(),
@@ -151,7 +151,7 @@ where
             let mut is_none = false;
             if unsafe {
                 !JS_GetOwnPropertyDescriptorById(
-                    crate::script_runtime::copy_cx(cx),
+                    cx,
                     object.handle(),
                     id.handle(),
                     desc.handle_mut(),
@@ -174,7 +174,7 @@ where
 
             rooted!(&in(cx) let mut property = UndefinedValue());
             if unsafe {
-                !JS_GetPropertyById(crate::script_runtime::copy_cx(cx), object.handle(), id.handle(), property.handle_mut())
+                !JS_GetPropertyById(cx, object.handle(), id.handle(), property.handle_mut())
             } {
                 return Err(());
             }

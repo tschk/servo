@@ -115,7 +115,7 @@ pub(crate) unsafe extern "C" fn define_property(
     rooted!(&in(cx) let mut expando = ptr::null_mut::<JSObject>());
     ensure_expando_object(cx, proxy, expando.handle_mut());
 
-    JS_DefinePropertyById(cx, expando.handle(), id, desc, result)
+    JS_DefinePropertyById(cx, *expando.handle(), id, desc, result)
 }
 
 /// Deletes an expando off the given `proxy`.
@@ -144,7 +144,7 @@ pub(crate) unsafe extern "C" fn delete(
         return true;
     }
 
-    JS_DeletePropertyById(cx, expando.handle(), id, bp)
+    JS_DeletePropertyById(cx, *expando.handle(), id, bp)
 }
 
 /// Controls whether the Extensible bit can be changed
@@ -347,7 +347,7 @@ pub(crate) unsafe extern "C" fn maybe_cross_origin_set_prototype_rawcx(
     //
     // > 2. Let current be `? O.[[GetPrototypeOf]]()`.
     rooted!(&in(cx) let mut current = ptr::null_mut::<JSObject>());
-    if !GetObjectProto(cx, Handle::from_raw(proxy), current.handle_mut()) {
+    if !GetObjectProto(cx, Handle::from_raw(proxy), current.handle_mut().as_ptr()) {
         return false;
     }
 

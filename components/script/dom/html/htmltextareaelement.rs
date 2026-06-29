@@ -57,7 +57,7 @@ use crate::textinput::{ClipboardEventFlags, IsComposing, KeyReaction, Lines, Tex
 #[dom_struct]
 pub(crate) struct HTMLTextAreaElement {
     htmlelement: HTMLElement,
-    #[no_trace]
+    #[no_trace = "TextInput rope state is not JS-managed"]
     textinput: DomRefCell<TextInput<EmbedderClipboardProvider>>,
     placeholder: RefCell<DOMString>,
     // https://html.spec.whatwg.org/multipage/#concept-textarea-dirty

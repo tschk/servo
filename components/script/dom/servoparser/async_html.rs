@@ -140,7 +140,7 @@ enum ParseOperation {
         template: ParseNodeId,
         attributes: Vec<Attribute>,
         /// Used to notify the parser thread whether or not attaching the shadow root succeeded
-        #[no_trace]
+        #[no_trace = "Channel sender is not JS-managed"]
         sender: Sender<bool>,
     },
 }
@@ -207,10 +207,10 @@ fn create_buffer_queue(mut buffers: VecDeque<SendTendril<UTF8>>) -> BufferQueue 
 #[cfg_attr(crown, crown::unrooted_must_root_lint::must_root)]
 pub(crate) struct Tokenizer {
     document: Dom<Document>,
-    #[no_trace]
+    #[no_trace = "Channel endpoint is not JS-managed"]
     from_parser_thread_receiver: Receiver<FromParserThreadMsg>,
     /// Sender from the main thread to the parser thread.
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     to_parser_thread_sender: Sender<ToParserThreadMsg>,
     nodes: RefCell<FxHashMap<ParseNodeId, Dom<Node>>>,
     #[no_trace]

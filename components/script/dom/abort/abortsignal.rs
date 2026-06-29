@@ -82,12 +82,12 @@ pub(crate) struct AbortSignal {
     dependent: Cell<bool>,
 
     /// <https://dom.spec.whatwg.org/#abortsignal-source-signals>
-    #[no_trace]
+    #[no_trace = "WeakRef set holds no active JS roots"]
     #[ignore_malloc_size_of = "WeakRef"]
     source_signals: DomRefCell<IndexSet<WeakRef<AbortSignal>>>,
 
     /// <https://dom.spec.whatwg.org/#abortsignal-dependent-signals>
-    #[no_trace]
+    #[no_trace = "WeakRef set holds no active JS roots"]
     #[ignore_malloc_size_of = "WeakRef"]
     dependent_signals: DomRefCell<IndexSet<WeakRef<AbortSignal>>>,
 }

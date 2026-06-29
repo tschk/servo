@@ -393,7 +393,7 @@ pub(crate) struct ScriptThreadSenders {
 
     /// The shared [`Sender`] which is sent to the `ImageCache` when requesting an image.
     /// Messages on this channel are sent to [`ScriptThreadReceivers::image_cache_receiver`].
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     pub(crate) image_cache_sender: Sender<ImageCacheResponseMessage>,
 
     /// For providing contact with the time profiler.

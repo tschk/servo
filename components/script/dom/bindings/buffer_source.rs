@@ -440,19 +440,17 @@ where
     pub(crate) fn acquire_data(&self, cx: &mut JSContext) -> Result<Vec<T::Element>, ()> {
         assert!(self.is_initialized());
 
-        let mut rooter = CustomAutoRooter::new(TypedArray::from(match &self.buffer_source {
-            BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => {
-                buffer.get()
+        let mut rooter = CustomAutoRooter::new(TypedArray::<T, *mut JSObject>::from(
+            match &self.buffer_source {
+                BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => {
+                    buffer.get()
+                },
             },
-        })?);
-        let array = Ok(rooter.root(&mut *cx));
-        let data = if let Ok(array) = array {
-            let data = array.to_vec();
-            let _ = self.detach_buffer(cx);
-            Ok(data)
-        } else {
-            Err(())
-        };
+        )?);
+        let array = rooter.root(&mut *cx);
+        let data = array.to_vec();
+        let _ = self.detach_buffer(cx);
+        let data = Ok(data);
 
         match &self.buffer_source {
             BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => {
@@ -470,11 +468,13 @@ where
         length: usize,
     ) -> Result<(), ()> {
         assert!(self.is_initialized());
-        let mut rooter = CustomAutoRooter::new(TypedArray::from(match &self.buffer_source {
-            BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => {
-                buffer.get()
+        let mut rooter = CustomAutoRooter::new(TypedArray::<T, *mut JSObject>::from(
+            match &self.buffer_source {
+                BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => {
+                    buffer.get()
+                },
             },
-        })?);
+        )?);
         let array = rooter.root(&mut *cx);
         unsafe {
             let slice = array.as_slice();
@@ -491,11 +491,13 @@ where
         length: usize,
     ) -> Result<(), ()> {
         assert!(self.is_initialized());
-        let mut rooter = CustomAutoRooter::new(TypedArray::from(match &self.buffer_source {
-            BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => {
-                buffer.get()
+        let mut rooter = CustomAutoRooter::new(TypedArray::<T, *mut JSObject>::from(
+            match &self.buffer_source {
+                BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => {
+                    buffer.get()
+                },
             },
-        })?);
+        )?);
         let mut array = rooter.root(&mut *cx);
         unsafe {
             let slice = array.as_mut_slice();

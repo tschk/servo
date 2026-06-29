@@ -266,18 +266,18 @@ impl PendingTasksStruct {
 #[derive(Clone, JSTraceable)]
 pub(crate) struct WorkletThreadPool {
     // Channels to send data messages to the three roles.
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     primary_sender: Sender<WorkletData>,
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     hot_backup_sender: Sender<WorkletData>,
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     cold_backup_sender: Sender<WorkletData>,
     // Channels to send control messages to the three threads.
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     control_sender_0: Sender<WorkletControl>,
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     control_sender_1: Sender<WorkletControl>,
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     control_sender_2: Sender<WorkletControl>,
 }
 
@@ -810,7 +810,7 @@ impl WorkletThread {
 #[derive(Clone, JSTraceable, MallocSizeOf)]
 pub(crate) struct WorkletExecutor {
     worklet_id: WorkletId,
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     primary_sender: Sender<WorkletData>,
 }
 

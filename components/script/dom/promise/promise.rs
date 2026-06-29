@@ -142,7 +142,7 @@ impl Promise {
                 Some(do_nothing_promise_executor),
                 /* nargs = */ 2,
                 /* flags = */ 0,
-                ptr::null(),
+                ptr::null::<std::os::raw::c_char>(),
             );
             assert!(!do_nothing_func.is_null());
             rooted!(&in(cx) let do_nothing_obj = JS_GetFunctionObject(do_nothing_func));
@@ -372,7 +372,13 @@ fn create_native_handler_function(
     task: NativeHandlerTask,
 ) -> *mut JSObject {
     unsafe {
-        let func = NewFunctionWithReserved(cx, Some(native_handler_callback), 1, 0, ptr::null());
+        let func = NewFunctionWithReserved(
+            cx,
+            Some(native_handler_callback),
+            1,
+            0,
+            ptr::null::<std::os::raw::c_char>(),
+        );
         assert!(!func.is_null());
 
         rooted!(&in(cx) let obj = JS_GetFunctionObject(func));

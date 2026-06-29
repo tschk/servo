@@ -172,7 +172,7 @@ pub(crate) struct ServiceWorkerGlobalScope {
     /// indicating the sw should stop running,
     /// while still draining the task-queue
     // and running all enqueued, and not cancelled, tasks.
-    #[no_trace]
+    #[no_trace = "Channel endpoint is not JS-managed"]
     time_out_port: Receiver<Instant>,
 
     #[no_trace]
@@ -183,7 +183,7 @@ pub(crate) struct ServiceWorkerGlobalScope {
 
     /// A receiver of control messages,
     /// currently only used to signal shutdown.
-    #[no_trace]
+    #[no_trace = "Channel endpoint is not JS-managed"]
     control_receiver: Receiver<ServiceWorkerControlMsg>,
 
     #[no_trace]

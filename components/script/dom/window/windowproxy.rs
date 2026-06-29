@@ -1034,7 +1034,7 @@ unsafe extern "C" fn get_own_property_descriptor(
     let mut slot = UndefinedValue();
     unsafe { GetProxyPrivate(proxy.get(), &mut slot) };
     rooted!(in(cx) let target = slot.to_object());
-    unsafe { JS_GetOwnPropertyDescriptorById(cx, target.handle().into(), id, desc, is_none) }
+    unsafe { JS_GetOwnPropertyDescriptorById(cx, target.get(), id, desc, is_none) }
 }
 
 #[expect(unsafe_code)]
@@ -1059,7 +1059,7 @@ unsafe extern "C" fn define_property(
     let mut slot = UndefinedValue();
     unsafe { GetProxyPrivate(*proxy.ptr, &mut slot) };
     rooted!(in(cx) let target = slot.to_object());
-    unsafe { JS_DefinePropertyById(cx, target.handle().into(), id, desc, res) }
+    unsafe { JS_DefinePropertyById(cx, target.get(), id, desc, res) }
 }
 
 #[expect(unsafe_code)]
@@ -1079,7 +1079,7 @@ unsafe extern "C" fn has(
     unsafe { GetProxyPrivate(*proxy.ptr, &mut slot) };
     rooted!(in(cx) let target = slot.to_object());
     let mut found = false;
-    if !unsafe { JS_HasPropertyById(cx, target.handle().into(), id, &mut found) } {
+    if !unsafe { JS_HasPropertyById(cx, target.get(), id, &mut found) } {
         return false;
     }
 
@@ -1104,7 +1104,7 @@ unsafe extern "C" fn get(
     let mut slot = UndefinedValue();
     unsafe { GetProxyPrivate(*proxy.ptr, &mut slot) };
     rooted!(in(cx) let target = slot.to_object());
-    unsafe { JS_ForwardGetPropertyTo(cx, target.handle().into(), id, receiver, vp) }
+    unsafe { JS_ForwardGetPropertyTo(cx, target.get(), id, receiver, vp) }
 }
 
 #[expect(unsafe_code)]
@@ -1125,7 +1125,7 @@ unsafe extern "C" fn set(
     let mut slot = UndefinedValue();
     unsafe { GetProxyPrivate(*proxy.ptr, &mut slot) };
     rooted!(in(cx) let target = slot.to_object());
-    unsafe { JS_ForwardSetPropertyTo(cx, target.handle().into(), id, v, receiver, res) }
+    unsafe { JS_ForwardSetPropertyTo(cx, target.get(), id, v, receiver, res) }
 }
 
 #[expect(unsafe_code)]

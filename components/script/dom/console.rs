@@ -1035,7 +1035,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
         unsafe {
             GetSavedFrameFunctionDisplayName(
                 cx.raw_cx(),
-                ptr::null_mut(),
+                ptr::null_mut::<*mut js::jsapi::JSPrincipals>(),
                 frame,
                 result.handle_mut(),
                 SavedFrameSelfHosted::Include,
@@ -1052,7 +1052,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
         unsafe {
             GetSavedFrameSource(
                 cx.raw_cx(),
-                ptr::null_mut(),
+                ptr::null_mut::<*mut js::jsapi::JSPrincipals>(),
                 frame,
                 result.handle_mut(),
                 SavedFrameSelfHosted::Include,
@@ -1069,7 +1069,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
         unsafe {
             GetSavedFrameLine(
                 cx.raw_cx(),
-                ptr::null_mut(),
+                ptr::null_mut::<*mut js::jsapi::JSPrincipals>(),
                 frame,
                 &mut line_number,
                 SavedFrameSelfHosted::Include,
@@ -1080,7 +1080,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
         unsafe {
             GetSavedFrameColumn(
                 cx.raw_cx(),
-                ptr::null_mut(),
+                ptr::null_mut::<*mut js::jsapi::JSPrincipals>(),
                 frame,
                 &mut column_number,
                 SavedFrameSelfHosted::Include,

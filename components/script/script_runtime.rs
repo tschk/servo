@@ -806,7 +806,7 @@ impl Runtime {
 
             // Needed for debug assertions about whether GC is running.
             if cfg!(debug_assertions) {
-                JS_SetGCCallback(&cx, Some(debug_gc_callback), ptr::null_mut());
+                JS_SetGCCallback(&cx, Some(debug_gc_callback), ptr::null_mut::<c_void>());
             }
 
             if opts::get()
@@ -892,9 +892,10 @@ impl Runtime {
                 Box::into_raw(interrupt_queues) as *mut c_void,
             );
             SetJobQueue(&cx, job_queue);
-            SetPromiseRejectionTrackerCallback(&cx,
+            SetPromiseRejectionTrackerCallback(
+                &cx,
                 Some(promise_rejection_tracker),
-                ptr::null_mut(),
+                ptr::null_mut::<c_void>(),
             );
 
             RegisterScriptEnvironmentPreparer(

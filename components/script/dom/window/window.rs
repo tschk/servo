@@ -288,7 +288,7 @@ pub(crate) struct Window {
     layout: RefCell<Box<dyn Layout>>,
     navigator: MutNullableDom<Navigator>,
     crypto: MutNullableDom<Crypto>,
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     image_cache_sender: Sender<ImageCacheResponseMessage>,
     window_proxy: MutNullableDom<WindowProxy>,
     document: MutNullableDom<Document>,

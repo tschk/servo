@@ -212,7 +212,7 @@ pub(crate) struct DedicatedWorkerGlobalScope {
     browsing_context: Option<BrowsingContextId>,
     /// A receiver of control messages,
     /// currently only used to signal shutdown.
-    #[no_trace]
+    #[no_trace = "Channel endpoint is not JS-managed"]
     control_receiver: Receiver<DedicatedWorkerControlMsg>,
     #[no_trace]
     queued_worker_tasks: DomRefCell<Vec<MessageData>>,

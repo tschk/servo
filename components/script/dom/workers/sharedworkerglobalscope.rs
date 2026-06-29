@@ -173,7 +173,7 @@ pub(crate) struct SharedWorkerGlobalScope {
     browsing_context: Option<BrowsingContextId>,
     // Shared workers receive message ports through `connect` events on their `SharedWorkerGlobalScope` object for each connection.
     pending_connect: DomRefCell<VecDeque<Dom<MessagePort>>>,
-    #[no_trace]
+    #[no_trace = "Channel endpoint is not JS-managed"]
     control_receiver: Receiver<SharedWorkerControlMsg>,
     debugger_global: Dom<DebuggerGlobalScope>,
     // A `SharedWorkerGlobalScope` object has associated constructor origin (an origin), constructor URL (a URL record), and credentials (a credentials mode), and extended lifetime (a boolean).

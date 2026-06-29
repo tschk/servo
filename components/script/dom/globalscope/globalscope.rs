@@ -172,7 +172,7 @@ pub(crate) struct AutoCloseWorker {
     join_handle: Option<JoinHandle<()>>,
     /// A sender of control messages,
     /// currently only used to signal shutdown.
-    #[no_trace]
+    #[no_trace = "Channel sender is not JS-managed"]
     control_sender: Sender<DedicatedWorkerControlMsg>,
     /// The context to request an interrupt on the worker thread.
     #[ignore_malloc_size_of = "mozjs"]

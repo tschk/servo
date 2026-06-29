@@ -142,7 +142,7 @@ pub(crate) struct HTMLInputElement {
     size: Cell<u32>,
     maxlength: Cell<i32>,
     minlength: Cell<i32>,
-    #[no_trace]
+    #[no_trace = "TextInput rope state is not JS-managed"]
     textinput: DomRefCell<TextInput<EmbedderClipboardProvider>>,
     /// <https://html.spec.whatwg.org/multipage/#concept-input-value-dirty-flag>
     value_dirty: Cell<bool>,

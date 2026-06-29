@@ -336,7 +336,7 @@ unsafe extern "C" fn native_handler_callback(
 
     let args = unsafe { CallArgs::from_vp(vp, argc) };
     let native_handler_value =
-        unsafe { *GetFunctionNativeReserved(args.callee(), SLOT_NATIVEHANDLER) };
+        unsafe { GetFunctionNativeReserved(args.callee(), SLOT_NATIVEHANDLER).get() };
     rooted!(&in(cx) let native_handler_value = native_handler_value);
     assert!(native_handler_value.get().is_object());
 
@@ -346,7 +346,7 @@ unsafe extern "C" fn native_handler_callback(
     .expect("unexpected value for native handler in promise native handler callback");
 
     let native_handler_task_value =
-        unsafe { *GetFunctionNativeReserved(args.callee(), SLOT_NATIVEHANDLER_TASK) };
+        unsafe { GetFunctionNativeReserved(args.callee(), SLOT_NATIVEHANDLER_TASK).get() };
     rooted!(&in(cx) let native_handler_task_value = native_handler_task_value);
     match native_handler_task_value.to_int32() {
         native_handler_task_value

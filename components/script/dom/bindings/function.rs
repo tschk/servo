@@ -48,7 +48,7 @@ macro_rules! native_raw_obj_fn {
         unsafe {
             let name: &std::ffi::CStr = $name;
             let raw_fun = js::rust::wrappers2::JS_NewFunction(
-                $cx,
+                $cx.raw_cx(),
                 Some(wrapper),
                 $nargs,
                 $flags,

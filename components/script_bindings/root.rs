@@ -240,6 +240,14 @@ unsafe impl<T: DomObject> JSTraceable for Dom<T> {
     }
 }
 
+unsafe impl<T: DomObject> js::rust::Trace for Dom<T> {
+    unsafe fn trace(&self, tracer: *mut JSTracer) {
+        unsafe {
+            JSTraceable::trace(self, tracer);
+        }
+    }
+}
+
 /// A traced reference to a DOM object that may not be reflected yet.
 #[cfg_attr(crown, crown::unrooted_must_root_lint::must_root)]
 pub struct MaybeUnreflectedDom<T> {

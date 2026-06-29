@@ -1177,14 +1177,14 @@ impl CustomElementReactionStack {
 
     pub(crate) fn pop_current_element_queue(&self, cx: &mut JSContext) {
         let mut stack: Vec<ElementQueue> = Vec::new();
-        mem::swap(&mut stack, self.stack.borrow_mut());
+        mem::swap(&mut stack, &mut *self.stack.borrow_mut());
 
         if let Some(current_queue) = stack.last() {
             current_queue.invoke_reactions(cx);
         }
         stack.pop();
 
-        mem::swap(self.stack.borrow_mut(), &mut stack);
+        mem::swap(&mut *self.stack.borrow_mut(), &mut stack);
         self.stack.borrow_mut().append(&mut stack);
     }
 

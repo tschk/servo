@@ -148,7 +148,7 @@ where
     }
 
     pub(crate) fn from_view(
-        chunk: CustomAutoRooterGuard<T>,
+        chunk: CustomAutoRooterGuard<TypedArray<T, *mut JSObject>>,
     ) -> RootedTraceableBox<HeapBufferSource<T>> {
         RootedTraceableBox::new(HeapBufferSource::<T>::new(BufferSource::ArrayBufferView(
             Heap::boxed(unsafe { *chunk.underlying_object() }),
@@ -446,9 +446,7 @@ where
                 buffer.get()
             },
         });
-        let data = if let Ok(array) =
-            array as Result<CustomAutoRooterGuard<'_, T>, &mut ()>
-        {
+        let data = if let Ok(array) = array {
             let data = array.to_vec();
             let _ = self.detach_buffer(cx);
             Ok(data)
@@ -478,13 +476,11 @@ where
                 buffer.get()
             },
         });
-        let Ok(array) =
-            array as Result<CustomAutoRooterGuard<'_, T>, &mut ()>
-        else {
+        let Ok(array) = array else {
             return Err(());
         };
         unsafe {
-            let slice = (*array).as_slice();
+            let slice = array.as_slice();
             dest.copy_from_slice(&slice[source_start..length]);
         }
         Ok(())
@@ -493,7 +489,7 @@ where
     pub(crate) fn copy_data_from(
         &self,
         cx: &mut JSContext,
-        source: CustomAutoRooterGuard<T>,
+        source: CustomAutoRooterGuard<TypedArray<T, *mut JSObject>>,
         dest_start: usize,
         length: usize,
     ) -> Result<(), ()> {
@@ -504,13 +500,11 @@ where
                 buffer.get()
             },
         });
-        let Ok(mut array) =
-            array as Result<CustomAutoRooterGuard<'_, T>, &mut ()>
-        else {
+        let Ok(mut array) = array else {
             return Err(());
         };
         unsafe {
-            let slice = (*array).as_mut_slice();
+            let slice = array.as_mut_slice();
             let (_, dest) = slice.split_at_mut(dest_start);
             dest[0..length].copy_from_slice(&source.as_slice()[0..length])
         }

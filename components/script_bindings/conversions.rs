@@ -180,7 +180,7 @@ impl FromJSValConvertible for ByteString {
             let latin1 = JS_DeprecatedStringHasLatin1Chars(string);
             if latin1 {
                 let mut length = 0;
-                let chars = JS_GetLatin1StringCharsAndLength(cx, string, &mut length);
+                let chars = JS_GetLatin1StringCharsAndLength(&mut *cx, ptr::null(), string, &mut length);
                 assert!(!chars.is_null());
 
                 let char_slice = slice::from_raw_parts(chars as *mut u8, length);
@@ -190,7 +190,7 @@ impl FromJSValConvertible for ByteString {
             }
 
             let mut length = 0;
-            let chars = JS_GetTwoByteStringCharsAndLength(cx, string, &mut length);
+            let chars = JS_GetTwoByteStringCharsAndLength(&mut *cx, ptr::null(), string, &mut length);
             let char_vec = slice::from_raw_parts(chars, length);
 
             if char_vec.iter().any(|&c| c > 0xFF) {
@@ -432,15 +432,14 @@ pub fn jsid_to_string(cx: &js::context::JSContext, id: HandleId) -> Option<DOMSt
     None
 }
 
-impl<T: Float + ToJSValConvertible> ToJSValConvertible for Finite<T> {
+impl<T: Float + crate::JSTraceable + ToJSValConvertible> ToJSValConvertible for Finite<T> {
     #[inline]
     unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {
-        let value = **self;
-        value.to_jsval(cx, rval);
+        (*self).to_jsval(cx, rval);
     }
 }
 
-impl<T: Float + FromJSValConvertible<Config = ()>> FromJSValConvertible for Finite<T> {
+impl<T: Float + crate::JSTraceable + FromJSValConvertible<Config = ()>> FromJSValConvertible for Finite<T> {
     type Config = ();
 
     unsafe fn from_jsval(

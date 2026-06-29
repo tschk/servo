@@ -638,7 +638,7 @@ pub(crate) fn maybe_cross_origin_get_prototype<D: DomTypes>(
 ) -> bool {
     // > 1. If ! IsPlatformObjectSameOrigin(this) is true, then return ! OrdinaryGetPrototypeOf(this).
     if is_platform_object_same_origin(cx, proxy) {
-        let mut realm = AutoRealm::new_from_handle(cx, proxy);
+        let mut realm = unsafe { AutoRealm::new_from_handle(cx, proxy) };
         let mut realm = realm.current_realm();
         let global = D::GlobalScope::from_current_realm(&realm);
         get_proto_object(

@@ -642,7 +642,7 @@ unsafe fn call_setter(
     argc: u32,
     vp: *mut JSVal,
 ) -> bool {
-    if !CallJitSetterOp(info, cx, handle, this, argc, vp) {
+    if !CallJitSetterOp(info, cx.raw_cx(), handle, this, argc, vp) {
         return false;
     }
     *vp = UndefinedValue();

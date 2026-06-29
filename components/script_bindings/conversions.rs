@@ -410,7 +410,7 @@ where
     }
     #[expect(unsafe_code)]
     unsafe {
-        root_from_object(v.get().to_object(), *cx)
+        root_from_object(v.get().to_object(), cx.raw_cx())
     }
 }
 
@@ -531,7 +531,7 @@ where
 
     #[expect(unsafe_code)]
     unsafe {
-        native_from_object(v.get().to_object(), *cx)
+        native_from_object(v.get().to_object(), cx.raw_cx())
     }
 }
 

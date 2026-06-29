@@ -96,7 +96,7 @@ macro_rules! rooted_vec {
 #[macro_export]
 macro_rules! typedarray {
     (&in($cx:expr) $($t:tt)*) => {
-        typedarray!(in(unsafe { $cx.raw_cx() }) $($t)*);
+        typedarray!(in(&mut *$cx) $($t)*);
     };
     (in($cx:expr) let $name:ident : $ty:ident = $init:expr) => {
         let mut __array =

@@ -33,7 +33,7 @@ use js::rust::wrappers2::{
     StealArrayBufferContents,
 };
 use js::rust::{
-    CustomAutoRooterGuard, Handle, MutableHandleObject,
+    CustomAutoRooter, CustomAutoRooterGuard, Handle, MutableHandleObject,
     MutableHandleValue as SafeMutableHandleValue,
 };
 #[cfg(feature = "webgpu")]
@@ -440,12 +440,12 @@ where
     pub(crate) fn acquire_data(&self, cx: &mut JSContext) -> Result<Vec<T::Element>, ()> {
         assert!(self.is_initialized());
 
-        typedarray!(&in(cx) let array: TypedArray = match &self.buffer_source {
-            BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer)
-            => {
+        let mut rooter = CustomAutoRooter::new(TypedArray::from(match &self.buffer_source {
+            BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => {
                 buffer.get()
             },
-        });
+        })?);
+        let array = Ok(rooter.root(&mut *cx));
         let data = if let Ok(array) = array {
             let data = array.to_vec();
             let _ = self.detach_buffer(cx);
@@ -470,15 +470,12 @@ where
         length: usize,
     ) -> Result<(), ()> {
         assert!(self.is_initialized());
-        typedarray!(&in(cx) let array: TypedArray = match &self.buffer_source {
-            BufferSource::ArrayBufferView(buffer) |  BufferSource::ArrayBuffer(buffer)
-            => {
+        let mut rooter = CustomAutoRooter::new(TypedArray::from(match &self.buffer_source {
+            BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => {
                 buffer.get()
             },
-        });
-        let Ok(array) = array else {
-            return Err(());
-        };
+        })?);
+        let array = rooter.root(&mut *cx);
         unsafe {
             let slice = array.as_slice();
             dest.copy_from_slice(&slice[source_start..length]);
@@ -494,15 +491,12 @@ where
         length: usize,
     ) -> Result<(), ()> {
         assert!(self.is_initialized());
-        typedarray!(&in(cx) let mut array: TypedArray = match &self.buffer_source {
-            BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer)
-            => {
+        let mut rooter = CustomAutoRooter::new(TypedArray::from(match &self.buffer_source {
+            BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => {
                 buffer.get()
             },
-        });
-        let Ok(mut array) = array else {
-            return Err(());
-        };
+        })?);
+        let mut array = rooter.root(&mut *cx);
         unsafe {
             let slice = array.as_mut_slice();
             let (_, dest) = slice.split_at_mut(dest_start);

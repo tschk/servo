@@ -3357,7 +3357,7 @@ impl GlobalScope {
         );
 
         #[expect(unsafe_code)]
-        let guard = unsafe { CustomAutoRooterGuard::new(cx.raw_cx(), &mut rooted) };
+        let guard = unsafe { CustomAutoRooterGuard::new(&mut *cx, &mut rooted) };
 
         let data = structuredclone::write(cx, value, Some(guard))?;
 

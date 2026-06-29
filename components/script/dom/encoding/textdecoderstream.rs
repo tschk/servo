@@ -51,7 +51,7 @@ pub(crate) fn decode_and_enqueue_a_chunk(
     // Step 4.3 Let result be the result of processing an item with item, decoder’s decoder,
     //      decoder’s I/O queue, output, and decoder’s error mode.
     // Step 4.4 If result is error, then throw a TypeError.
-    let output_chunk = decoder.decode(Some(buffer_source), false)?;
+    let output_chunk = decoder.decode(Some(&buffer_source), false)?;
 
     // Step 4.2.2 If outputChunk is not the empty string, then enqueue
     //      outputChunk in decoder’s transform.

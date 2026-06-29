@@ -1799,7 +1799,7 @@ impl WindowMethods<crate::DomTypeHolder> for Window {
                 .collect(),
         );
         #[expect(unsafe_code)]
-        let transfer = unsafe { CustomAutoRooterGuard::new(cx.raw_cx(), &mut rooted) };
+        let transfer = unsafe { CustomAutoRooterGuard::new(&mut *cx, &mut rooted) };
 
         let incumbent = GlobalScope::incumbent().expect("no incumbent global?");
         let source = incumbent.as_window();

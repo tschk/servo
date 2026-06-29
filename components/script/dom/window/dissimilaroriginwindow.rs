@@ -182,7 +182,7 @@ impl DissimilarOriginWindowMethods<crate::DomTypeHolder> for DissimilarOriginWin
                 .collect(),
         );
         #[expect(unsafe_code)]
-        let transfer = unsafe { CustomAutoRooterGuard::new(cx.raw_cx(), &mut rooted) };
+        let transfer = unsafe { CustomAutoRooterGuard::new(&mut *cx, &mut rooted) };
 
         self.post_message_impl(&options.targetOrigin, cx, message, transfer)
     }

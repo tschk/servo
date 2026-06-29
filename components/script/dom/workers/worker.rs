@@ -316,7 +316,7 @@ impl WorkerMethods<crate::DomTypeHolder> for Worker {
                 .collect(),
         );
         #[expect(unsafe_code)]
-        let guard = unsafe { CustomAutoRooterGuard::new(cx.raw_cx(), &mut rooted) };
+        let guard = unsafe { CustomAutoRooterGuard::new(&mut *cx, &mut rooted) };
         self.post_message_impl(cx, message, guard)
     }
 

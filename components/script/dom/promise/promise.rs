@@ -72,7 +72,7 @@ impl PromiseHelper for Rc<Promise> {
         self.permanent_js_root.set(ObjectValue(*obj));
         unsafe {
             assert!(AddRawValueRoot(
-                cx,
+                cx.raw_cx(),
                 self.permanent_js_root.get_unsafe(),
                 c"Promise::root".as_ptr(),
             ));
@@ -138,7 +138,7 @@ impl Promise {
     fn create_js_promise(cx: &mut JSContext, mut obj: MutableHandleObject) {
         unsafe {
             let do_nothing_func = JS_NewFunction(
-                cx,
+                cx.raw_cx(),
                 Some(do_nothing_promise_executor),
                 /* nargs = */ 2,
                 /* flags = */ 0,
@@ -147,7 +147,7 @@ impl Promise {
             assert!(!do_nothing_func.is_null());
             rooted!(&in(cx) let do_nothing_obj = JS_GetFunctionObject(do_nothing_func));
             assert!(!do_nothing_obj.is_null());
-            obj.set(NewPromiseObject(cx, do_nothing_obj.handle()));
+            obj.set(NewPromiseObject(&mut *cx, do_nothing_obj.handle()));
             assert!(!obj.is_null());
             let is_user_interacting = if ScriptThread::is_user_interacting() {
                 PromiseUserInputEventHandlingState::HadUserInteractionAtCreation

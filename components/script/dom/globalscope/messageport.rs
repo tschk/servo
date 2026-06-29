@@ -229,7 +229,7 @@ impl MessagePort {
 
         // Let options be «[ "transfer" → « » ]».
         let mut rooted = CustomAutoRooter::new(vec![]);
-        let transfer = unsafe { CustomAutoRooterGuard::new(cx.raw_cx(), &mut rooted) };
+        let transfer = unsafe { CustomAutoRooterGuard::new(&mut *cx, &mut rooted) };
 
         // Run the message port post message steps providing targetPort, message, and options.
         rooted!(&in(cx) let mut message_val = UndefinedValue());
@@ -323,7 +323,7 @@ impl MessagePortMethods<crate::DomTypeHolder> for MessagePort {
                 .collect(),
         );
         #[expect(unsafe_code)]
-        let guard = unsafe { CustomAutoRooterGuard::new(cx.raw_cx(), &mut rooted) };
+        let guard = unsafe { CustomAutoRooterGuard::new(&mut *cx, &mut rooted) };
         self.post_message_impl(cx, message, guard)
     }
 

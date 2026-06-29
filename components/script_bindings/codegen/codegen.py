@@ -1031,7 +1031,7 @@ def getJSToNativeConversionInfo(type: IDLType, descriptorProvider: DescriptorPro
 
         templateBody = fill(
             """
-            match ${function}($${val}, SafeJSContext::from_ptr(cx.raw_cx())) {
+            match ${function}($${val}, crate::script_runtime::copy_cx(cx)) {
                 Ok(val) => val,
                 Err(()) => {
                     $*{failureCode}
@@ -4222,7 +4222,7 @@ class CGCallGenerator(CGThing):
         self.cgRoot = CGList([], "\n")
         if nativeMethodName in descriptor.realmMethods:
             self.cgRoot.append(CGList([
-                CGGeneric("let mut realm = CurrentRealm::assert(cx);"),
+                CGGeneric("let mut realm = CurrentRealm::assert(&mut *cx);"),
                 CGGeneric("let cx = &mut realm;"),
             ]))
             args.prepend(CGGeneric("cx"))
@@ -4233,7 +4233,7 @@ class CGCallGenerator(CGThing):
             args.prepend(CGGeneric("cx"))
         else:
             if "cx" not in argsPre and needsCx:
-                args.prepend(CGGeneric("SafeJSContext::from_ptr(cx.raw_cx())"))
+                args.prepend(CGGeneric("crate::script_runtime::copy_cx(cx)"))
             if nativeMethodName in descriptor.canGcMethods:
                 args.append(CGGeneric("CanGc::deprecated_note()"))
 
@@ -4277,14 +4277,14 @@ class CGCallGenerator(CGThing):
             if static:
                 glob = "global.upcast::<D::GlobalScope>()"
             else:
-                glob = "&D::GlobalScope::from_current_realm(&CurrentRealm::assert(crate::script_runtime::copy_cx(cx)))"
+                glob = "&D::GlobalScope::from_current_realm(&CurrentRealm::assert(&mut *cx))"
 
             self.cgRoot.append(CGGeneric(
                 "let result = match result {\n"
                 "    Ok(result) => result,\n"
                 "    Err(e) => {\n"
                 f"        let global = {glob};\n"
-                f"        <D as DomHelpers<D>>::throw_dom_exception(crate::script_runtime::copy_cx(cx), global, e);\n"
+                f"        <D as DomHelpers<D>>::throw_dom_exception(&mut *cx, global, e);\n"
                 f"        return{errorResult};\n"
                 "    },\n"
                 "};"))
@@ -9052,8 +9052,9 @@ class CGIterableMethodGenerator(CGGeneric):
             return
         CGGeneric.__init__(self, fill(
             """
-            let mut realm = CurrentRealm::assert(cx);
-            let result = ${iterClass}::new(&mut realm, this, IteratorType::${itrMethod});
+            let mut realm = CurrentRealm::assert(&mut *cx);
+            let cx = &mut realm;
+            let result = ${iterClass}::new(cx, this, IteratorType::${itrMethod});
             """,
             iterClass=iteratorNativeType(descriptor, True),
             ifaceName=descriptor.interface.identifier.name,

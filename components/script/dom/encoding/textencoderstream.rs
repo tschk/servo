@@ -72,7 +72,8 @@ fn jsval_to_primitive(
 
     // Step 10. Let primValue be ? ToPrimitive(argument, string).
     rooted!(&in(cx) let obj = chunk.to_object());
-    let is_success = unsafe { ToPrimitive(cx, obj.handle().get(), JSType::JSTYPE_STRING, rval) };
+    let is_success =
+        unsafe { ToPrimitive(&mut *cx, obj.handle().get(), JSType::JSTYPE_STRING, rval) };
     log::debug!("ToPrimitive is_success={:?}", is_success);
     if !is_success {
         unsafe {
@@ -238,10 +239,11 @@ pub(crate) fn encode_and_enqueue_a_chunk(
     let input = unsafe {
         if JS_DeprecatedStringHasLatin1Chars(*jsstr) {
             let s = NonNull::new(*jsstr).expect("jsstr cannot be null");
-            ConvertedInput::String(latin1_to_string(cx, s))
+            ConvertedInput::String(latin1_to_string(&mut *cx, s))
         } else {
             let mut len = 0;
-            let data = JS_GetTwoByteStringCharsAndLength(cx, ptr::null(), *jsstr, &mut len);
+            let data =
+                JS_GetTwoByteStringCharsAndLength(&mut *cx, ptr::null(), *jsstr, &mut len);
             let maybe_ill_formed_code_units = std::slice::from_raw_parts(data, len);
             ConvertedInput::CodeUnits(maybe_ill_formed_code_units)
         }

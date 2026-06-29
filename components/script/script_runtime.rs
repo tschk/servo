@@ -531,7 +531,7 @@ fn safely_convert_null_to_string(cx: &js::context::JSContext, str_: HandleString
 unsafe extern "C" fn code_for_eval_gets(
     cx: *mut RawJSContext,
     code: HandleObject,
-    code_for_eval: MutableHandleString,
+    mut code_for_eval: MutableHandleString,
 ) -> bool {
     let mut cx = unsafe { JSContext::from_raw_ptr(cx) };
     if let Ok(trusted_script) =
@@ -539,7 +539,7 @@ unsafe extern "C" fn code_for_eval_gets(
     {
         let script_str = trusted_script.data().str();
         let s = js::conversions::Utf8Chars::from(&*script_str);
-        let new_string = unsafe { JS_NewStringCopyUTF8N(&mut cx, &*s as *const _) };
+        let new_string = unsafe { JS_NewStringCopyUTF8N(&mut cx, s.as_ptr()) };
         code_for_eval.set(new_string);
     }
     true
@@ -885,7 +885,7 @@ impl Runtime {
         let cx_opts;
         let job_queue;
         unsafe {
-            let cx = runtime.cx();
+            let mut cx = runtime.cx();
             job_queue = CreateJobQueue(
                 &JOB_QUEUE_TRAPS,
                 &*microtask_queue as *const _ as *const c_void,
@@ -905,7 +905,7 @@ impl Runtime {
 
             EnsureModuleHooksInitialized(runtime.rt());
 
-            let cx = runtime.cx();
+            let mut cx = runtime.cx();
 
             set_gc_zeal_options(cx.raw_cx());
 

@@ -2658,7 +2658,9 @@ fn new_js_regex(
     mut out_regex: MutableHandleObject,
 ) -> bool {
     let pattern: Vec<u16> = pattern.encode_utf16().collect();
-    out_regex.set(unsafe { NewUCRegExpObject(cx, pattern.as_ptr(), pattern.len(), flags) });
+    out_regex.set(unsafe {
+        NewUCRegExpObject(&mut *cx, pattern.as_ptr(), pattern.len(), flags)
+    });
 
     if out_regex.is_null() {
         unsafe { JS_ClearPendingException(cx) };

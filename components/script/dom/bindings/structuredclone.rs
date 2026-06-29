@@ -366,7 +366,7 @@ fn receive_object<T: Transferable>(
     owner: &GlobalScope,
     sc_reader: &mut StructuredDataReader<'_>,
     extra_data: u64,
-    return_object: RawMutableHandleObject,
+    mut return_object: RawMutableHandleObject,
 ) -> Result<(), ()> {
     // 1. Re-build the key for the storage location
     // of the transferred object.
@@ -754,7 +754,7 @@ pub(crate) fn write(
         let result = JS_WriteStructuredClone(
             cx,
             message,
-            scdata,
+            &mut *scdata,
             StructuredCloneScope::DifferentProcess,
             &policy,
             &STRUCTURED_CLONE_CALLBACKS,
@@ -771,9 +771,9 @@ pub(crate) fn write(
             return Err(error);
         }
 
-        let nbytes = GetLengthOfJSStructuredCloneData(scdata);
+        let nbytes = GetLengthOfJSStructuredCloneData(&mut *scdata);
         let mut data = Vec::with_capacity(nbytes);
-        CopyJSStructuredCloneData(scdata, data.as_mut_ptr());
+        CopyJSStructuredCloneData(&mut *scdata, data.as_mut_ptr());
         data.set_len(nbytes);
 
         let data = StructuredSerializedData {
@@ -843,12 +843,12 @@ pub(crate) fn read(
         WriteBytesToJSStructuredCloneData(
             data.serialized.as_mut_ptr() as *const u8,
             data.serialized.len(),
-            scdata,
+            &mut *scdata,
         );
 
         let result = JS_ReadStructuredClone(
             cx,
-            scdata,
+            &mut *scdata,
             JS_STRUCTURED_CLONE_VERSION,
             StructuredCloneScope::DifferentProcess,
             rval,

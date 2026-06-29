@@ -373,7 +373,7 @@ fn create_native_handler_function(
 ) -> *mut JSObject {
     unsafe {
         let func = NewFunctionWithReserved(
-            cx,
+            &mut *cx,
             Some(native_handler_callback),
             1,
             0,

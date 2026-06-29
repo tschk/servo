@@ -416,9 +416,9 @@ pub mod glue {
     }
 
     #[cfg(not(feature = "v8"))]
-    pub unsafe extern "C" fn CallJitGetterOp<'a>(
+    pub unsafe fn CallJitGetterOp<'a>(
         _info: *const jsapi::JSJitInfo,
-        _cx: *mut jsapi::JSContext,
+        _cx: &mut crate::context::JSContext,
         _obj: jsapi::HandleObject<'a>,
         _this: *mut std::ffi::c_void,
         _argc: u32,
@@ -427,21 +427,21 @@ pub mod glue {
         false
     }
     #[cfg(feature = "v8")]
-    pub unsafe extern "C" fn CallJitGetterOp<'a>(
+    pub unsafe fn CallJitGetterOp<'a>(
         info: *const jsapi::JSJitInfo,
-        cx: *mut jsapi::JSContext,
+        cx: &mut crate::context::JSContext,
         obj: jsapi::HandleObject<'a>,
         this: *mut std::ffi::c_void,
         argc: u32,
         vp: *mut jsapi::JSVal,
     ) -> bool {
-        crate::v8_glue::call_jit_getter_op(info, cx, obj, this, argc, vp)
+        crate::v8_glue::call_jit_getter_op(info, cx.raw_cx(), obj, this, argc, vp)
     }
 
     #[cfg(not(feature = "v8"))]
-    pub unsafe extern "C" fn CallJitMethodOp<'a>(
+    pub unsafe fn CallJitMethodOp<'a>(
         _info: *const jsapi::JSJitInfo,
-        _cx: *mut jsapi::JSContext,
+        _cx: &mut crate::context::JSContext,
         _obj: jsapi::HandleObject<'a>,
         _this: *mut std::ffi::c_void,
         _argc: u32,
@@ -450,15 +450,15 @@ pub mod glue {
         false
     }
     #[cfg(feature = "v8")]
-    pub unsafe extern "C" fn CallJitMethodOp<'a>(
+    pub unsafe fn CallJitMethodOp<'a>(
         info: *const jsapi::JSJitInfo,
-        cx: *mut jsapi::JSContext,
+        cx: &mut crate::context::JSContext,
         obj: jsapi::HandleObject<'a>,
         this: *mut std::ffi::c_void,
         argc: u32,
         vp: *mut jsapi::JSVal,
     ) -> bool {
-        crate::v8_glue::call_jit_method_op(info, cx, obj, this, argc, vp)
+        crate::v8_glue::call_jit_method_op(info, cx.raw_cx(), obj, this, argc, vp)
     }
 
     #[cfg(not(feature = "v8"))]
@@ -4081,20 +4081,28 @@ pub mod rust {
             true
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_NewGlobalObject(
-            _cx: *mut jsapi::JSContext,
+        pub unsafe fn JS_NewGlobalObject<C: ToJsContextPtr, O>(
+            _cx: C,
             _clasp: *const jsapi::JSClass,
             _principal: *mut std::ffi::c_void,
+            _hook: jsapi::OnNewGlobalHookOption,
+            _options: O,
         ) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_NewGlobalObject(
-            cx: *mut jsapi::JSContext,
+        pub unsafe fn JS_NewGlobalObject<C: ToJsContextPtr, O>(
+            cx: C,
             clasp: *const jsapi::JSClass,
             principal: *mut std::ffi::c_void,
+            _hook: jsapi::OnNewGlobalHookOption,
+            _options: O,
         ) -> *mut jsapi::JSObject {
-            crate::v8_glue::create_dom_global(cx, clasp, principal)
+            crate::v8_glue::create_dom_global(
+                cx.to_js_context_ptr(),
+                clasp,
+                principal,
+            )
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_DefineProperty<C: ?Sized, O, N, V>(
@@ -6386,6 +6394,12 @@ pub mod context {
     impl std::ops::DerefMut for JSContext {
         fn deref_mut(&mut self) -> &mut NoGC {
             Box::leak(Box::new(NoGC(())))
+        }
+    }
+
+    impl std::convert::AsMut<JSContext> for JSContext {
+        fn as_mut(&mut self) -> &mut JSContext {
+            self
         }
     }
 

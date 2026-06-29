@@ -495,7 +495,7 @@ pub(crate) fn evaluate_key_path_on_value(
             }
 
             // Step 1.4. Return result.
-            result.safe_to_jsval(cx, return_val);
+            result.safe_to_jsval(cx, return_val, ());
         },
         KeyPath::String(key_path) => {
             // Step 2. If keyPath is the empty string, return value and skip the remaining steps.
@@ -750,7 +750,7 @@ pub(crate) fn inject_key_into_value(
             // Step 4.3.1 Let o be a new Object created as if by the expression ({}).
             rooted!(&in(cx) let o = unsafe { JS_NewObject(cx, ptr::null()) });
             rooted!(&in(cx) let mut o_value = UndefinedValue());
-            o.safe_to_jsval(cx, o_value.handle_mut());
+            o.safe_to_jsval(&mut *cx, o_value.handle_mut(), ());
 
             // Step 4.3.2 Let status be CreateDataProperty(value, identifier, o).
             define_dictionary_property(

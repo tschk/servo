@@ -233,7 +233,7 @@ impl MessagePort {
 
         // Run the message port post message steps providing targetPort, message, and options.
         rooted!(&in(cx) let mut message_val = UndefinedValue());
-        message.safe_to_jsval(cx, message_val.handle_mut());
+        message.safe_to_jsval(&mut *cx, message_val.handle_mut(), ());
         self.post_message_impl(cx, message_val.handle(), transfer)
     }
 }

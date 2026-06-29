@@ -81,7 +81,7 @@ fn html_constructor(
         throw_dom_exception(cx, global, Error::Type(c"new.target is null".to_owned()));
         return Err(());
     }
-    if call_args.callee() == new_target_unwrapped.get() {
+    if call_args.callee().get().to_object() == new_target_unwrapped.get() {
         throw_dom_exception(cx, global, Error::Type(c"Illegal constructor.".to_owned()));
         return Err(());
     }

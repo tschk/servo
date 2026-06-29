@@ -148,7 +148,7 @@ where
     }
 
     pub(crate) fn from_view(
-        chunk: CustomAutoRooterGuard<TypedArray<T, *mut JSObject>>,
+        chunk: CustomAutoRooterGuard<T>,
     ) -> RootedTraceableBox<HeapBufferSource<T>> {
         RootedTraceableBox::new(HeapBufferSource::<T>::new(BufferSource::ArrayBufferView(
             Heap::boxed(unsafe { *chunk.underlying_object() }),
@@ -447,7 +447,7 @@ where
             },
         });
         let data = if let Ok(array) =
-            array as Result<CustomAutoRooterGuard<'_, TypedArray<T, *mut JSObject>>, &mut ()>
+            array as Result<CustomAutoRooterGuard<'_, T>, &mut ()>
         {
             let data = array.to_vec();
             let _ = self.detach_buffer(cx);
@@ -479,7 +479,7 @@ where
             },
         });
         let Ok(array) =
-            array as Result<CustomAutoRooterGuard<'_, TypedArray<T, *mut JSObject>>, &mut ()>
+            array as Result<CustomAutoRooterGuard<'_, T>, &mut ()>
         else {
             return Err(());
         };
@@ -493,7 +493,7 @@ where
     pub(crate) fn copy_data_from(
         &self,
         cx: &mut JSContext,
-        source: CustomAutoRooterGuard<TypedArray<T, *mut JSObject>>,
+        source: CustomAutoRooterGuard<T>,
         dest_start: usize,
         length: usize,
     ) -> Result<(), ()> {
@@ -505,7 +505,7 @@ where
             },
         });
         let Ok(mut array) =
-            array as Result<CustomAutoRooterGuard<'_, TypedArray<T, *mut JSObject>>, &mut ()>
+            array as Result<CustomAutoRooterGuard<'_, T>, &mut ()>
         else {
             return Err(());
         };

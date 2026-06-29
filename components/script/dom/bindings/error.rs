@@ -295,7 +295,7 @@ impl ErrorInfo {
     fn from_dom_exception(cx: &mut JSContext, object: HandleObject) -> Option<ErrorInfo> {
         let exception =
             unsafe { root_from_object::<DOMException>(object.get(), cx.raw_cx()).ok()? };
-        let scripted_caller = unsafe { describe_scripted_caller(cx.raw_cx()) }.unwrap_or_default();
+        let scripted_caller = unsafe { describe_scripted_caller(cx) }.unwrap_or_default();
         Some(ErrorInfo {
             message: exception.stringifier().into(),
             filename: scripted_caller.filename,
@@ -326,7 +326,7 @@ impl ErrorInfo {
         match USVString::safe_from_jsval(cx, value, ()) {
             Ok(ConversionResult::Success(USVString(string))) => {
                 let scripted_caller =
-                    unsafe { describe_scripted_caller(cx.raw_cx()) }.unwrap_or_default();
+                    unsafe { describe_scripted_caller(cx) }.unwrap_or_default();
                 ErrorInfo {
                     message: format!("uncaught exception: {}", string),
                     filename: scripted_caller.filename,
@@ -357,7 +357,7 @@ fn error_info_from_pending_exception(
         return None;
     }
 
-    let error_info = unsafe { error_info_from_exception_stack(cx.raw_cx(), value.into())? };
+    let error_info = unsafe { error_info_from_exception_stack(cx, value.into())? };
 
     Some(ErrorInfo {
         message: error_info.message,

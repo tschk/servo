@@ -432,14 +432,14 @@ pub fn jsid_to_string(cx: &js::context::JSContext, id: HandleId) -> Option<DOMSt
     None
 }
 
-impl<T: Float + crate::JSTraceable + ToJSValConvertible> ToJSValConvertible for Finite<T> {
+impl<T: Float + crate::JSTraceable + ToJSValConvertible + 'static> ToJSValConvertible for Finite<T> {
     #[inline]
     unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {
         (*self).to_jsval(cx, rval);
     }
 }
 
-impl<T: Float + crate::JSTraceable + FromJSValConvertible<Config = ()>> FromJSValConvertible for Finite<T> {
+impl<T: Float + crate::JSTraceable + FromJSValConvertible<Config = ()> + 'static> FromJSValConvertible for Finite<T> {
     type Config = ();
 
     unsafe fn from_jsval(

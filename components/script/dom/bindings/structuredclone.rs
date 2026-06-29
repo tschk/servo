@@ -255,7 +255,7 @@ unsafe extern "C" fn read_callback(
 
     let sc_reader = unsafe { &mut *(closure as *mut StructuredDataReader<'_>) };
 
-    let realm = CurrentRealm::assert(cx);
+    let realm = CurrentRealm::assert(&mut *cx);
     let global = GlobalScope::from_current_realm(&realm);
 
     for serializable in SerializableInterface::iter() {
@@ -330,7 +330,7 @@ unsafe extern "C" fn write_callback(
 
     let sc_writer = unsafe { &mut *(closure as *mut StructuredDataWriter) };
 
-    let realm = CurrentRealm::assert(cx);
+    let realm = CurrentRealm::assert(&mut *cx);
     let global = GlobalScope::from_current_realm(&realm);
 
     for serializable in SerializableInterface::iter() {

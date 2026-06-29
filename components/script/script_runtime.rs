@@ -281,7 +281,7 @@ const HOST_DEFINED_DATA_SLOTS: u32 = 1;
 unsafe extern "C" fn get_host_defined_data(
     _: *const c_void,
     cx: *mut RawJSContext,
-    data: MutableHandleObject,
+    mut data: MutableHandleObject,
 ) -> bool {
     let mut cx = unsafe {
         // SAFETY: We are in SM hook
@@ -408,7 +408,7 @@ unsafe extern "C" fn enqueue_promise_job(
                 GlobalScope::from_object(incumbent_global.to_object())
             }
         } else {
-            let realm = CurrentRealm::assert(cx);
+            let realm = CurrentRealm::assert(&mut *cx);
             GlobalScope::from_current_realm(&realm)
         };
         let pipeline = global.pipeline_id();
@@ -561,7 +561,7 @@ unsafe extern "C" fn content_security_policy_allows(
     let cx = &mut cx;
     wrap_panic(&mut || {
         // SpiderMonkey provides null pointer when executing webassembly.
-        let realm = CurrentRealm::assert(cx);
+        let realm = CurrentRealm::assert(&mut *cx);
         let global = GlobalScope::from_current_realm(&realm);
         let csp_list = global.get_csp_list();
 
@@ -1413,7 +1413,7 @@ unsafe extern "C" fn consume_stream(
         )
     };
     let cx = &mut cx;
-    let realm = CurrentRealm::assert(cx);
+    let realm = CurrentRealm::assert(&mut *cx);
     let global = GlobalScope::from_current_realm(&realm);
 
     // Step 2.1 Upon fulfillment of source, store the Response with value unwrappedSource.

@@ -60,7 +60,8 @@ pub(crate) fn incumbent_global() -> Option<DomRoot<GlobalScope>> {
             // no longer exists.
             return None;
         };
-        let global = GetScriptedCallerGlobal(cx.as_ptr());
+        let ptr = cx.as_ptr();
+        let global = GetScriptedCallerGlobal(&ptr);
         if !global.is_null() {
             return Some(GlobalScope::from_object(global));
         }

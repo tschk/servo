@@ -1643,11 +1643,14 @@ pub mod jsapi {
         cell: RefCell<Option<Box<T>>>,
     }
     impl<T> Heap<T> {
-        pub fn boxed(val: T) -> Self {
+        pub fn new(val: T) -> Self {
             Self {
                 ptr: HeapPtr(ptr::null_mut()),
                 cell: RefCell::new(Some(Box::new(val))),
             }
+        }
+        pub fn boxed(val: T) -> Box<Self> {
+            Box::new(Self::new(val))
         }
         pub fn set(&self, val: T) {
             *self.cell.borrow_mut() = Some(Box::new(val));
@@ -6147,20 +6150,25 @@ pub mod gc {
     unsafe impl<T: Traceable + ?Sized> Traceable for std::sync::Arc<T> {}
     unsafe impl Traceable for std::sync::atomic::AtomicBool {}
     unsafe impl<A: Traceable, B: Traceable> Traceable for (A, B) {}
-    unsafe impl<K, V, S> Traceable for std::collections::HashMap<K, V, S> {}
-    unsafe impl<T, S> Traceable for std::collections::HashSet<T, S> {}
-    unsafe impl<T, S> Traceable for indexmap::IndexSet<T, S> {}
-    unsafe impl<T, const N: usize> Traceable for [T; N] {}
-    unsafe impl<T> Traceable for std::thread::JoinHandle<T> {}
-    unsafe impl<T> Traceable for std::cell::OnceCell<T> {}
-    unsafe impl Traceable for std::time::Instant {}
-    unsafe impl Traceable for std::time::Duration {}
-    unsafe impl Traceable for std::time::SystemTime {}
+    unsafe impl<K: Traceable, V: Traceable, S> Traceable for std::collections::HashMap<K, V, S> {}
+    unsafe impl<T: Traceable, S> Traceable for std::collections::HashSet<T, S> {}
+    unsafe impl<T: Traceable, S> Traceable for indexmap::IndexSet<T, S> {}
+    unsafe impl<T: Traceable, const N: usize> Traceable for [T; N] {}
+    unsafe impl<T: Traceable> Traceable for std::thread::JoinHandle<T> {}
+    unsafe impl<T: Traceable> Traceable for std::cell::OnceCell<T> {}
     unsafe impl<T> Traceable for std::ops::Range<T> {}
     unsafe impl Traceable for std::sync::atomic::AtomicUsize {}
     unsafe impl<T> Traceable for std::marker::PhantomData<T> {}
-    unsafe impl<T> Traceable for std::cell::Cell<T> {}
-    unsafe impl<T> Traceable for std::cell::RefCell<T> {}
+    unsafe impl<T: Traceable + Copy> Traceable for std::cell::Cell<T> {
+        unsafe fn trace(&self, trc: *mut super::jsapi::JSTracer) {
+            unsafe { Traceable::trace(&self.get(), trc) }
+        }
+    }
+    unsafe impl<T: Traceable> Traceable for std::cell::RefCell<T> {
+        unsafe fn trace(&self, trc: *mut super::jsapi::JSTracer) {
+            unsafe { Traceable::trace(&*self.borrow(), trc) }
+        }
+    }
     unsafe impl<T> Traceable for std::cell::UnsafeCell<T> {}
     unsafe impl Traceable for String {}
     unsafe impl<T> Traceable for crossbeam_channel::Sender<T> {}
@@ -6214,6 +6222,11 @@ pub mod gc {
         }
         pub fn ptr(&self) -> *mut T {
             self.0
+        }
+        pub fn into_box(self) -> Box<T> {
+            let ptr = self.0;
+            std::mem::forget(self);
+            unsafe { Box::from_raw(ptr) }
         }
         pub unsafe fn trace(&self, _tracer: *mut super::jsapi::JSTracer) {}
     }
@@ -6314,6 +6327,9 @@ pub mod context {
         pub unsafe fn from_ptr(ptr: std::ptr::NonNull<RawJSContext>) -> Self {
             Self { ptr }
         }
+        pub unsafe fn from_raw_ptr(ptr: *mut RawJSContext) -> Self {
+            Self::from_ptr(std::ptr::NonNull::new(ptr).expect("null JSContext"))
+        }
         pub unsafe fn raw_cx(&mut self) -> *mut RawJSContext {
             self.ptr.as_ptr()
         }
@@ -6335,6 +6351,18 @@ pub mod context {
     impl std::ops::DerefMut for JSContext {
         fn deref_mut(&mut self) -> &mut NoGC {
             Box::leak(Box::new(NoGC(())))
+        }
+    }
+
+    impl From<&mut JSContext> for JSContext {
+        fn from(cx: &mut JSContext) -> Self {
+            unsafe { JSContext::from_raw_ptr(cx.raw_cx()) }
+        }
+    }
+
+    impl From<&JSContext> for JSContext {
+        fn from(cx: &JSContext) -> Self {
+            unsafe { JSContext::from_raw_ptr(cx.raw_cx_no_gc()) }
         }
     }
 
@@ -6429,6 +6457,18 @@ pub mod realms {
             Box::leak(Box::new(unsafe {
                 crate::context::JSContext::from_ptr(std::ptr::NonNull::dangling())
             }))
+        }
+    }
+
+    impl<'a> From<&mut CurrentRealm<'a>> for crate::context::JSContext {
+        fn from(realm: &mut CurrentRealm<'a>) -> Self {
+            unsafe { crate::context::JSContext::from_raw_ptr(realm.raw_cx()) }
+        }
+    }
+
+    impl<'a> From<&mut AutoRealm<'a>> for crate::context::JSContext {
+        fn from(realm: &mut AutoRealm<'a>) -> Self {
+            unsafe { crate::context::JSContext::from_raw_ptr(realm.raw_cx()) }
         }
     }
 }
@@ -6894,7 +6934,7 @@ pub mod typedarray {
                 }
                 pub fn update(&mut self, _value: &[$element]) {}
                 pub fn underlying_object(&self) -> jsapi::Heap<*mut jsapi::JSObject> {
-                    jsapi::Heap::boxed(self.0)
+                    jsapi::Heap::new(self.0)
                 }
                 pub fn get_array_type(&self) -> jsapi::Type {
                     $array_type

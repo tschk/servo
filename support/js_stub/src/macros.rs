@@ -73,7 +73,7 @@ macro_rules! rooted {
 #[macro_export]
 macro_rules! auto_root {
     (&in($cx:expr) let $var:ident = $init:expr) => {
-        let $var = $init;
+        let $var = $crate::rust::CustomAutoRooterGuard::from($init);
     };
 }
 
@@ -81,6 +81,9 @@ macro_rules! auto_root {
 macro_rules! rooted_vec {
     (let mut $name:ident) => {
         let mut $name = Vec::new();
+    };
+    (let mut $name:ident <- $iter:expr) => {
+        let mut $name: Vec<_> = $iter.collect();
     };
     (let $name:ident <- $iter:expr) => {
         let $name: Vec<_> = $iter.collect();

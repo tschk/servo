@@ -203,7 +203,7 @@ where
             BufferSource::ArrayBufferView(buffer) => unsafe {
                 let mut is_shared = false;
                 rooted!(&in(cx) let view_buffer =
-                         JS_GetArrayBufferViewBuffer(cx, Handle::from_raw(buffer.handle()), &mut is_shared));
+                         JS_GetArrayBufferViewBuffer(&mut *cx, Handle::from_raw(buffer.handle()), &mut is_shared));
 
                 RootedTraceableBox::new(HeapBufferSource::<ArrayBufferU8>::new(
                     BufferSource::ArrayBuffer(Heap::boxed(*view_buffer.handle())),
@@ -225,7 +225,7 @@ where
                     // assert buffer is an ArrayBuffer view
                     assert!(JS_IsArrayBufferViewObject(*buffer.handle()));
                     rooted!(&in(cx) let view_buffer =
-                            JS_GetArrayBufferViewBuffer(cx, Handle::from_raw(buffer.handle()), &mut is_shared));
+                            JS_GetArrayBufferViewBuffer(&mut *cx, Handle::from_raw(buffer.handle()), &mut is_shared));
                     // This buffer is always created unshared
                     debug_assert!(!is_shared);
                     // Detach the ArrayBuffer
@@ -255,7 +255,7 @@ where
                 unsafe {
                     assert!(JS_IsArrayBufferViewObject(*buffer.handle()));
                     rooted!(&in(cx) let view_buffer =
-                            JS_GetArrayBufferViewBuffer(cx, Handle::from_raw(buffer.handle()), &mut is_shared));
+                            JS_GetArrayBufferViewBuffer(&mut *cx, Handle::from_raw(buffer.handle()), &mut is_shared));
                     debug_assert!(!is_shared);
                     IsDetachedArrayBufferObject(*view_buffer.handle())
                 }
@@ -274,7 +274,7 @@ where
                 unsafe {
                     assert!(JS_IsArrayBufferViewObject(*buffer.handle()));
                     rooted!(&in(cx) let view_buffer =
-                            JS_GetArrayBufferViewBuffer(cx, Handle::from_raw(buffer.handle()), &mut is_shared));
+                            JS_GetArrayBufferViewBuffer(&mut *cx, Handle::from_raw(buffer.handle()), &mut is_shared));
                     debug_assert!(!is_shared);
                     GetArrayBufferByteLength(*view_buffer.handle())
                 }
@@ -356,10 +356,10 @@ where
             BufferSource::ArrayBufferView(buffer) => {
                 let mut is_shared = false;
                 rooted!(&in(cx) let view_buffer =
-                    unsafe { JS_GetArrayBufferViewBuffer(cx, Handle::from_raw(buffer.handle()), &mut is_shared) });
+                    unsafe { JS_GetArrayBufferViewBuffer(&mut *cx, Handle::from_raw(buffer.handle()), &mut is_shared) });
                 debug_assert!(!is_shared);
 
-                unsafe { ArrayBufferClone(cx, view_buffer.handle(), byte_offset, byte_length) }
+                unsafe { ArrayBufferClone(&mut *cx, view_buffer.handle(), byte_offset, byte_length) }
             },
             BufferSource::ArrayBuffer(buffer) => unsafe {
                 ArrayBufferClone(
@@ -377,8 +377,8 @@ where
             rooted!(&in(cx) let mut _ex = UndefinedValue());
             unsafe {
                 // If SpiderMonkey set an exception, clear it so callers see a clean cx.
-                if JS_GetPendingException(cx, _ex.handle_mut()) {
-                    JS_ClearPendingException(cx);
+                if JS_GetPendingException(&mut *cx, _ex.handle_mut()) {
+                    JS_ClearPendingException(&mut *cx);
                 }
             }
 
@@ -657,7 +657,7 @@ where
         // Step 2 (Reordered)
         let buffer_data = match &self.buffer_source {
             BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer) => unsafe {
-                StealArrayBufferContents(cx, Handle::from_raw(buffer.handle()))
+                StealArrayBufferContents(&mut *cx, Handle::from_raw(buffer.handle()))
             },
         };
 
@@ -667,8 +667,8 @@ where
         if !self.detach_buffer(cx) {
             rooted!(&in(cx) let mut rval = UndefinedValue());
             unsafe {
-                assert!(JS_GetPendingException(cx, rval.handle_mut()));
-                JS_ClearPendingException(cx)
+                assert!(JS_GetPendingException(&mut *cx, rval.handle_mut()));
+                JS_ClearPendingException(&mut *cx)
             };
 
             Err(Error::Type(c"can't transfer array buffer".to_owned()))
@@ -678,7 +678,7 @@ where
             // whose [[ArrayBufferByteLength]] internal slot value is arrayBufferByteLength.
             Ok(RootedTraceableBox::new(
                 HeapBufferSource::<ArrayBufferU8>::new(BufferSource::ArrayBuffer(Heap::boxed(
-                    unsafe { NewArrayBufferWithContents(cx, buffer_length, buffer_data) },
+                    unsafe { NewArrayBufferWithContents(&mut *cx, buffer_length, buffer_data) },
                 ))),
             ))
         }
@@ -901,12 +901,12 @@ pub(crate) fn create_array_buffer_with_size(
     cx: &mut JSContext,
     size: usize,
 ) -> Fallible<RootedTraceableBox<HeapBufferSource<ArrayBufferU8>>> {
-    let result = unsafe { NewArrayBuffer(cx, size) };
+    let result = unsafe { NewArrayBuffer(&mut *cx, size) };
     if result.is_null() {
         rooted!(&in(cx) let mut rval = UndefinedValue());
         unsafe {
-            assert!(JS_GetPendingException(cx, rval.handle_mut()));
-            JS_ClearPendingException(cx)
+            assert!(JS_GetPendingException(&mut *cx, rval.handle_mut()));
+            JS_ClearPendingException(&mut *cx)
         };
 
         Err(Error::Type(c"can't create array buffer".to_owned()))

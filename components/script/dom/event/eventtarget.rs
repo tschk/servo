@@ -696,7 +696,7 @@ impl EventTarget {
         options.set_introduction_type(IntroductionType::EVENT_HANDLER);
 
         // Step 3.9, subsection Scope steps 1-6
-        let scopechain =
+        let mut scopechain =
             js::rust::EnvironmentChain::new(&mut *cx, SupportUnscopables::Yes);
 
         if let Some(element) = element {

@@ -72,7 +72,7 @@ fn jsval_to_primitive(
 
     // Step 10. Let primValue be ? ToPrimitive(argument, string).
     rooted!(&in(cx) let obj = chunk.to_object());
-    let is_success = unsafe { ToPrimitive(cx, obj.handle(), JSType::JSTYPE_STRING, rval) };
+    let is_success = unsafe { ToPrimitive(cx, obj.handle().get(), JSType::JSTYPE_STRING, rval) };
     log::debug!("ToPrimitive is_success={:?}", is_success);
     if !is_success {
         unsafe {

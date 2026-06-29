@@ -2427,7 +2427,11 @@ impl GlobalScope {
         let cx = Runtime::get()
             .expect("Can't obtain context after runtime shutdown")
             .as_ptr();
-        unsafe { SafeJSContext::from_ptr(cx) }
+        unsafe {
+            SafeJSContext::from_ptr(
+                std::ptr::NonNull::new(cx).expect("runtime JSContext must be non-null"),
+            )
+        }
     }
 
     pub(crate) fn time(&self, label: DOMString) -> Result<(), ()> {
@@ -3135,13 +3139,14 @@ impl GlobalScope {
     /// ["current"]: https://html.spec.whatwg.org/multipage/#current
     #[expect(unsafe_code)]
     pub(crate) fn current() -> Option<DomRoot<Self>> {
-        let cx = Runtime::get()?;
+        let cx_ptr = Runtime::get()?;
         unsafe {
-            let global = CurrentGlobalOrNull(cx.as_ptr());
+            let mut cx = js::context::JSContext::from_ptr(cx_ptr);
+            let global = CurrentGlobalOrNull(&cx);
             if global.is_null() {
                 None
             } else {
-                Some(global_scope_from_global(global, cx.as_ptr()))
+                Some(global_scope_from_global(global, cx.raw_cx()))
             }
         }
     }

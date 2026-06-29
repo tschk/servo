@@ -1291,6 +1291,19 @@ pub mod jsapi {
             unsafe { &*self.ptr }
         }
     }
+    impl<'a, T: Copy> Handle<'a, Vec<T>> {
+        pub fn len(&self) -> u32 {
+            std::ops::Deref::deref(self).len() as u32
+        }
+        pub fn at(&self, index: u32) -> Option<Handle<'_, T>> {
+            let vec = std::ops::Deref::deref(self);
+            if (index as usize) >= vec.len() {
+                return None;
+            }
+            // SAFETY: index is in bounds for this rooted vector handle.
+            Some(unsafe { Handle::from_raw(vec.as_ptr().add(index as usize)) })
+        }
+    }
     impl<'a, T: PartialEq + Copy> PartialEq for Handle<'a, T> {
         fn eq(&self, other: &Self) -> bool {
             self.get() == other.get()
@@ -6091,6 +6104,11 @@ pub mod rust {
     pub unsafe trait Trace {
         unsafe fn trace(&self, _tracer: *mut super::jsapi::JSTracer) {}
     }
+    unsafe impl<T: super::gc::Traceable + ?Sized> Trace for std::rc::Rc<T> {
+        unsafe fn trace(&self, tr: *mut super::jsapi::JSTracer) {
+            <T as super::gc::Traceable>::trace(self, tr);
+        }
+    }
     pub trait IntoHandle {
         type Target;
         fn into_handle(self) -> Self::Target;
@@ -6281,6 +6299,11 @@ pub mod gc {
     }
     unsafe impl<T> Traceable for std::cell::UnsafeCell<T> {}
     unsafe impl Traceable for String {}
+    unsafe impl Traceable for std::time::Instant {}
+    unsafe impl Traceable for std::time::Duration {}
+    unsafe impl Traceable for std::time::SystemTime {}
+    unsafe impl Traceable for std::num::NonZero<u16> {}
+    unsafe impl<T: Traceable, S: std::hash::BuildHasher> Traceable for indexmap::IndexSet<T, S> {}
     unsafe impl<T> Traceable for crossbeam_channel::Sender<T> {}
     unsafe impl Traceable for crate::rust::Stencil {}
     unsafe impl<T: super::typedarray::TypedArrayElement, O> Traceable

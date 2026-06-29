@@ -5617,7 +5617,7 @@ pub mod rust {
         pub unsafe fn JS_IsIdentifier<C, S>(_cx: &C, _chars: S, _is_valid: *mut bool) -> bool {
             false
         }
-        pub unsafe fn JS_NewObject<C, O>(_cx: &C, _clasp: O) -> *mut jsapi::JSObject {
+        pub unsafe fn JS_NewObject<C: ?Sized>(_cx: &C, _clasp: *const jsapi::JSClass) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
         pub unsafe fn CompileFunction<C: ?Sized, O, Opt, N, A, S>(
@@ -6177,7 +6177,7 @@ pub mod gc {
     unsafe impl<A: Traceable, B: Traceable> Traceable for (A, B) {}
     unsafe impl<K: Traceable, V: Traceable, S> Traceable for std::collections::HashMap<K, V, S> {}
     unsafe impl<T: Traceable, S> Traceable for std::collections::HashSet<T, S> {}
-    unsafe impl<T: Traceable, S> Traceable for indexmap::IndexSet<T, S> {}
+
     unsafe impl<T: Traceable, const N: usize> Traceable for [T; N] {}
     unsafe impl<T: Traceable> Traceable for std::thread::JoinHandle<T> {}
     unsafe impl<T: Traceable> Traceable for std::cell::OnceCell<T> {}

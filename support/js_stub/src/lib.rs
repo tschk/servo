@@ -2492,6 +2492,10 @@ pub mod jsapi {
         Object,
         Array,
         Function,
+        Map,
+        Set,
+        Date,
+        RegExp,
     }
     #[derive(Copy, Clone, PartialEq, Eq)]
     pub enum CompilationType {
@@ -5023,10 +5027,16 @@ pub mod rust {
         pub unsafe fn create_with_parent(_parent: ParentRuntime) -> Self {
             Self
         }
+        pub fn prepare_for_new_child(&self) -> ParentRuntime {
+            ParentRuntime
+        }
         pub fn get() -> Option<std::ptr::NonNull<super::jsapi::JSContext>> {
             Some(std::ptr::NonNull::dangling())
         }
         pub fn cx(&self) -> crate::context::JSContext {
+            unsafe { crate::context::JSContext::from_ptr(std::ptr::NonNull::dangling()) }
+        }
+        pub fn cx_no_gc(&self) -> crate::context::JSContext {
             unsafe { crate::context::JSContext::from_ptr(std::ptr::NonNull::dangling()) }
         }
         pub fn rt(&self) -> *mut super::jsapi::JSRuntime {
@@ -5180,6 +5190,20 @@ pub mod rust {
         }
         pub fn is_shared(&self) -> bool {
             false
+        }
+    }
+    impl<T> CustomAutoRooterGuard<T>
+    where
+        T: super::typedarray::TypedArrayElement,
+    {
+        pub fn underlying_object(&self) -> super::jsapi::Heap<*mut super::jsapi::JSObject> {
+            super::jsapi::Heap::new(ptr::null_mut())
+        }
+        pub fn to_vec(&self) -> Vec<T::Element> {
+            Vec::new()
+        }
+        pub fn as_slice(&self) -> &[T::Element] {
+            &[]
         }
     }
     impl<T> From<T> for CustomAutoRooterGuard<T> {
@@ -5343,6 +5367,27 @@ pub mod rust {
         pub line: u32,
         pub col: u32,
     }
+    #[derive(Clone, Copy, Debug)]
+    pub enum ForOfIterationFailure<OtherError> {
+        ValueIsNotIterable,
+        JSFailed,
+        Other(OtherError),
+    }
+    impl<OtherError> From<OtherError> for ForOfIterationFailure<OtherError> {
+        fn from(value: OtherError) -> Self {
+            Self::Other(value)
+        }
+    }
+    pub fn for_of<Callback, OtherError>(
+        _cx: *mut super::jsapi::JSContext,
+        _iterable: super::jsapi::HandleValue<'_>,
+        _callback: Callback,
+    ) -> Result<(), ForOfIterationFailure<OtherError>>
+    where
+        Callback: FnMut(super::jsapi::HandleValue<'_>) -> Result<std::ops::ControlFlow<()>, ForOfIterationFailure<OtherError>>,
+    {
+        Ok(())
+    }
     pub fn describe_scripted_caller<C: ?Sized>(_cx: &C) -> Option<ScriptedCaller> {
         None
     }
@@ -5367,17 +5412,37 @@ pub mod rust {
             JS_GetTwoByteStringCharsAndLength, JS_NewPlainObject,
         };
         pub use super::wrappers::{
-            AppendToIdVector, CallOriginalPromiseReject, GetPropertyKeys,
-            JS_AlreadyHasOwnPropertyById, JS_CopyOwnPropertiesAndPrivateFields, JS_DefineProperty,
-            JS_DefineProperty3, JS_DefineProperty5, JS_DefinePropertyById2, JS_DefinePropertyById5,
-            JS_DefineUCProperty2, JS_DeletePropertyById, JS_FireOnNewGlobalObject,
-            JS_ForwardGetPropertyTo, JS_GetPrototype, JS_HasOwnProperty, JS_HasProperty,
+            AddPromiseReactions, AppendToIdVector, CallOriginalPromiseReject,
+            CallOriginalPromiseResolve, CheckRegExpSyntax, DetachArrayBuffer, ExecuteRegExpNoStatics,
+            GetBuiltinClass, GetPropertyKeys, GetPromiseIsHandled, GetPromiseState, IsPromiseObject,
+            JS_AlreadyHasOwnPropertyById, JS_CallFunctionName, JS_CopyOwnPropertiesAndPrivateFields,
+            JS_DefineProperty, JS_DefineProperty3, JS_DefineProperty5, JS_DefinePropertyById2,
+            JS_DefinePropertyById5, JS_DefineUCProperty2, JS_DeletePropertyById,
+            JS_ErrorFromException, JS_FireOnNewGlobalObject, JS_ForwardGetPropertyTo,
+            JS_GetPromiseResult, JS_GetPrototype, JS_HasOwnProperty, JS_HasProperty,
             JS_HasPropertyById, JS_IdToValue, JS_InitializePropertiesFromCompatibleNativeObject,
             JS_LinkConstructorAndPrototype, JS_NewFunction, JS_NewGlobalObject,
-            JS_NewObjectWithoutMetadata, JS_SetImmutablePrototype, JS_SetProperty,
-            JS_ValueToSource, NewProxyObject, RUST_SYMBOL_TO_JSID, SetDataPropertyDescriptor,
-            ToJSON, int_to_jsid,
+            JS_NewObjectWithoutMetadata, JS_ReadStructuredClone, JS_SetImmutablePrototype,
+            JS_SetProperty, JS_Stringify, JS_TransplantObject, JS_TypeOfValue, JS_ValueToSource,
+            JS_WriteStructuredClone, NewPromiseObject, NewProxyObject, NewWindowProxy, ObjectIsRegExp,
+            RUST_SYMBOL_TO_JSID, RejectPromise, ResolvePromise, SetAnyPromiseIsHandled,
+            SetDataPropertyDescriptor, SetPromiseUserInputEventHandlingState, SetWindowProxy, ToJSON,
+            int_to_jsid,
         };
+        pub use super::super::jsapi::{
+            ArrayBufferClone, ArrayBufferCopyData, GetSavedFrameColumn,
+            GetSavedFrameFunctionDisplayName, GetSavedFrameLine, GetSavedFrameSource,
+            HasDefinedArrayBufferDetachKey, JS_FreezeObject, JS_GetArrayBufferViewBuffer,
+            JS_GetFunctionDisplayId, JS_GetFunctionId, JS_NewBigInt64ArrayWithBuffer,
+            JS_NewBigUint64ArrayWithBuffer, JS_NewDataView, JS_NewFloat16ArrayWithBuffer,
+            JS_NewFloat32ArrayWithBuffer, JS_NewFloat64ArrayWithBuffer, JS_NewInt8ArrayWithBuffer,
+            JS_NewInt16ArrayWithBuffer, JS_NewInt32ArrayWithBuffer, JS_NewUint8ArrayWithBuffer,
+            JS_NewUint8ClampedArrayWithBuffer, JS_NewUint16ArrayWithBuffer,
+            JS_NewUint32ArrayWithBuffer, JS_ValueToFunction, NewArrayBuffer,
+            NewArrayBufferWithContents, NewFunctionWithReserved, NewUCRegExpObject,
+            StealArrayBufferContents, ToPrimitive,
+        };
+        pub use crate::glue::{CollectServoSizes, DispatchableRun};
         pub use super::super::jsapi::{
             AddRawValueRoot, GetObjectProto, GetRealmErrorPrototype, GetRealmFunctionPrototype,
             GetRealmIteratorPrototype, JS_DefinePropertyById, JS_GetPropertyDescriptorById,
@@ -6006,6 +6071,18 @@ pub mod rust {
         ) -> bool {
             true
         }
+        pub unsafe fn JS_GetElement<C, O, I, V>(_cx: &C, _obj: O, _index: I, _vp: V) -> bool {
+            false
+        }
+        pub unsafe fn JS_GetScriptedCallerPrivate<C, V>(_cx: &C, _vp: V) -> bool {
+            false
+        }
+        pub unsafe fn MapEntries<C, O, V>(_cx: &C, _obj: O, _iterator: V) -> bool {
+            false
+        }
+        pub unsafe fn MapSize<C, O>(_cx: &C, _obj: O) -> u32 {
+            0
+        }
     }
 
     pub unsafe fn ToString<C: ?Sized, V>(_cx: &C, _val: V) -> *mut super::jsapi::JSString {
@@ -6210,28 +6287,10 @@ pub mod gc {
         for super::typedarray::TypedArray<T, O>
     {
     }
-    unsafe impl Traceable for super::typedarray::HeapArrayBuffer {}
-    unsafe impl Traceable for super::typedarray::HeapArrayBufferView {}
-    unsafe impl Traceable for super::typedarray::HeapFloat32Array {}
-    unsafe impl Traceable for super::typedarray::HeapFloat64Array {}
-    unsafe impl Traceable for super::typedarray::HeapInt8Array {}
-    unsafe impl Traceable for super::typedarray::HeapInt32Array {}
-    unsafe impl Traceable for super::typedarray::HeapUint8Array {}
-    unsafe impl Traceable for super::typedarray::HeapUint8ClampedArray {}
-    unsafe impl Traceable for super::typedarray::HeapUint32Array {}
     unsafe impl<T: super::typedarray::TypedArrayElement, O> crate::rust::Trace
         for super::typedarray::TypedArray<T, O>
     {
     }
-    unsafe impl crate::rust::Trace for super::typedarray::HeapArrayBuffer {}
-    unsafe impl crate::rust::Trace for super::typedarray::HeapArrayBufferView {}
-    unsafe impl crate::rust::Trace for super::typedarray::HeapFloat32Array {}
-    unsafe impl crate::rust::Trace for super::typedarray::HeapFloat64Array {}
-    unsafe impl crate::rust::Trace for super::typedarray::HeapInt8Array {}
-    unsafe impl crate::rust::Trace for super::typedarray::HeapInt32Array {}
-    unsafe impl crate::rust::Trace for super::typedarray::HeapUint8Array {}
-    unsafe impl crate::rust::Trace for super::typedarray::HeapUint8ClampedArray {}
-    unsafe impl crate::rust::Trace for super::typedarray::HeapUint32Array {}
 
     pub type HandleValue<'a> = super::jsapi::Handle<'a, super::jsapi::JSVal>;
     pub type MutableHandleValue<'a> = super::jsapi::MutableHandle<'a, super::jsapi::JSVal>;
@@ -6815,33 +6874,6 @@ pub mod conversions {
             ))
         }
     }
-    macro_rules! typedarray_from_jsval {
-        ($($ty:ty),* $(,)?) => {
-            $(
-                impl FromJSValConvertible for $ty {
-                    type Config = ();
-                    unsafe fn from_jsval(
-                        _cx: *mut jsapi::JSContext,
-                        _val: jsapi::HandleValue,
-                        _option: (),
-                    ) -> Result<ConversionResult<Self>, ()> {
-                        Ok(ConversionResult::Success(<$ty>::from(std::ptr::null_mut()).unwrap()))
-                    }
-                }
-            )*
-        };
-    }
-    typedarray_from_jsval!(
-        super::typedarray::HeapArrayBuffer,
-        super::typedarray::HeapArrayBufferView,
-        super::typedarray::HeapFloat32Array,
-        super::typedarray::HeapFloat64Array,
-        super::typedarray::HeapInt8Array,
-        super::typedarray::HeapInt32Array,
-        super::typedarray::HeapUint8Array,
-        super::typedarray::HeapUint8ClampedArray,
-        super::typedarray::HeapUint32Array
-    );
 }
 
 // ── JSVal ───────────────────────────────────────────────────────────────────
@@ -7055,15 +7087,15 @@ pub mod typedarray {
     typed_array!(Uint8Array, u8, jsapi::Type::Uint8);
     typed_array!(Uint8ClampedArray, u8, jsapi::Type::Uint8Clamped);
     typed_array!(Uint32Array, u32, jsapi::Type::Uint32);
-    typed_array!(HeapArrayBuffer, u8, jsapi::Type::Uint8);
-    typed_array!(HeapArrayBufferView, u8, jsapi::Type::Uint8);
-    typed_array!(HeapFloat32Array, f32, jsapi::Type::Float32);
-    typed_array!(HeapFloat64Array, f64, jsapi::Type::Float64);
-    typed_array!(HeapInt8Array, i8, jsapi::Type::Int8);
-    typed_array!(HeapInt32Array, i32, jsapi::Type::Int32);
-    typed_array!(HeapUint8Array, u8, jsapi::Type::Uint8);
-    typed_array!(HeapUint8ClampedArray, u8, jsapi::Type::Uint8Clamped);
-    typed_array!(HeapUint32Array, u32, jsapi::Type::Uint32);
+    pub type HeapArrayBuffer = TypedArray<ArrayBuffer, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
+    pub type HeapArrayBufferView = TypedArray<ArrayBufferView, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
+    pub type HeapFloat32Array = TypedArray<Float32Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
+    pub type HeapFloat64Array = TypedArray<Float64Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
+    pub type HeapInt8Array = TypedArray<Int8Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
+    pub type HeapInt32Array = TypedArray<Int32Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
+    pub type HeapUint8Array = TypedArray<Uint8Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
+    pub type HeapUint8ClampedArray = TypedArray<Uint8ClampedArray, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
+    pub type HeapUint32Array = TypedArray<Uint32Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
 
     pub type ArrayBufferU8 = ArrayBuffer;
     pub type ArrayBufferViewU8 = ArrayBufferView;

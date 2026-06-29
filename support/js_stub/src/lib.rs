@@ -615,7 +615,7 @@ pub mod glue {
     pub fn UnwrapObjectStatic<O>(_obj: O) -> *mut jsapi::JSObject {
         ::std::ptr::null_mut()
     }
-    pub fn CopyJSStructuredCloneData<D, B>(_data: D, _dest: B, _len: usize) -> bool {
+    pub fn CopyJSStructuredCloneData<D, B>(_data: D, _dest: B) -> bool {
         false
     }
     pub fn GetLengthOfJSStructuredCloneData<D>(_data: D) -> usize {
@@ -1478,6 +1478,14 @@ pub mod jsapi {
     }
     impl From<&Vec<JSVal>> for HandleValueArray {
         fn from(values: &Vec<JSVal>) -> Self {
+            Self {
+                length_: values.len(),
+                elements_: values.as_ptr(),
+            }
+        }
+    }
+    impl<'a> From<&crate::gc::RootedVec<'a, JSVal>> for HandleValueArray {
+        fn from(values: &crate::gc::RootedVec<'a, JSVal>) -> Self {
             Self {
                 length_: values.len(),
                 elements_: values.as_ptr(),
@@ -4218,6 +4226,7 @@ pub mod rust {
             let name = crate::v8_glue::property_name_from_raw(name.to_byte_ptr());
             crate::v8_glue::js_new_function(cx, call, nargs, flags as u32, name)
         }
+
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_GetFunctionObject(_fun: *mut jsapi::JSFunction) -> *mut jsapi::JSObject {
             ptr::null_mut()
@@ -5190,24 +5199,69 @@ pub mod rust {
         Ok(())
     }
 
-    pub struct CustomAutoRooterGuard<T = ()>(std::marker::PhantomData<T>);
-    impl<T> CustomAutoRooterGuard<T> {
-        pub unsafe fn new<C, R>(_cx: &C, _root: R) -> Self {
-            Self(std::marker::PhantomData)
+    pub unsafe trait CustomTrace {
+        fn trace(&self, _trc: *mut super::jsapi::JSTracer) {}
+    }
+    unsafe impl<T: super::gc::Traceable> CustomTrace for T {
+        fn trace(&self, trc: *mut super::jsapi::JSTracer) {
+            unsafe {
+                super::gc::Traceable::trace(self, trc);
+            }
         }
-        pub fn from_value(_value: T) -> Self {
-            Self(std::marker::PhantomData)
+    }
+
+    pub fn typedarray_err_dummy() -> &'static mut () {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        static mut PTR: *mut () = std::ptr::null_mut();
+        INIT.call_once(|| {
+            // SAFETY: runs exactly once during initialization.
+            unsafe {
+                PTR = Box::into_raw(Box::new(()));
+            }
+        });
+        // SAFETY: initialized exactly once above; only used as an error sentinel.
+        unsafe { &mut *PTR }
+    }
+
+    pub struct CustomAutoRooter<T> {
+        data: T,
+    }
+    impl<T: CustomTrace> CustomAutoRooter<T> {
+        pub fn new(data: T) -> Self {
+            Self { data }
         }
-        pub fn ptr(&self) -> *mut T {
-            std::ptr::NonNull::<T>::dangling().as_ptr()
+        pub fn root<'a>(
+            &'a mut self,
+            cx: *mut super::jsapi::JSContext,
+        ) -> CustomAutoRooterGuard<'a, T> {
+            CustomAutoRooterGuard::new(cx, self)
+        }
+    }
+
+    pub struct CustomAutoRooterGuard<'a, T: 'a + CustomTrace = ()> {
+        rooter: Option<&'a mut CustomAutoRooter<T>>,
+        owned: Option<T>,
+    }
+    impl<'a, T: CustomTrace> CustomAutoRooterGuard<'a, T> {
+        pub fn new<C>(_cx: C, rooter: &'a mut CustomAutoRooter<T>) -> Self {
+            Self {
+                rooter: Some(rooter),
+                owned: None,
+            }
+        }
+        pub fn from_value(value: T) -> CustomAutoRooterGuard<'static, T> {
+            CustomAutoRooterGuard {
+                rooter: None,
+                owned: Some(value),
+            }
         }
         pub fn is_shared(&self) -> bool {
             false
         }
     }
-    impl<T> CustomAutoRooterGuard<T>
+    impl<'a, T> CustomAutoRooterGuard<'a, T>
     where
-        T: super::typedarray::TypedArrayElement,
+        T: super::typedarray::TypedArrayElement + CustomTrace,
     {
         pub fn underlying_object(&self) -> super::jsapi::Heap<*mut super::jsapi::JSObject> {
             super::jsapi::Heap::new(ptr::null_mut())
@@ -5219,20 +5273,45 @@ pub mod rust {
             &[]
         }
     }
-    impl<T> From<T> for CustomAutoRooterGuard<T> {
+    impl<'a, T> CustomAutoRooterGuard<'a, super::typedarray::TypedArray<T, *mut super::jsapi::JSObject>>
+    where
+        T: super::typedarray::TypedArrayElement + CustomTrace,
+    {
+        pub fn underlying_object(&self) -> &*mut super::jsapi::JSObject {
+            std::ops::Deref::deref(self).object_ref()
+        }
+        pub fn to_vec(&self) -> Vec<T::Element> {
+            std::ops::Deref::deref(self).to_vec()
+        }
+        pub fn as_slice(&self) -> &[T::Element] {
+            std::ops::Deref::deref(self).as_slice()
+        }
+        pub fn as_mut_slice(&mut self) -> &mut [T::Element] {
+            std::ops::DerefMut::deref_mut(self).as_mut_slice()
+        }
+    }
+    impl<T: CustomTrace> From<T> for CustomAutoRooterGuard<'static, T> {
         fn from(value: T) -> Self {
             Self::from_value(value)
         }
     }
-    impl<T> std::ops::Deref for CustomAutoRooterGuard<T> {
+    impl<'a, T: CustomTrace> std::ops::Deref for CustomAutoRooterGuard<'a, T> {
         type Target = T;
         fn deref(&self) -> &T {
-            unsafe { &*self.ptr() }
+            match (&self.rooter, &self.owned) {
+                (Some(rooter), None) => &rooter.data,
+                (None, Some(value)) => value,
+                _ => unreachable!("CustomAutoRooterGuard must be rooted or owned"),
+            }
         }
     }
-    impl<T> std::ops::DerefMut for CustomAutoRooterGuard<T> {
+    impl<'a, T: CustomTrace> std::ops::DerefMut for CustomAutoRooterGuard<'a, T> {
         fn deref_mut(&mut self) -> &mut T {
-            unsafe { &mut *self.ptr() }
+            match (&mut self.rooter, &mut self.owned) {
+                (Some(rooter), None) => &mut rooter.data,
+                (None, Some(value)) => value,
+                _ => unreachable!("CustomAutoRooterGuard must be rooted or owned"),
+            }
         }
     }
     pub trait GCMethods {
@@ -5307,12 +5386,7 @@ pub mod rust {
         pub fn set_is_run_once(&mut self, _is_run_once: bool) {}
         pub fn set_no_script_rval(&mut self, _no_script_rval: bool) {}
     }
-    pub struct CustomAutoRooter;
-    impl CustomAutoRooter {
-        pub fn new<T>(_value: T) -> Self {
-            Self
-        }
-    }
+
     pub struct EnvironmentChain;
     impl EnvironmentChain {
         pub fn new<C, S>(_cx: &C, _support_unscopables: S) -> Self {
@@ -6200,6 +6274,11 @@ pub mod gc {
             &mut self.value
         }
     }
+    impl<'a, T> RootedGuard<'a, T> {
+        pub fn take(self) -> T {
+            self.value
+        }
+    }
 
     impl<'a> RootedGuard<'a, *mut std::ffi::c_void> {
         pub fn is_undefined(&self) -> bool {
@@ -6270,14 +6349,15 @@ pub mod gc {
     unsafe impl<T: Traceable> Traceable for Option<T> {}
     unsafe impl<T: Traceable> Traceable for Vec<T> {}
     unsafe impl<T: Traceable> Traceable for [T] {}
-    unsafe impl<T: Traceable> Traceable for Box<[T]> {}
+
     unsafe impl<T: Traceable> Traceable for std::collections::VecDeque<T> {}
     unsafe impl<T: Traceable, E: Traceable> Traceable for Result<T, E> {}
-    unsafe impl<T: Traceable> Traceable for Box<T> {}
+    unsafe impl<T: Traceable + ?Sized> Traceable for Box<T> {}
     unsafe impl<T: Traceable + ?Sized> Traceable for std::rc::Rc<T> {}
     unsafe impl<T: Traceable + ?Sized> Traceable for std::sync::Arc<T> {}
     unsafe impl Traceable for std::sync::atomic::AtomicBool {}
     unsafe impl<A: Traceable, B: Traceable> Traceable for (A, B) {}
+    unsafe impl<A: Traceable, B: Traceable, C: Traceable, D: Traceable> Traceable for (A, B, C, D) {}
     unsafe impl<K: Traceable, V: Traceable, S> Traceable for std::collections::HashMap<K, V, S> {}
     unsafe impl<T: Traceable, S> Traceable for std::collections::HashSet<T, S> {}
 
@@ -6321,7 +6401,43 @@ pub mod gc {
     pub type MutableHandleObject<'a> =
         super::jsapi::MutableHandle<'a, *mut super::jsapi::JSObject>;
     pub type Handle<'a, T> = super::jsapi::Handle<'a, T>;
-    pub type RootedVec<T> = Vec<T>;
+    pub struct RootableVec<T: Traceable> {
+        v: Vec<T>,
+    }
+    impl<T: Traceable> RootableVec<T> {
+        pub fn new_unrooted() -> Self {
+            Self { v: Vec::new() }
+        }
+    }
+    unsafe impl<T: Traceable> Traceable for RootableVec<T> {}
+
+    pub struct RootedVec<'a, T: Traceable + 'static> {
+        root: &'a mut RootableVec<T>,
+    }
+    impl<'a, T: Traceable + 'static> RootedVec<'a, T> {
+        pub fn new(root: &'a mut RootableVec<T>) -> Self {
+            Self { root }
+        }
+        pub fn from_iter<I>(root: &'a mut RootableVec<T>, iter: I) -> Self
+        where
+            I: Iterator<Item = T>,
+        {
+            root.v.extend(iter);
+            Self { root }
+        }
+    }
+    impl<'a, T: Traceable> std::ops::Deref for RootedVec<'a, T> {
+        type Target = Vec<T>;
+        fn deref(&self) -> &Vec<T> {
+            &self.root.v
+        }
+    }
+    impl<'a, T: Traceable> std::ops::DerefMut for RootedVec<'a, T> {
+        fn deref_mut(&mut self) -> &mut Vec<T> {
+            &mut self.root.v
+        }
+    }
+
     pub type StackGCVector<T> = Vec<T>;
 
     pub struct RootedTraceableBox<T>(*mut T);
@@ -6590,6 +6706,16 @@ pub mod realms {
             }))
         }
     }
+    impl<'a> std::convert::AsMut<crate::context::JSContext> for CurrentRealm<'a> {
+        fn as_mut(&mut self) -> &mut crate::context::JSContext {
+            std::ops::DerefMut::deref_mut(self)
+        }
+    }
+    impl<'a> std::convert::AsMut<crate::context::JSContext> for AutoRealm<'a> {
+        fn as_mut(&mut self) -> &mut crate::context::JSContext {
+            std::ops::DerefMut::deref_mut(self)
+        }
+    }
 
     impl<'a> From<&mut CurrentRealm<'a>> for crate::context::JSContext {
         fn from(realm: &mut CurrentRealm<'a>) -> Self {
@@ -6686,6 +6812,13 @@ pub mod conversions {
             _cx: *mut jsapi::JSContext,
             _value: jsapi::HandleValue,
         ) -> Result<ConversionResult<std::rc::Rc<Self>>, ()>;
+
+        fn safe_from_jsval(
+            cx: &mut crate::context::JSContext,
+            value: jsapi::HandleValue,
+        ) -> Result<ConversionResult<std::rc::Rc<Self>>, ()> {
+            unsafe { Self::from_jsval(cx.raw_cx(), value) }
+        }
     }
 
     macro_rules! primitive_to_jsval {
@@ -6785,6 +6918,16 @@ pub mod conversions {
             rval.set(jsapi::JSVal::default());
         }
     }
+    impl<T: ToJSValConvertible> ToJSValConvertible for Vec<T> {
+        unsafe fn to_jsval(&self, cx: *mut jsapi::JSContext, rval: jsapi::MutableHandleValue) {
+            unsafe { <[T]>::to_jsval(self, cx, rval) }
+        }
+    }
+    impl<T: ToJSValConvertible> ToJSValConvertible for Box<T> {
+        unsafe fn to_jsval(&self, cx: *mut jsapi::JSContext, rval: jsapi::MutableHandleValue) {
+            unsafe { (**self).to_jsval(cx, rval) }
+        }
+    }
 
     impl<T: ToJSValConvertible> ToJSValConvertible for Option<T> {
         unsafe fn to_jsval(&self, cx: *mut jsapi::JSContext, rval: jsapi::MutableHandleValue) {
@@ -6806,11 +6949,6 @@ pub mod conversions {
     impl<T: ToJSValConvertible> ToJSValConvertible for crate::gc::RootedGuard<'_, T> {
         unsafe fn to_jsval(&self, cx: *mut jsapi::JSContext, rval: jsapi::MutableHandleValue) {
             unsafe { std::ops::Deref::deref(self).to_jsval(cx, rval) }
-        }
-    }
-    impl<T: ToJSValConvertible> ToJSValConvertible for Vec<T> {
-        unsafe fn to_jsval(&self, _cx: *mut jsapi::JSContext, mut rval: jsapi::MutableHandleValue) {
-            rval.set(jsapi::JSVal::default());
         }
     }
     impl<T> FromJSValConvertible for Vec<T>
@@ -7098,6 +7236,7 @@ pub mod typedarray {
                 }
             }
             impl TypedArrayElementCreator for $name {}
+            unsafe impl super::gc::Traceable for $name {}
         };
     }
 
@@ -7191,6 +7330,9 @@ pub mod typedarray {
             }
         }
         pub fn underlying_object(&self) -> *const *mut jsapi::JSObject {
+            &self.object
+        }
+        pub fn object_ref(&self) -> &*mut jsapi::JSObject {
             &self.object
         }
         pub fn object(&self) -> *mut jsapi::JSObject {

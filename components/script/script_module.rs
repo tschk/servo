@@ -1140,7 +1140,7 @@ unsafe extern "C" fn import_meta_resolve(cx: *mut RawJSContext, argc: u32, vp: *
 
     let args = unsafe { CallArgs::from_vp(vp, argc) };
 
-    rooted!(&in(cx) let module_private = unsafe { *GetFunctionNativeReserved(args.callee(), SLOT_MODULEPRIVATE) });
+    rooted!(&in(cx) let module_private = unsafe { GetFunctionNativeReserved(args.callee(), SLOT_MODULEPRIVATE).get() });
     let reference_private = module_private.handle().into();
     let module_data = unsafe { module_script_from_reference_private(&reference_private) };
 

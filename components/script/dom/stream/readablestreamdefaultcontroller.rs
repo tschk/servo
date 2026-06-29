@@ -157,7 +157,7 @@ impl EnqueuedValue {
                 rooted!(&in(cx) let mut array_buffer_ptr = ptr::null_mut::<JSObject>());
                 create_buffer_source::<Uint8>(cx, chunk, array_buffer_ptr.handle_mut())
                     .expect("failed to create buffer source for native chunk.");
-                array_buffer_ptr.safe_to_jsval(cx, rval);
+                array_buffer_ptr.safe_to_jsval(cx, rval, ());
             },
             EnqueuedValue::Js(value_with_size) => value_with_size.value.safe_to_jsval(cx, rval),
             EnqueuedValue::CloseSentinel => {

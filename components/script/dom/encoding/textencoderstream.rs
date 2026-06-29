@@ -241,7 +241,7 @@ pub(crate) fn encode_and_enqueue_a_chunk(
             ConvertedInput::String(latin1_to_string(cx, s))
         } else {
             let mut len = 0;
-            let data = JS_GetTwoByteStringCharsAndLength(cx, *jsstr, &mut len);
+            let data = JS_GetTwoByteStringCharsAndLength(cx, ptr::null(), *jsstr, &mut len);
             let maybe_ill_formed_code_units = std::slice::from_raw_parts(data, len);
             ConvertedInput::CodeUnits(maybe_ill_formed_code_units)
         }

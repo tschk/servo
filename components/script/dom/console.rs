@@ -1021,7 +1021,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
     const MAX_FRAME_COUNT: u32 = 128;
 
     let mut frames = vec![];
-    rooted!(&in(&mut *cx) let mut handle =  ptr::null_mut());
+    rooted!(&in(&mut *cx) let mut handle = ptr::null_mut::<*mut js::jsapi::JSObject>());
     let captured_js_stack =
         unsafe { CapturedJSStack::new(&mut *cx, handle, Some(MAX_FRAME_COUNT)) };
     let Some(captured_js_stack) = captured_js_stack else {

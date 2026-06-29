@@ -446,7 +446,7 @@ where
                 buffer.get()
             },
         });
-        let data = if let Ok(array) = array {
+        let data = if let Some(array) = array {
             let data = array.to_vec();
             let _ = self.detach_buffer(cx);
             Ok(data)
@@ -476,7 +476,7 @@ where
                 buffer.get()
             },
         });
-        let Ok(array) = array else {
+        let Some(array) = array else {
             return Err(());
         };
         unsafe {
@@ -500,7 +500,7 @@ where
                 buffer.get()
             },
         });
-        let Ok(mut array) = array else {
+        let Some(mut array) = array else {
             return Err(());
         };
         unsafe {

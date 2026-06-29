@@ -95,7 +95,7 @@ impl<D: DomTypes> CallbackObject<D> {
         self.permanent_js_root.set(ObjectValue(callback));
         unsafe {
             assert!(AddRawValueRoot(
-                cx,
+                cx.raw_cx_no_gc(),
                 self.permanent_js_root.get_unsafe(),
                 c"CallbackObject::root".as_ptr()
             ));

@@ -96,7 +96,7 @@ pub(crate) unsafe fn wrap<T: MutDomObject, D: DomTypes>(
             rooted!(&in(cx) let mut proto = ptr::null_mut::<JSObject>());
             if let Some(given) = given_proto {
                 proto.set(*given);
-                if get_context_realm(cx.raw_cx()) != get_object_realm(*given) {
+                if get_context_realm(cx) != get_object_realm(*given) {
                     assert!(JS_WrapObject(cx, proto.handle_mut()));
                 }
             } else {

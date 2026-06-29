@@ -210,7 +210,7 @@ impl<T> ToJSValConvertible for Reflector<T> {
         let obj = self.get_jsobject().get();
         assert!(!obj.is_null());
         rval.set(ObjectValue(obj));
-        maybe_wrap_value(cx, rval);
+        maybe_wrap_value(&*cx, rval);
     }
 }
 

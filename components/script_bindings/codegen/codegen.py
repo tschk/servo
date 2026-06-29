@@ -4277,14 +4277,14 @@ class CGCallGenerator(CGThing):
             if static:
                 glob = "global.upcast::<D::GlobalScope>()"
             else:
-                glob = "&D::GlobalScope::from_current_realm(&CurrentRealm::assert(cx))"
+                glob = "&D::GlobalScope::from_current_realm(&CurrentRealm::assert(crate::script_runtime::copy_cx(cx)))"
 
             self.cgRoot.append(CGGeneric(
                 "let result = match result {\n"
                 "    Ok(result) => result,\n"
                 "    Err(e) => {\n"
                 f"        let global = {glob};\n"
-                f"        <D as DomHelpers<D>>::throw_dom_exception(cx, global, e);\n"
+                f"        <D as DomHelpers<D>>::throw_dom_exception(crate::script_runtime::copy_cx(cx), global, e);\n"
                 f"        return{errorResult};\n"
                 "    },\n"
                 "};"))
@@ -4516,7 +4516,7 @@ class CGAbstractStaticBindingMethod(CGAbstractMethod):
     def definition_body(self) -> CGThing:
         preamble = """\
 let args = CallArgs::from_vp(vp, argc);
-let global = D::GlobalScope::from_object(args.callee());
+let global = D::GlobalScope::from_object(args.callee().to_object());
 """
         if len(self.exposureSet) == 1:
             preamble += f"let global = DomRoot::downcast::<D::{list(self.exposureSet)[0]}>(global).unwrap();\n"

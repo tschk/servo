@@ -165,11 +165,11 @@ pub(crate) unsafe fn create_global_object<D: DomTypes>(
         // in select_compartment() below [1], preventing compartment reuse in either direction between this global
         // and any globals created with `use_system_compartment` set to false.
         // [1] IsSystemCompartment() → Realm::isSystem() → Realm::isSystem_ → principals == trustedPrincipals()
-        JS_SetTrustedPrincipals(cx, principal.as_raw());
+        JS_SetTrustedPrincipals(cx.raw_cx(), principal.as_raw());
     }
 
     rval.set(JS_NewGlobalObject(
-        cx,
+        cx.raw_cx(),
         class,
         principal.as_raw(),
         OnNewGlobalHookOption::DontFireOnNewGlobalHook,
@@ -189,7 +189,7 @@ pub(crate) unsafe fn create_global_object<D: DomTypes>(
     let mut cx = AutoRealm::new_from_handle(cx, rval.handle());
     let cx = &mut cx;
 
-    JS_FireOnNewGlobalObject(cx, rval.handle());
+    JS_FireOnNewGlobalObject(cx.raw_cx(), rval.handle());
 }
 
 /// Choose the compartment to create a new global object in.
@@ -705,7 +705,7 @@ pub fn get_desired_proto(
         }
 
         {
-            let mut realm = AutoRealm::new(cx, NonNull::new(GetRealmGlobalOrNull(realm)).unwrap());
+            let mut realm = AutoRealm::new(cx, NonNull::new(GetRealmGlobalOrNull(&*realm)).unwrap());
             let (global, realm) = realm.global_and_reborrow();
             get_per_interface_object_handle(
                 realm,

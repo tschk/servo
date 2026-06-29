@@ -131,7 +131,7 @@ where
         }
 
         rooted!(&in(cx) let object = value.to_object());
-        let mut ids = unsafe { IdVector::new(cx.raw_cx()) };
+        let mut ids = unsafe { IdVector::new(cx) };
         if unsafe {
             !GetPropertyKeys(
                 crate::script_runtime::copy_cx(cx),

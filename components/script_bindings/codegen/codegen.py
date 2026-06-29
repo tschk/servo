@@ -4904,7 +4904,8 @@ class CGMemberJITInfo(CGThing):
                 """
                 JSJitInfo {
                     __bindgen_anon_1: JSJitInfo__bindgen_ty_1 {
-                        ${opKind}: ${opValue}
+                        ${opKind}: ${opValue},
+                        ..Default::default()
                     },
                     __bindgen_anon_2: JSJitInfo__bindgen_ty_2 {
                         protoID: PrototypeList::ID::${name} as u16,
@@ -5259,7 +5260,8 @@ class CGStaticMethodJitinfo(CGGeneric):
             pub(crate) fn init_{method.identifier.name}_methodinfo<D: DomTypes>() {{
                 {method.identifier.name}_methodinfo.set(JSJitInfo {{
                     __bindgen_anon_1: JSJitInfo__bindgen_ty_1 {{
-                        staticMethod: Some({CGDictionary.makeMemberName(method.identifier.name)}::<D>)
+                        staticMethod: Some({CGDictionary.makeMemberName(method.identifier.name)}::<D>),
+                        ..Default::default()
                     }},
                     __bindgen_anon_2: JSJitInfo__bindgen_ty_2 {{
                         protoID: PrototypeList::ID::Last as u16,

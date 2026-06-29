@@ -998,9 +998,9 @@ impl ScriptFetchOptions {
 }
 
 #[expect(unsafe_code)]
-pub(crate) unsafe fn module_script_from_reference_private(
-    reference_private: &RawHandle<JSVal>,
-) -> Option<&ModuleScript> {
+pub(crate) unsafe fn module_script_from_reference_private<'a>(
+    reference_private: &'a RawHandle<'a, JSVal>,
+) -> Option<&'a ModuleScript> {
     if reference_private.get().is_undefined() {
         return None;
     }
@@ -1025,10 +1025,13 @@ unsafe extern "C" fn HostResolveImportedModule(
 
     // Step 5.
     let module_data = unsafe { module_script_from_reference_private(&reference_private) };
-    let jsstr = unsafe { GetModuleRequestSpecifier(cx, Handle::from_raw(specifier)) };
-    let module_type = unsafe { GetModuleRequestType(cx, Handle::from_raw(specifier)) };
+    let jsstr =
+        unsafe { GetModuleRequestSpecifier(&mut *cx, Handle::from_raw(specifier)) };
+    let module_type =
+        unsafe { GetModuleRequestType(&mut *cx, Handle::from_raw(specifier)) };
 
-    let specifier = unsafe { jsstr_to_string(cx, NonNull::new(jsstr).unwrap()) };
+    let specifier =
+        unsafe { jsstr_to_string(&mut *cx, NonNull::new(jsstr).unwrap()) };
     let url = ModuleTree::resolve_module_specifier(
         &global_scope,
         module_data,
@@ -1150,8 +1153,8 @@ unsafe extern "C" fn import_meta_resolve(cx: *mut RawJSContext, argc: u32, vp: *
     let specifier = unsafe {
         let value = HandleValue::from_raw(args.get(0));
 
-        match NonNull::new(ToString(cx, value)) {
-            Some(jsstr) => jsstr_to_string(cx, jsstr).into(),
+        match NonNull::new(ToString(&mut *cx, value)) {
+            Some(jsstr) => jsstr_to_string(&mut *cx, jsstr).into(),
             None => return false,
         }
     };
@@ -1162,8 +1165,10 @@ unsafe extern "C" fn import_meta_resolve(cx: *mut RawJSContext, argc: u32, vp: *
     match url {
         Ok(url) => {
             // Step 4.3. Return the serialization of url.
-            url.as_str()
-                .safe_to_jsval(cx, unsafe { MutableHandleValue::from_raw(args.rval()) });
+            url.as_str().safe_to_jsval(
+                &mut *cx,
+                unsafe { MutableHandleValue::from_raw(args.rval()) },
+            );
             true
         },
         Err(error) => {

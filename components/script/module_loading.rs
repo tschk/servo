@@ -147,7 +147,8 @@ fn inner_module_loading(
             // Note: Gecko will call hasFirstUnsupportedAttributeKey on each module request,
             // GetRequestedModuleSpecifier will do it for us.
             // In addition it will also check if specifier has an unknown module type.
-            let jsstr = unsafe { GetRequestedModuleSpecifier(cx, module_handle, index) };
+            let jsstr =
+                unsafe { GetRequestedModuleSpecifier(&mut *cx, module_handle, index) };
 
             if jsstr.is_null() {
                 // 1. Let error be ThrowCompletion(a newly created SyntaxError object).
@@ -164,9 +165,11 @@ fn inner_module_loading(
                 // 2. Perform ContinueModuleLoading(state, error).
                 continue_module_loading(cx, state, Err(error));
             } else {
-                let specifier =
-                    unsafe { jsstr_to_string(cx, std::ptr::NonNull::new(jsstr).unwrap()) };
-                let module_type = unsafe { GetRequestedModuleType(cx, module_handle, index) };
+                let specifier = unsafe {
+                    jsstr_to_string(&mut *cx, std::ptr::NonNull::new(jsstr).unwrap())
+                };
+                let module_type =
+                    unsafe { GetRequestedModuleType(&mut *cx, module_handle, index) };
 
                 let realm = CurrentRealm::assert(&mut *cx);
                 let global = GlobalScope::from_current_realm(&realm);
@@ -182,7 +185,7 @@ fn inner_module_loading(
                     // iii. Else,
                     None => {
                         rooted!(&in(cx) let mut referrer = UndefinedValue());
-                        unsafe { JS_GetModulePrivate(module_handle.get(), referrer.handle_mut()) };
+                        referrer.set(unsafe { JS_GetModulePrivate(module_handle.get()) });
 
                         // 1. Perform HostLoadImportedModule(module, request, state.[[HostDefined]], state).
                         host_load_imported_module(

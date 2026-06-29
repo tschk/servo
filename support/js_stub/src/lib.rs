@@ -4068,11 +4068,11 @@ pub mod rust {
             crate::v8_glue::set_private(obj, data)
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_GetPrototype<C, O, R>(_cx: C, _obj: O, _result: R) -> bool {
+        pub unsafe fn JS_GetPrototype<C, O, R>(_cx: &C, _obj: O, _result: R) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_GetPrototype<C, O, R>(_cx: C, obj: O, result: R) -> bool
+        pub unsafe fn JS_GetPrototype<C, O, R>(_cx: &C, obj: O, result: R) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
             R: jsapi::SetJsapiObjectOut,
@@ -4097,8 +4097,8 @@ pub mod rust {
             crate::v8_glue::create_dom_global(cx, clasp, principal)
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_DefineProperty<C, O, N, V>(
-            _cx: C,
+        pub unsafe fn JS_DefineProperty<C: ?Sized, O, N, V>(
+            _cx: &C,
             _obj: O,
             _name: N,
             _val: V,
@@ -4107,8 +4107,8 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_DefineProperty<C, O, N, V>(
-            _cx: C,
+        pub unsafe fn JS_DefineProperty<C: ?Sized, O, N, V>(
+            _cx: &C,
             obj: O,
             name: N,
             val: V,
@@ -4126,11 +4126,11 @@ pub mod rust {
             )
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_GetProperty<C, O, N, V>(_cx: C, _obj: O, _name: N, _vp: V) -> bool {
+        pub unsafe fn JS_GetProperty<C, O, N, V>(_cx: &C, _obj: O, _name: N, _vp: V) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_GetProperty<C, O, N, V>(_cx: C, obj: O, name: N, vp: V) -> bool
+        pub unsafe fn JS_GetProperty<C, O, N, V>(_cx: &C, obj: O, name: N, vp: V) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
             N: jsapi::ToBytePtr,
@@ -4145,11 +4145,11 @@ pub mod rust {
             }
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_SetProperty<C, O, N, V>(_cx: C, _obj: O, _name: N, _vp: V) -> bool {
+        pub unsafe fn JS_SetProperty<C, O, N, V>(_cx: &C, _obj: O, _name: N, _vp: V) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_SetProperty<C, O, N, V>(_cx: C, obj: O, name: N, vp: V) -> bool
+        pub unsafe fn JS_SetProperty<C, O, N, V>(_cx: &C, obj: O, name: N, vp: V) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
             N: jsapi::ToBytePtr,
@@ -4270,11 +4270,11 @@ pub mod rust {
             crate::v8_glue::atomize_string_n(cx, s.to_byte_ptr(), len)
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn Call<C, T, F, A, R>(_cx: C, _this: T, _fun: F, _args: A, _rval: R) -> bool {
+        pub unsafe fn Call<C, T, F, A, R>(_cx: &C, _this: T, _fun: F, _args: A, _rval: R) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn Call<C, T, F, A, R>(_cx: C, _this: T, fun: F, args: A, rval: R) -> bool
+        pub unsafe fn Call<C, T, F, A, R>(_cx: &C, _this: T, fun: F, args: A, rval: R) -> bool
         where
             F: jsapi::ToFunctionObjectPtr,
             A: jsapi::ToCallArgs,
@@ -4300,27 +4300,27 @@ pub mod rust {
             crate::v8_glue::append_to_id_vector(v.into(), id.into())
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn GetPropertyKeys<C, O, I>(_cx: C, _obj: O, _flags: u32, _ids: I) -> bool {
+        pub unsafe fn GetPropertyKeys<C, O, I>(_cx: &C, _obj: O, _flags: u32, _ids: I) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn GetPropertyKeys<C, O, I>(_cx: C, obj: O, _flags: u32, ids: I) -> bool
+        pub unsafe fn GetPropertyKeys<C, O, I>(_cx: &C, obj: O, _flags: u32, ids: I) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
             I: Into<jsapi::MutableHandleIdVector>,
         {
             crate::v8_glue::get_property_keys(obj.into(), ids.into())
         }
-        pub unsafe fn JS_CopyOwnPropertiesAndPrivateFields<C, T, O>(
-            _cx: C,
+        pub unsafe fn JS_CopyOwnPropertiesAndPrivateFields<C: ?Sized, T, O>(
+            _cx: &C,
             _target: T,
             _obj: O,
         ) -> bool {
             true
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_DefinePropertyById2<C, O, I, V, A>(
-            _cx: C,
+        pub unsafe fn JS_DefinePropertyById2<C: ?Sized, O, I, V, A>(
+            _cx: &C,
             _obj: O,
             _id: I,
             _val: V,
@@ -4329,8 +4329,8 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_DefinePropertyById2<C, O, I, V, A>(
-            _cx: C,
+        pub unsafe fn JS_DefinePropertyById2<C: ?Sized, O, I, V, A>(
+            _cx: &C,
             obj: O,
             id: I,
             val: V,
@@ -4343,24 +4343,24 @@ pub mod rust {
         {
             crate::v8_glue::set_property_by_jsid(obj.into(), id.into(), val.to_property_value())
         }
-        pub unsafe fn JS_InitializePropertiesFromCompatibleNativeObject<C, D, S>(
-            _cx: C,
+        pub unsafe fn JS_InitializePropertiesFromCompatibleNativeObject<C: ?Sized, D, S>(
+            _cx: &C,
             _dst: D,
             _src: S,
         ) -> bool {
             true
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_NewObjectWithGivenProto<C, P>(
-            _cx: C,
+        pub unsafe fn JS_NewObjectWithGivenProto<C: ?Sized, P>(
+            _cx: &C,
             _clasp: *const jsapi::JSClass,
             _proto: P,
         ) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_NewObjectWithGivenProto<C, P>(
-            _cx: C,
+        pub unsafe fn JS_NewObjectWithGivenProto<C: ?Sized, P>(
+            _cx: &C,
             clasp: *const jsapi::JSClass,
             proto: P,
         ) -> *mut jsapi::JSObject
@@ -4370,16 +4370,16 @@ pub mod rust {
             crate::v8_glue::js_new_object_with_proto(clasp, proto.into())
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_NewObjectWithoutMetadata<C, P>(
-            _cx: C,
+        pub unsafe fn JS_NewObjectWithoutMetadata<C: ?Sized, P>(
+            _cx: &C,
             _clasp: *const jsapi::JSClass,
             _proto: P,
         ) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_NewObjectWithoutMetadata<C, P>(
-            _cx: C,
+        pub unsafe fn JS_NewObjectWithoutMetadata<C: ?Sized, P>(
+            _cx: &C,
             clasp: *const jsapi::JSClass,
             proto: P,
         ) -> *mut jsapi::JSObject
@@ -4388,8 +4388,8 @@ pub mod rust {
         {
             crate::v8_glue::js_new_object_with_proto(clasp, proto.into())
         }
-        pub unsafe fn JS_SetImmutablePrototype<C, O>(
-            _cx: C,
+        pub unsafe fn JS_SetImmutablePrototype<C: ?Sized, O>(
+            _cx: &C,
             _obj: O,
             succeeded: *mut bool,
         ) -> bool {
@@ -4399,35 +4399,35 @@ pub mod rust {
             true
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_SetPrototype<C, O, P>(_cx: C, _obj: O, _proto: P) -> bool {
+        pub unsafe fn JS_SetPrototype<C, O, P>(_cx: &C, _obj: O, _proto: P) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_SetPrototype<C, O, P>(_cx: C, obj: O, proto: P) -> bool
+        pub unsafe fn JS_SetPrototype<C, O, P>(_cx: &C, obj: O, proto: P) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
             P: Into<*mut jsapi::JSObject>,
         {
             !crate::v8_glue::set_prototype(obj.into(), proto.into()).is_null()
         }
-        pub unsafe fn JS_WrapObject<C, O>(_cx: C, _obj: O) -> bool {
+        pub unsafe fn JS_WrapObject<C, O>(_cx: &C, _obj: O) -> bool {
             false
         }
         pub trait ToJsContextPtr {
-            fn to_js_context_ptr(self) -> *mut jsapi::JSContext;
+            fn to_js_context_ptr(&self) -> *mut jsapi::JSContext;
         }
         impl ToJsContextPtr for *mut jsapi::JSContext {
-            fn to_js_context_ptr(self) -> *mut jsapi::JSContext {
-                self
+            fn to_js_context_ptr(&self) -> *mut jsapi::JSContext {
+                *self
             }
         }
-        impl ToJsContextPtr for &mut crate::context::JSContext {
-            fn to_js_context_ptr(self) -> *mut jsapi::JSContext {
-                unsafe { self.raw_cx() }
+        impl ToJsContextPtr for crate::context::JSContext {
+            fn to_js_context_ptr(&self) -> *mut jsapi::JSContext {
+                unsafe { self.raw_cx_no_gc() }
             }
         }
-        pub unsafe fn NewProxyObject<C, Pr, P>(
-            cx: C,
+        pub unsafe fn NewProxyObject<C: ?Sized, Pr, P>(
+            cx: &C,
             handler: *const std::ffi::c_void,
             _priv: Pr,
             proto: P,
@@ -4440,7 +4440,7 @@ pub mod rust {
         {
             crate::v8_glue::new_proxy_object(cx.to_js_context_ptr(), handler, proto.into(), flag)
         }
-        pub fn RUST_INTERNED_STRING_TO_JSID<C, S, O>(_cx: C, _s: S, _out: O) -> jsapi::jsid {
+        pub fn RUST_INTERNED_STRING_TO_JSID<C, S, O>(_cx: &C, _s: S, _out: O) -> jsapi::jsid {
             jsapi::jsid(0)
         }
         #[cfg(not(feature = "v8"))]
@@ -4487,11 +4487,11 @@ pub mod rust {
         }
 
         #[cfg(not(feature = "v8"))]
-        pub fn IsArrayObject<C, V>(_cx: C, _val: V, _out: *mut bool) -> bool {
+        pub fn IsArrayObject<C, V>(_cx: &C, _val: V, _out: *mut bool) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub fn IsArrayObject<C, V>(_cx: C, val: V, out: *mut bool) -> bool
+        pub fn IsArrayObject<C, V>(_cx: &C, val: V, out: *mut bool) -> bool
         where
             V: jsapi::ToFunctionObjectPtr,
         {
@@ -4501,8 +4501,8 @@ pub mod rust {
             }
             true
         }
-        pub fn JS_DefineProperty3<C, O, N, V>(
-            _cx: C,
+        pub fn JS_DefineProperty3<C: ?Sized, O, N, V>(
+            _cx: &C,
             obj: O,
             name: N,
             val: V,
@@ -4519,8 +4519,8 @@ pub mod rust {
                 val.to_property_value(),
             )
         }
-        pub fn JS_DefineProperty4<C, O, N, V>(
-            _cx: C,
+        pub fn JS_DefineProperty4<C: ?Sized, O, N, V>(
+            _cx: &C,
             obj: O,
             name: N,
             val: V,
@@ -4537,8 +4537,8 @@ pub mod rust {
                 val.to_property_value(),
             )
         }
-        pub fn JS_DefineProperty5<C, O, N, V>(
-            _cx: C,
+        pub fn JS_DefineProperty5<C: ?Sized, O, N, V>(
+            _cx: &C,
             obj: O,
             name: N,
             val: V,
@@ -4556,8 +4556,8 @@ pub mod rust {
             )
         }
         #[cfg(not(feature = "v8"))]
-        pub fn JS_DefinePropertyById5<C, O, I, V>(
-            _cx: C,
+        pub fn JS_DefinePropertyById5<C: ?Sized, O, I, V>(
+            _cx: &C,
             _obj: O,
             _id: I,
             _val: V,
@@ -4566,8 +4566,8 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub fn JS_DefinePropertyById5<C, O, I, V>(
-            _cx: C,
+        pub fn JS_DefinePropertyById5<C: ?Sized, O, I, V>(
+            _cx: &C,
             obj: O,
             id: I,
             val: V,
@@ -4582,8 +4582,8 @@ pub mod rust {
         }
         pub fn JS_FireOnNewGlobalObject<O>(_cx: *mut jsapi::JSContext, _obj: O) {}
         #[cfg(not(feature = "v8"))]
-        pub fn JS_AlreadyHasOwnPropertyById<C, O, I>(
-            _cx: C,
+        pub fn JS_AlreadyHasOwnPropertyById<C: ?Sized, O, I>(
+            _cx: &C,
             _obj: O,
             _id: I,
             _found: *mut bool,
@@ -4591,8 +4591,8 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub fn JS_AlreadyHasOwnPropertyById<C, O, I>(
-            _cx: C,
+        pub fn JS_AlreadyHasOwnPropertyById<C: ?Sized, O, I>(
+            _cx: &C,
             obj: O,
             id: I,
             found: *mut bool,
@@ -4606,11 +4606,11 @@ pub mod rust {
         }
         pub fn SetDataPropertyDescriptor<D, V>(_desc: D, _value: V, _attrs: u32) {}
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: C, _obj: O, _id: I, _vp: V) -> bool {
+        pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: &C, _obj: O, _id: I, _vp: V) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: C, obj: O, id: I, vp: V) -> bool
+        pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: &C, obj: O, id: I, vp: V) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
             I: Into<jsapi::jsid>,
@@ -4624,8 +4624,8 @@ pub mod rust {
                 None => false,
             }
         }
-        pub unsafe fn JS_HasProperty<C, O, N>(
-            _cx: C,
+        pub unsafe fn JS_HasProperty<C: ?Sized, O, N>(
+            _cx: &C,
             _obj: O,
             _name: N,
             _found: *mut bool,
@@ -4633,8 +4633,8 @@ pub mod rust {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_HasPropertyById<C, O, I>(
-            _cx: C,
+        pub unsafe fn JS_HasPropertyById<C: ?Sized, O, I>(
+            _cx: &C,
             _obj: O,
             _id: I,
             _found: *mut bool,
@@ -4642,7 +4642,7 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_HasPropertyById<C, O, I>(_cx: C, obj: O, id: I, found: *mut bool) -> bool
+        pub unsafe fn JS_HasPropertyById<C, O, I>(_cx: &C, obj: O, id: I, found: *mut bool) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
             I: Into<jsapi::jsid>,
@@ -4650,8 +4650,8 @@ pub mod rust {
             found.set_bool_out(crate::v8_glue::has_property_by_jsid(obj.into(), id.into()));
             true
         }
-        pub unsafe fn JS_HasOwnProperty<C, O, N>(
-            _cx: C,
+        pub unsafe fn JS_HasOwnProperty<C: ?Sized, O, N>(
+            _cx: &C,
             _obj: O,
             _name: N,
             _found: *mut bool,
@@ -4659,8 +4659,8 @@ pub mod rust {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_ForwardGetPropertyTo<C, O, I, R, V>(
-            _cx: C,
+        pub unsafe fn JS_ForwardGetPropertyTo<C: ?Sized, O, I, R, V>(
+            _cx: &C,
             _obj: O,
             _id: I,
             _receiver: R,
@@ -4669,8 +4669,8 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_ForwardGetPropertyTo<C, O, I, R, V>(
-            _cx: C,
+        pub unsafe fn JS_ForwardGetPropertyTo<C: ?Sized, O, I, R, V>(
+            _cx: &C,
             obj: O,
             id: I,
             _receiver: R,
@@ -4689,8 +4689,8 @@ pub mod rust {
                 None => false,
             }
         }
-        pub unsafe fn JS_DeletePropertyById<C, O, I, R>(
-            _cx: C,
+        pub unsafe fn JS_DeletePropertyById<C: ?Sized, O, I, R>(
+            _cx: &C,
             _obj: O,
             _id: I,
             _result: R,
@@ -4698,11 +4698,11 @@ pub mod rust {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_GetPendingException<C, V>(_cx: C, _vp: V) -> bool {
+        pub unsafe fn JS_GetPendingException<C, V>(_cx: &C, _vp: V) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_GetPendingException<C, V>(_cx: C, vp: V) -> bool
+        pub unsafe fn JS_GetPendingException<C, V>(_cx: &C, vp: V) -> bool
         where
             V: SetPropertyOut,
         {
@@ -4714,31 +4714,31 @@ pub mod rust {
             }
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_SetPendingException<C, V, B>(_cx: C, _val: V, _behavior: B) {}
+        pub unsafe fn JS_SetPendingException<C, V, B>(_cx: &C, _val: V, _behavior: B) {}
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_SetPendingException<C, V, B>(_cx: C, val: V, _behavior: B)
+        pub unsafe fn JS_SetPendingException<C, V, B>(_cx: &C, val: V, _behavior: B)
         where
             V: Into<jsapi::JSVal>,
         {
             crate::v8_glue::set_pending_exception(val.into());
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_IdToValue<C, I, V>(_cx: C, _id: I, _vp: V) -> bool {
+        pub unsafe fn JS_IdToValue<C, I, V>(_cx: &C, _id: I, _vp: V) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_IdToValue<C, I, V>(_cx: C, id: I, vp: V) -> bool
+        pub unsafe fn JS_IdToValue<C, I, V>(_cx: &C, id: I, vp: V) -> bool
         where
             I: Into<jsapi::jsid>,
             V: jsapi::SetJsapiValOut,
         {
             crate::v8_glue::id_to_value(id.into(), vp)
         }
-        pub unsafe fn CallOriginalPromiseReject<C, V>(_cx: C, _value: V) -> *mut jsapi::JSObject {
+        pub unsafe fn CallOriginalPromiseReject<C, V>(_cx: &C, _value: V) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
-        pub unsafe fn JS_DefineUCProperty2<C, O, N, V>(
-            _cx: C,
+        pub unsafe fn JS_DefineUCProperty2<C: ?Sized, O, N, V>(
+            _cx: &C,
             _obj: O,
             _name: N,
             _namelen: usize,
@@ -4747,8 +4747,8 @@ pub mod rust {
         ) -> bool {
             false
         }
-        pub unsafe fn ToJSON<C, V, O, T, W, D>(
-            _cx: C,
+        pub unsafe fn ToJSON<C: ?Sized, V, O, T, W, D>(
+            _cx: &C,
             _val: V,
             _obj: O,
             _replacer: T,
@@ -4757,8 +4757,8 @@ pub mod rust {
         ) -> bool {
             false
         }
-        pub unsafe fn JS_GetOwnPropertyDescriptorById<C, O, I, D>(
-            _cx: C,
+        pub unsafe fn JS_GetOwnPropertyDescriptorById<C: ?Sized, O, I, D>(
+            _cx: &C,
             _obj: O,
             _id: I,
             _desc: D,
@@ -4766,19 +4766,19 @@ pub mod rust {
         ) -> bool {
             false
         }
-        pub unsafe fn AddPromiseReactions<C, P, R, J>(
-            _cx: C,
+        pub unsafe fn AddPromiseReactions<C: ?Sized, P, R, J>(
+            _cx: &C,
             _promise: P,
             _resolve: R,
             _reject: J,
         ) -> bool {
             false
         }
-        pub unsafe fn CallOriginalPromiseResolve<C, V>(_cx: C, _value: V) -> *mut jsapi::JSObject {
+        pub unsafe fn CallOriginalPromiseResolve<C, V>(_cx: &C, _value: V) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
-        pub unsafe fn CheckRegExpSyntax<C, S, L, R>(
-            _cx: C,
+        pub unsafe fn CheckRegExpSyntax<C: ?Sized, S, L, R>(
+            _cx: &C,
             _source: S,
             _len: L,
             _flags: crate::jsapi::RegExpFlags,
@@ -4786,22 +4786,22 @@ pub mod rust {
         ) -> bool {
             false
         }
-        pub unsafe fn Construct1<C, F, A, R>(_cx: C, _fun: F, _args: A, _rval: R) -> bool {
+        pub unsafe fn Construct1<C, F, A, R>(_cx: &C, _fun: F, _args: A, _rval: R) -> bool {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn DetachArrayBuffer<C, O>(_cx: C, _obj: O) -> bool {
+        pub unsafe fn DetachArrayBuffer<C, O>(_cx: &C, _obj: O) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn DetachArrayBuffer<C, O>(_cx: C, obj: O) -> bool
+        pub unsafe fn DetachArrayBuffer<C, O>(_cx: &C, obj: O) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
         {
             crate::v8_glue::detach_array_buffer(obj.into())
         }
-        pub unsafe fn ExecuteRegExpNoStatics<C, R, S, I, B, V>(
-            _cx: C,
+        pub unsafe fn ExecuteRegExpNoStatics<C: ?Sized, R, S, I, B, V>(
+            _cx: &C,
             _regexp: R,
             _input: S,
             _len: usize,
@@ -4812,11 +4812,11 @@ pub mod rust {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn GetArrayLength<C, O>(_cx: C, _obj: O, _len: *mut u32) -> bool {
+        pub unsafe fn GetArrayLength<C, O>(_cx: &C, _obj: O, _len: *mut u32) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn GetArrayLength<C, O>(_cx: C, obj: O, len: *mut u32) -> bool
+        pub unsafe fn GetArrayLength<C, O>(_cx: &C, obj: O, len: *mut u32) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
         {
@@ -4826,7 +4826,7 @@ pub mod rust {
             }
             true
         }
-        pub unsafe fn GetBuiltinClass<C, O>(_cx: C, obj: O, class: *mut jsapi::ESClass) -> bool
+        pub unsafe fn GetBuiltinClass<C, O>(_cx: &C, obj: O, class: *mut jsapi::ESClass) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
         {
@@ -4868,8 +4868,8 @@ pub mod rust {
         {
             crate::v8_glue::is_promise_object(obj.into())
         }
-        pub unsafe fn JS_CallFunctionName<C, O, N, A, R>(
-            _cx: C,
+        pub unsafe fn JS_CallFunctionName<C: ?Sized, O, N, A, R>(
+            _cx: &C,
             _obj: O,
             _name: N,
             _args: A,
@@ -4877,15 +4877,15 @@ pub mod rust {
         ) -> bool {
             false
         }
-        pub unsafe fn JS_ErrorFromException<C, V>(_cx: C, _value: V) -> *mut jsapi::JSErrorReport {
+        pub unsafe fn JS_ErrorFromException<C, V>(_cx: &C, _value: V) -> *mut jsapi::JSErrorReport {
             ptr::null_mut()
         }
         pub unsafe fn JS_GetPromiseResult<O, R>(_obj: O, _rval: R) {}
-        pub unsafe fn JS_ParseJSON<C, S, V>(_cx: C, _chars: S, _len: u32, _vp: V) -> bool {
+        pub unsafe fn JS_ParseJSON<C, S, V>(_cx: &C, _chars: S, _len: u32, _vp: V) -> bool {
             false
         }
-        pub unsafe fn JS_ReadStructuredClone<C, D, Ver, S, V, CB, Cl, P>(
-            _cx: C,
+        pub unsafe fn JS_ReadStructuredClone<C: ?Sized, D, Ver, S, V, CB, Cl, P>(
+            _cx: &C,
             _data: D,
             _version: Ver,
             _scope: S,
@@ -4896,8 +4896,8 @@ pub mod rust {
         ) -> bool {
             false
         }
-        pub unsafe fn JS_Stringify<C, V, R, S, W, D>(
-            _cx: C,
+        pub unsafe fn JS_Stringify<C: ?Sized, V, R, S, W, D>(
+            _cx: &C,
             _value: V,
             _replacer: R,
             _space: S,
@@ -4906,29 +4906,29 @@ pub mod rust {
         ) -> bool {
             false
         }
-        pub unsafe fn JS_TransplantObject<C, O, T>(
-            _cx: C,
+        pub unsafe fn JS_TransplantObject<C: ?Sized, O, T>(
+            _cx: &C,
             _orig: O,
             _target: T,
         ) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
-        pub unsafe fn JS_TypeOfValue<C, V>(_cx: C, _value: V) -> jsapi::JSType {
+        pub unsafe fn JS_TypeOfValue<C, V>(_cx: &C, _value: V) -> jsapi::JSType {
             jsapi::JSType::JSTYPE_OBJECT
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_ValueToSource<C, V>(_cx: C, _value: V) -> *mut jsapi::JSString {
+        pub unsafe fn JS_ValueToSource<C, V>(_cx: &C, _value: V) -> *mut jsapi::JSString {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_ValueToSource<C, V>(_cx: C, value: V) -> *mut jsapi::JSString
+        pub unsafe fn JS_ValueToSource<C, V>(_cx: &C, value: V) -> *mut jsapi::JSString
         where
             V: Into<jsapi::JSVal>,
         {
             crate::v8_glue::value_to_source(value.into())
         }
-        pub unsafe fn JS_WriteStructuredClone<C, V, D, S, P, CB, Cl, R>(
-            _cx: C,
+        pub unsafe fn JS_WriteStructuredClone<C: ?Sized, V, D, S, P, CB, Cl, R>(
+            _cx: &C,
             _value: V,
             _data: D,
             _scope: S,
@@ -4940,18 +4940,18 @@ pub mod rust {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn NewPromiseObject<C, H>(_cx: C, _executor: H) -> *mut jsapi::JSObject {
+        pub unsafe fn NewPromiseObject<C, H>(_cx: &C, _executor: H) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn NewPromiseObject<C, H>(_cx: C, executor: H) -> *mut jsapi::JSObject
+        pub unsafe fn NewPromiseObject<C, H>(_cx: &C, executor: H) -> *mut jsapi::JSObject
         where
             H: Into<*mut jsapi::JSObject>,
         {
             crate::v8_glue::new_promise_object(executor.into())
         }
-        pub unsafe fn NewWindowProxy<C, H, P>(
-            cx: C,
+        pub unsafe fn NewWindowProxy<C: ?Sized, H, P>(
+            cx: &C,
             window: H,
             handler: P,
         ) -> *mut jsapi::JSObject
@@ -4967,42 +4967,42 @@ pub mod rust {
                 false,
             )
         }
-        pub unsafe fn ObjectIsRegExp<C, O>(_cx: C, _obj: O, out: *mut bool) -> bool {
+        pub unsafe fn ObjectIsRegExp<C, O>(_cx: &C, _obj: O, out: *mut bool) -> bool {
             if !out.is_null() {
                 *out = false;
             }
             true
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn RejectPromise<C, P, V>(_cx: C, _promise: P, _value: V) -> bool {
+        pub unsafe fn RejectPromise<C, P, V>(_cx: &C, _promise: P, _value: V) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn RejectPromise<C, P, V>(_cx: C, promise: P, _value: V) -> bool
+        pub unsafe fn RejectPromise<C, P, V>(_cx: &C, promise: P, _value: V) -> bool
         where
             P: Into<*mut jsapi::JSObject>,
         {
             crate::v8_glue::set_promise_state(promise.into(), jsapi::PromiseState::Rejected)
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn ResolvePromise<C, P, V>(_cx: C, _promise: P, _value: V) -> bool {
+        pub unsafe fn ResolvePromise<C, P, V>(_cx: &C, _promise: P, _value: V) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn ResolvePromise<C, P, V>(_cx: C, promise: P, _value: V) -> bool
+        pub unsafe fn ResolvePromise<C, P, V>(_cx: &C, promise: P, _value: V) -> bool
         where
             P: Into<*mut jsapi::JSObject>,
         {
             crate::v8_glue::set_promise_state(promise.into(), jsapi::PromiseState::Fulfilled)
         }
-        pub unsafe fn SameValue<C, A, B>(_cx: C, _a: A, _b: B, _same: *mut bool) -> bool {
+        pub unsafe fn SameValue<C, A, B>(_cx: &C, _a: A, _b: B, _same: *mut bool) -> bool {
             false
         }
-        pub unsafe fn SetAnyPromiseIsHandled<C, O>(_cx: C, _obj: O) -> bool {
+        pub unsafe fn SetAnyPromiseIsHandled<C, O>(_cx: &C, _obj: O) -> bool {
             true
         }
         pub unsafe fn SetPromiseUserInputEventHandlingState<O, S>(_obj: O, _state: S) {}
-        pub unsafe fn SetWindowProxy<C, O, W>(_cx: C, _obj: O, _window_proxy: W) -> bool {
+        pub unsafe fn SetWindowProxy<C, O, W>(_cx: &C, _obj: O, _window_proxy: W) -> bool {
             false
         }
     }
@@ -5098,24 +5098,24 @@ pub mod rust {
     pub fn is_dom_object(obj: *mut super::jsapi::JSObject) -> bool {
         is_dom_class(get_object_class(obj))
     }
-    pub fn maybe_wrap_value<C, V>(_cx: C, _vp: V) -> bool {
+    pub fn maybe_wrap_value<C, V>(_cx: &C, _vp: V) -> bool {
         false
     }
-    pub fn maybe_wrap_object<C, O>(_cx: C, _obj: O) -> bool {
+    pub fn maybe_wrap_object<C, O>(_cx: &C, _obj: O) -> bool {
         false
     }
     pub type RealmOptions = super::jsapi::RealmOptions;
     #[cfg(not(feature = "v8"))]
-    pub fn define_methods<C, O>(
-        _cx: C,
+    pub fn define_methods<C: ?Sized, O>(
+        _cx: &C,
         _obj: O,
         _methods: &[super::jsapi::JSFunctionSpec],
     ) -> Result<(), ()> {
         Ok(())
     }
     #[cfg(feature = "v8")]
-    pub fn define_methods<C, O>(
-        _cx: C,
+    pub fn define_methods<C: ?Sized, O>(
+        _cx: &C,
         obj: O,
         methods: &[super::jsapi::JSFunctionSpec],
     ) -> Result<(), ()>
@@ -5151,8 +5151,8 @@ pub mod rust {
         }
         Ok(())
     }
-    pub fn define_properties<C, O>(
-        _cx: C,
+    pub fn define_properties<C: ?Sized, O>(
+        _cx: &C,
         _obj: O,
         _props: &[super::jsapi::JSPropertySpec],
     ) -> Result<(), ()> {
@@ -5161,7 +5161,7 @@ pub mod rust {
 
     pub struct CustomAutoRooterGuard<T = ()>(std::marker::PhantomData<T>);
     impl<T> CustomAutoRooterGuard<T> {
-        pub unsafe fn new<C, R>(_cx: C, _root: R) -> Self {
+        pub unsafe fn new<C, R>(_cx: &C, _root: R) -> Self {
             Self(std::marker::PhantomData)
         }
         pub fn from_value(_value: T) -> Self {
@@ -5234,7 +5234,7 @@ pub mod rust {
     }
     pub struct CapturedJSStack;
     impl CapturedJSStack {
-        pub unsafe fn new<C, H>(_cx: C, _stack: H, _max_frame_count: Option<u32>) -> Option<Self> {
+        pub unsafe fn new<C, H>(_cx: &C, _stack: H, _max_frame_count: Option<u32>) -> Option<Self> {
             Some(Self)
         }
         pub fn for_each_stack_frame<F>(&self, _callback: F)
@@ -5247,12 +5247,12 @@ pub mod rust {
         pub ptr: *mut std::ffi::c_void,
     }
     impl CompileOptionsWrapper {
-        pub fn new<C, F>(_cx: C, _filename: F, _line: u32) -> Self {
+        pub fn new<C, F>(_cx: &C, _filename: F, _line: u32) -> Self {
             Self {
                 ptr: std::ptr::null_mut(),
             }
         }
-        pub unsafe fn new_raw<C, F>(_cx: C, _filename: F, _line: u32) -> Self {
+        pub unsafe fn new_raw<C, F>(_cx: &C, _filename: F, _line: u32) -> Self {
             Self {
                 ptr: std::ptr::null_mut(),
             }
@@ -5270,7 +5270,7 @@ pub mod rust {
     }
     pub struct EnvironmentChain;
     impl EnvironmentChain {
-        pub fn new<C, S>(_cx: C, _support_unscopables: S) -> Self {
+        pub fn new<C, S>(_cx: &C, _support_unscopables: S) -> Self {
             Self
         }
         pub fn append<O>(&mut self, _object: O) {}
@@ -5319,7 +5319,7 @@ pub mod rust {
             Self
         }
     }
-    pub fn ToNumber<C, V>(_cx: C, _value: V) -> Result<f64, ()> {
+    pub fn ToNumber<C, V>(_cx: &C, _value: V) -> Result<f64, ()> {
         Ok(0.0)
     }
     #[derive(Default)]
@@ -5338,8 +5338,8 @@ pub mod rust {
     pub fn describe_scripted_caller<C: ?Sized>(_cx: &C) -> Option<ScriptedCaller> {
         None
     }
-    pub fn error_info_from_exception_stack<C>(
-        _cx: C,
+    pub fn error_info_from_exception_stack<C: ?Sized>(
+        _cx: &C,
         _value: super::jsapi::JSVal,
     ) -> Option<ExceptionStackInfo> {
         None
@@ -5359,9 +5359,23 @@ pub mod rust {
             JS_GetTwoByteStringCharsAndLength, JS_NewPlainObject,
         };
         pub use super::wrappers::{
-            GetPropertyKeys, JS_CopyOwnPropertiesAndPrivateFields, JS_HasProperty, JS_IdToValue,
-            JS_InitializePropertiesFromCompatibleNativeObject, NewProxyObject,
+            AppendToIdVector, CallOriginalPromiseReject, GetPropertyKeys,
+            JS_AlreadyHasOwnPropertyById, JS_CopyOwnPropertiesAndPrivateFields, JS_DefineProperty,
+            JS_DefineProperty3, JS_DefineProperty5, JS_DefinePropertyById2, JS_DefinePropertyById5,
+            JS_DefineUCProperty2, JS_DeletePropertyById, JS_FireOnNewGlobalObject,
+            JS_ForwardGetPropertyTo, JS_GetPrototype, JS_HasOwnProperty, JS_HasProperty,
+            JS_HasPropertyById, JS_IdToValue, JS_InitializePropertiesFromCompatibleNativeObject,
+            JS_LinkConstructorAndPrototype, JS_NewFunction, JS_NewGlobalObject,
+            JS_NewObjectWithoutMetadata, JS_SetImmutablePrototype, JS_SetProperty,
+            JS_ValueToSource, NewProxyObject, RUST_SYMBOL_TO_JSID, SetDataPropertyDescriptor,
+            ToJSON, int_to_jsid,
         };
+        pub use super::super::jsapi::{
+            AddRawValueRoot, GetObjectProto, GetRealmErrorPrototype, GetRealmFunctionPrototype,
+            GetRealmIteratorPrototype, JS_DefinePropertyById, JS_GetPropertyDescriptorById,
+            JS_IterateCompartments, JS_SetTrustedPrincipals,
+        };
+        pub use crate::glue::{CallJitGetterOp, CallJitMethodOp, CallJitSetterOp, RUST_JSID_IS_VOID};
 
         pub unsafe fn JS_GetRuntime(_cx: *mut jsapi::JSContext) -> *mut std::ffi::c_void {
             ptr::null_mut()
@@ -5374,10 +5388,10 @@ pub mod rust {
         pub unsafe fn JS_IsExceptionPending<C: ?Sized>(_cx: &C) -> bool {
             crate::v8_glue::is_exception_pending()
         }
-        pub unsafe fn JS_WrapObject<C, O>(_cx: C, _obj: O) -> bool {
+        pub unsafe fn JS_WrapObject<C, O>(_cx: &C, _obj: O) -> bool {
             false
         }
-        pub unsafe fn JS_GetProperty<C, O, N, V>(_cx: C, _obj: O, _name: N, _vp: V) -> bool {
+        pub unsafe fn JS_GetProperty<C, O, N, V>(_cx: &C, _obj: O, _name: N, _vp: V) -> bool {
             false
         }
         #[cfg(not(feature = "v8"))]
@@ -5387,11 +5401,11 @@ pub mod rust {
             crate::v8_glue::clear_pending_exception();
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_GetPendingException<C, V>(_cx: C, _vp: V) -> bool {
+        pub unsafe fn JS_GetPendingException<C, V>(_cx: &C, _vp: V) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_GetPendingException<C, V>(_cx: C, vp: V) -> bool
+        pub unsafe fn JS_GetPendingException<C, V>(_cx: &C, vp: V) -> bool
         where
             V: jsapi::SetJsapiValOut,
         {
@@ -5403,37 +5417,37 @@ pub mod rust {
             }
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_SetPendingException<C, V, B>(_cx: C, _val: V, _behavior: B)
+        pub unsafe fn JS_SetPendingException<C, V, B>(_cx: &C, _val: V, _behavior: B)
         where
             V: Into<jsapi::JSVal>,
         {
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_SetPendingException<C, V, B>(_cx: C, val: V, _behavior: B)
+        pub unsafe fn JS_SetPendingException<C, V, B>(_cx: &C, val: V, _behavior: B)
         where
             V: Into<jsapi::JSVal>,
         {
             crate::v8_glue::set_pending_exception(val.into());
         }
-        pub unsafe fn JS_ParseJSON<C, S, L, V>(_cx: C, _chars: S, _len: L, _vp: V) -> bool {
+        pub unsafe fn JS_ParseJSON<C, S, L, V>(_cx: &C, _chars: S, _len: L, _vp: V) -> bool {
             false
         }
-        pub unsafe fn GetFunctionRealm<C, F>(_cx: C, _fun: F) -> *mut jsapi::JSObject {
+        pub unsafe fn GetFunctionRealm<C, F>(_cx: &C, _fun: F) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
-        pub unsafe fn GetWellKnownSymbol<C, W>(_cx: C, _which: W) -> jsapi::JSVal {
+        pub unsafe fn GetWellKnownSymbol<C, W>(_cx: &C, _which: W) -> jsapi::JSVal {
             jsapi::JSVal::default()
         }
-        pub unsafe fn RUST_INTERNED_STRING_TO_JSID<C, S, O>(_cx: C, _s: S, _out: O) -> jsapi::jsid {
+        pub unsafe fn RUST_INTERNED_STRING_TO_JSID<C, S, O>(_cx: &C, _s: S, _out: O) -> jsapi::jsid {
             jsapi::jsid(0)
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_AtomizeAndPinString<C, S>(_cx: C, _s: S) -> *mut jsapi::JSString {
+        pub unsafe fn JS_AtomizeAndPinString<C, S>(_cx: &C, _s: S) -> *mut jsapi::JSString {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_AtomizeAndPinString<C, S: jsapi::ToBytePtr>(
-            _cx: C,
+        pub unsafe fn JS_AtomizeAndPinString<C: ?Sized, S: jsapi::ToBytePtr>(
+            _cx: &C,
             s: S,
         ) -> *mut jsapi::JSString {
             let bytes = s.to_byte_ptr();
@@ -5447,16 +5461,16 @@ pub mod rust {
             crate::v8_glue::atomize_string_n(ptr::null_mut(), bytes, len)
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_NewObjectWithGivenProto<C, P>(
-            _cx: C,
+        pub unsafe fn JS_NewObjectWithGivenProto<C: ?Sized, P>(
+            _cx: &C,
             _clasp: *const jsapi::JSClass,
             _proto: P,
         ) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_NewObjectWithGivenProto<C, P>(
-            _cx: C,
+        pub unsafe fn JS_NewObjectWithGivenProto<C: ?Sized, P>(
+            _cx: &C,
             clasp: *const jsapi::JSClass,
             proto: P,
         ) -> *mut jsapi::JSObject
@@ -5465,24 +5479,24 @@ pub mod rust {
         {
             crate::v8_glue::js_new_object_with_proto(clasp, proto.into())
         }
-        pub unsafe fn JS_DefineProperties<C, O>(
-            _cx: C,
+        pub unsafe fn JS_DefineProperties<C: ?Sized, O>(
+            _cx: &C,
             _obj: O,
             _props: *const jsapi::JSPropertySpec,
         ) -> bool {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_DefineFunctions<C, O>(
-            _cx: C,
+        pub unsafe fn JS_DefineFunctions<C: ?Sized, O>(
+            _cx: &C,
             _obj: O,
             _funcs: *const jsapi::JSFunctionSpec,
         ) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_DefineFunctions<C, O>(
-            cx: C,
+        pub unsafe fn JS_DefineFunctions<C: ?Sized, O>(
+            cx: &C,
             obj: O,
             funcs: *const jsapi::JSFunctionSpec,
         ) -> bool
@@ -5501,26 +5515,26 @@ pub mod rust {
             super::define_methods(cx, obj, specs).is_ok()
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_SetPrototype<C, O, P>(_cx: C, _obj: O, _proto: P) -> bool {
+        pub unsafe fn JS_SetPrototype<C, O, P>(_cx: &C, _obj: O, _proto: P) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_SetPrototype<C, O, P>(_cx: C, obj: O, proto: P) -> bool
+        pub unsafe fn JS_SetPrototype<C, O, P>(_cx: &C, obj: O, proto: P) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
             P: Into<*mut jsapi::JSObject>,
         {
             !crate::v8_glue::set_prototype(obj.into(), proto.into()).is_null()
         }
-        pub unsafe fn SameValue<C, A, B>(_cx: C, _a: A, _b: B, _same: *mut bool) -> bool {
+        pub unsafe fn SameValue<C, A, B>(_cx: &C, _a: A, _b: B, _same: *mut bool) -> bool {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn NewArrayObject<C, A>(_cx: C, _args: A) -> *mut jsapi::JSObject {
+        pub unsafe fn NewArrayObject<C, A>(_cx: &C, _args: A) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn NewArrayObject<C, A>(_cx: C, args: A) -> *mut jsapi::JSObject
+        pub unsafe fn NewArrayObject<C, A>(_cx: &C, args: A) -> *mut jsapi::JSObject
         where
             A: jsapi::ToArrayObjectInit,
         {
@@ -5530,11 +5544,11 @@ pub mod rust {
             }
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn GetArrayLength<C, O>(_cx: C, _obj: O, _len: *mut u32) -> bool {
+        pub unsafe fn GetArrayLength<C, O>(_cx: &C, _obj: O, _len: *mut u32) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn GetArrayLength<C, O>(_cx: C, obj: O, len: *mut u32) -> bool
+        pub unsafe fn GetArrayLength<C, O>(_cx: &C, obj: O, len: *mut u32) -> bool
         where
             O: Into<*mut jsapi::JSObject>,
         {
@@ -5545,11 +5559,11 @@ pub mod rust {
             true
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn IsArrayObject<C, O>(_cx: C, _obj: O, _is_array: *mut bool) -> bool {
+        pub unsafe fn IsArrayObject<C, O>(_cx: &C, _obj: O, _is_array: *mut bool) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn IsArrayObject<C, O>(_cx: C, obj: O, is_array: *mut bool) -> bool
+        pub unsafe fn IsArrayObject<C, O>(_cx: &C, obj: O, is_array: *mut bool) -> bool
         where
             O: jsapi::ToFunctionObjectPtr,
         {
@@ -5562,8 +5576,8 @@ pub mod rust {
             true
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_HasOwnPropertyById<C, O, I>(
-            _cx: C,
+        pub unsafe fn JS_HasOwnPropertyById<C: ?Sized, O, I>(
+            _cx: &C,
             _obj: O,
             _id: I,
             _found: *mut bool,
@@ -5571,8 +5585,8 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_HasOwnPropertyById<C, O, I>(
-            _cx: C,
+        pub unsafe fn JS_HasOwnPropertyById<C: ?Sized, O, I>(
+            _cx: &C,
             obj: O,
             id: I,
             found: *mut bool,
@@ -5588,11 +5602,11 @@ pub mod rust {
             true
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_IndexToId<C, I, O>(_cx: C, _index: I, _id: O) -> bool {
+        pub unsafe fn JS_IndexToId<C, I, O>(_cx: &C, _index: I, _id: O) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_IndexToId<C, I, O>(_cx: C, index: I, id: O) -> bool
+        pub unsafe fn JS_IndexToId<C, I, O>(_cx: &C, index: I, id: O) -> bool
         where
             I: Into<u32>,
             O: jsapi::SetJsapiIdOut,
@@ -5600,14 +5614,14 @@ pub mod rust {
             id.set_jsapi_id_out(jsapi::jsid::from_int(index.into() as i32));
             true
         }
-        pub unsafe fn JS_IsIdentifier<C, S>(_cx: C, _chars: S, _is_valid: *mut bool) -> bool {
+        pub unsafe fn JS_IsIdentifier<C, S>(_cx: &C, _chars: S, _is_valid: *mut bool) -> bool {
             false
         }
-        pub unsafe fn JS_NewObject<C, O>(_cx: C, _clasp: O) -> *mut jsapi::JSObject {
+        pub unsafe fn JS_NewObject<C, O>(_cx: &C, _clasp: O) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
-        pub unsafe fn CompileFunction<C, O, Opt, N, A, S>(
-            _cx: C,
+        pub unsafe fn CompileFunction<C: ?Sized, O, Opt, N, A, S>(
+            _cx: &C,
             _obj: O,
             _options: Opt,
             _name: N,
@@ -5618,8 +5632,8 @@ pub mod rust {
             ptr::null_mut()
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_GetOwnPropertyDescriptorById<C, O, I, D>(
-            _cx: C,
+        pub unsafe fn JS_GetOwnPropertyDescriptorById<C: ?Sized, O, I, D>(
+            _cx: &C,
             _obj: O,
             _id: I,
             _desc: D,
@@ -5632,8 +5646,8 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_GetOwnPropertyDescriptorById<C, O, I, D>(
-            _cx: C,
+        pub unsafe fn JS_GetOwnPropertyDescriptorById<C: ?Sized, O, I, D>(
+            _cx: &C,
             obj: O,
             id: I,
             desc: D,
@@ -5654,7 +5668,7 @@ pub mod rust {
         #[cfg(not(feature = "v8"))]
         pub unsafe fn InvokeGetOwnPropertyDescriptor<H, C, P, I, D>(
             _handler: H,
-            _cx: C,
+            _cx: &C,
             _proxy: P,
             _id: I,
             _desc: D,
@@ -5665,7 +5679,7 @@ pub mod rust {
         #[cfg(feature = "v8")]
         pub unsafe fn InvokeGetOwnPropertyDescriptor<H, C, P, I, D>(
             _handler: H,
-            _cx: C,
+            _cx: &C,
             proxy: P,
             id: I,
             desc: D,
@@ -5684,8 +5698,8 @@ pub mod rust {
             )
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn SetPropertyIgnoringNamedGetter<C, O, I, V, R, D, S>(
-            _cx: C,
+        pub unsafe fn SetPropertyIgnoringNamedGetter<C: ?Sized, O, I, V, R, D, S>(
+            _cx: &C,
             _obj: O,
             _id: I,
             _v: V,
@@ -5696,8 +5710,8 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn SetPropertyIgnoringNamedGetter<C, O, I, V, R, D, S>(
-            _cx: C,
+        pub unsafe fn SetPropertyIgnoringNamedGetter<C: ?Sized, O, I, V, R, D, S>(
+            _cx: &C,
             obj: O,
             id: I,
             v: V,
@@ -5722,11 +5736,11 @@ pub mod rust {
             ok
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn Call<C, T, F, A, R>(_cx: C, _this: T, _fun: F, _args: A, _rval: R) -> bool {
+        pub unsafe fn Call<C, T, F, A, R>(_cx: &C, _this: T, _fun: F, _args: A, _rval: R) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn Call<C, T, F, A, R>(_cx: C, _this: T, fun: F, args: A, rval: R) -> bool
+        pub unsafe fn Call<C, T, F, A, R>(_cx: &C, _this: T, fun: F, args: A, rval: R) -> bool
         where
             F: jsapi::ToFunctionObjectPtr,
             A: jsapi::ToCallArgs,
@@ -5739,62 +5753,62 @@ pub mod rust {
                 rval.into(),
             )
         }
-        pub unsafe fn EnterRealm<C, O>(_cx: C, _realm: O) -> *mut std::ffi::c_void {
+        pub unsafe fn EnterRealm<C, O>(_cx: &C, _realm: O) -> *mut std::ffi::c_void {
             ptr::null_mut()
         }
-        pub unsafe fn LeaveRealm<C, R>(_cx: C, _old_realm: R) {}
+        pub unsafe fn LeaveRealm<C, R>(_cx: &C, _old_realm: R) {}
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn Compile1<C, O, S>(_cx: C, _options: O, _source: S) -> *mut jsapi::JSScript {
+        pub unsafe fn Compile1<C, O, S>(_cx: &C, _options: O, _source: S) -> *mut jsapi::JSScript {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn Compile1<C, O, S>(_cx: C, _options: O, _source: S) -> *mut jsapi::JSScript {
+        pub unsafe fn Compile1<C, O, S>(_cx: &C, _options: O, _source: S) -> *mut jsapi::JSScript {
             crate::v8_glue::js_new_object() as *mut jsapi::JSScript
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn CompileJsonModule1<C, O, S>(
-            _cx: C,
+        pub unsafe fn CompileJsonModule1<C: ?Sized, O, S>(
+            _cx: &C,
             _options: O,
             _source: S,
         ) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn CompileJsonModule1<C, O, S>(
-            _cx: C,
+        pub unsafe fn CompileJsonModule1<C: ?Sized, O, S>(
+            _cx: &C,
             _options: O,
             _source: S,
         ) -> *mut jsapi::JSObject {
             crate::v8_glue::js_new_object()
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn CompileModule1<C, O, S>(
-            _cx: C,
+        pub unsafe fn CompileModule1<C: ?Sized, O, S>(
+            _cx: &C,
             _options: O,
             _source: S,
         ) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn CompileModule1<C, O, S>(
-            _cx: C,
+        pub unsafe fn CompileModule1<C: ?Sized, O, S>(
+            _cx: &C,
             _options: O,
             _source: S,
         ) -> *mut jsapi::JSObject {
             crate::v8_glue::js_new_object()
         }
-        pub unsafe fn Construct1<C, F, A, R>(_cx: C, _fun: F, _args: A, _rval: R) -> bool {
+        pub unsafe fn Construct1<C, F, A, R>(_cx: &C, _fun: F, _args: A, _rval: R) -> bool {
             false
         }
         pub unsafe fn ContextOptionsRef<C: ?Sized>(_cx: &C) -> *mut jsapi::ContextOptions {
             jsapi::context_options_ref()
         }
-        pub unsafe fn DateGetMsecSinceEpoch<C, O>(_cx: C, _obj: O, _ms: *mut f64) -> bool {
+        pub unsafe fn DateGetMsecSinceEpoch<C, O>(_cx: &C, _obj: O, _ms: *mut f64) -> bool {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn DefineFunctionWithReserved<C, O, N>(
-            _cx: C,
+        pub unsafe fn DefineFunctionWithReserved<C: ?Sized, O, N>(
+            _cx: &C,
             _obj: O,
             _name: N,
             _call: Option<jsapi::NativeCallback>,
@@ -5804,8 +5818,8 @@ pub mod rust {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn DefineFunctionWithReserved<C, O, N>(
-            _cx: C,
+        pub unsafe fn DefineFunctionWithReserved<C: ?Sized, O, N>(
+            _cx: &C,
             obj: O,
             name: N,
             call: Option<jsapi::NativeCallback>,
@@ -5837,7 +5851,7 @@ pub mod rust {
                 fun
             }
         }
-        pub unsafe fn GetModuleNamespace<C, M>(_cx: C, _module: M) -> *mut jsapi::JSObject {
+        pub unsafe fn GetModuleNamespace<C, M>(_cx: &C, _module: M) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
         pub unsafe fn GetModuleRequestSpecifier<M, I>(
@@ -5849,36 +5863,36 @@ pub mod rust {
         pub unsafe fn GetModuleRequestType<M, I>(_module: M, _index: I) -> jsapi::ModuleType {
             jsapi::ModuleType::JavaScript
         }
-        pub unsafe fn GetRequestedModuleSpecifier<C, M, I>(
-            _cx: C,
+        pub unsafe fn GetRequestedModuleSpecifier<C: ?Sized, M, I>(
+            _cx: &C,
             _module: M,
             _index: I,
         ) -> *mut jsapi::JSString {
             ptr::null_mut()
         }
-        pub unsafe fn GetRequestedModuleType<C, M, I>(
-            _cx: C,
+        pub unsafe fn GetRequestedModuleType<C: ?Sized, M, I>(
+            _cx: &C,
             _module: M,
             _index: I,
         ) -> jsapi::ModuleType {
             jsapi::ModuleType::JavaScript
         }
-        pub unsafe fn GetRequestedModulesCount<C, M>(_cx: C, _module: M) -> u32 {
+        pub unsafe fn GetRequestedModulesCount<C, M>(_cx: &C, _module: M) -> u32 {
             0
         }
-        pub unsafe fn InitConsumeStreamCallback<C, F, E>(_cx: C, _callback: F, _error: E) {}
+        pub unsafe fn InitConsumeStreamCallback<C, F, E>(_cx: &C, _callback: F, _error: E) {}
         pub unsafe fn JobQueueIsEmpty<C: ?Sized>(_cx: &C) -> bool {
             true
         }
-        pub unsafe fn JS_AddExtraGCRootsTracer<C, F, D>(_cx: C, _tracer: F, _data: D) {}
-        pub unsafe fn JS_AddInterruptCallback<C, F>(_cx: C, _callback: F) -> bool {
+        pub unsafe fn JS_AddExtraGCRootsTracer<C, F, D>(_cx: &C, _tracer: F, _data: D) {}
+        pub unsafe fn JS_AddInterruptCallback<C, F>(_cx: &C, _callback: F) -> bool {
             false
         }
-        pub unsafe fn JS_DefineDebuggerObject<C, O>(_cx: C, _obj: O) -> bool {
+        pub unsafe fn JS_DefineDebuggerObject<C, O>(_cx: &C, _obj: O) -> bool {
             true
         }
-        pub unsafe fn JS_DefineProperty4<C, O, N, V>(
-            _cx: C,
+        pub unsafe fn JS_DefineProperty4<C: ?Sized, O, N, V>(
+            _cx: &C,
             _obj: O,
             _name: N,
             _value: V,
@@ -5887,55 +5901,55 @@ pub mod rust {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_ExecuteScript<C, S, R>(_cx: C, _script: S, _rval: R) -> bool {
+        pub unsafe fn JS_ExecuteScript<C, S, R>(_cx: &C, _script: S, _rval: R) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_ExecuteScript<C, S, R>(_cx: C, _script: S, rval: R) -> bool
+        pub unsafe fn JS_ExecuteScript<C, S, R>(_cx: &C, _script: S, rval: R) -> bool
         where
             R: jsapi::SetJsapiValOut,
         {
             rval.set_jsapi_val_out(jsapi::JSVal::undefined());
             true
         }
-        pub unsafe fn JS_GC<C, R>(_cx: C, _reason: R) {}
-        pub unsafe fn JS_GetGCParameter<C, K>(_cx: C, _key: K) -> u32 {
+        pub unsafe fn JS_GC<C, R>(_cx: &C, _reason: R) {}
+        pub unsafe fn JS_GetGCParameter<C, K>(_cx: &C, _key: K) -> u32 {
             0
         }
         pub unsafe fn JS_GetModulePrivate<M>(_module: M) -> jsapi::JSVal {
             jsapi::JSVal::default()
         }
-        pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: C, _obj: O, _id: I, _vp: V) -> bool {
+        pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: &C, _obj: O, _id: I, _vp: V) -> bool {
             false
         }
         pub unsafe fn JS_GetScriptPrivate<S, V>(_script: S, _value: V) -> bool {
             false
         }
-        pub unsafe fn JS_InitDestroyPrincipalsCallback<C, F>(_cx: C, _callback: F) {}
-        pub unsafe fn JS_InitReadPrincipalsCallback<C, F>(_cx: C, _callback: F) {}
+        pub unsafe fn JS_InitDestroyPrincipalsCallback<C, F>(_cx: &C, _callback: F) {}
+        pub unsafe fn JS_InitReadPrincipalsCallback<C, F>(_cx: &C, _callback: F) {}
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_NewStringCopyN<C, S>(_cx: C, _s: S, _len: usize) -> *mut jsapi::JSString {
+        pub unsafe fn JS_NewStringCopyN<C, S>(_cx: &C, _s: S, _len: usize) -> *mut jsapi::JSString {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_NewStringCopyN<C, S: jsapi::ToBytePtr>(
-            _cx: C,
+        pub unsafe fn JS_NewStringCopyN<C: ?Sized, S: jsapi::ToBytePtr>(
+            _cx: &C,
             s: S,
             len: usize,
         ) -> *mut jsapi::JSString {
             crate::v8_glue::atomize_string_n(ptr::null_mut(), s.to_byte_ptr(), len)
         }
-        pub unsafe fn JS_SetGCCallback<C, F, D>(_cx: C, _callback: F, _data: D) {}
-        pub unsafe fn JS_SetGCParameter<C, K, V>(_cx: C, _key: K, _value: V) {}
-        pub unsafe fn JS_SetGlobalJitCompilerOption<C, O, V>(_cx: C, _option: O, _value: V) {}
-        pub unsafe fn JS_SetOffthreadIonCompilationEnabled<C>(_cx: C, _enabled: bool) {}
-        pub unsafe fn JS_SetSecurityCallbacks<C, S>(_cx: C, _callbacks: S) {}
+        pub unsafe fn JS_SetGCCallback<C, F, D>(_cx: &C, _callback: F, _data: D) {}
+        pub unsafe fn JS_SetGCParameter<C, K, V>(_cx: &C, _key: K, _value: V) {}
+        pub unsafe fn JS_SetGlobalJitCompilerOption<C, O, V>(_cx: &C, _option: O, _value: V) {}
+        pub unsafe fn JS_SetOffthreadIonCompilationEnabled<C>(_cx: &C, _enabled: bool) {}
+        pub unsafe fn JS_SetSecurityCallbacks<C, S>(_cx: &C, _callbacks: S) {}
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn ModuleEvaluate<C, M, R>(_cx: C, _module: M, _rval: R) -> bool {
+        pub unsafe fn ModuleEvaluate<C, M, R>(_cx: &C, _module: M, _rval: R) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn ModuleEvaluate<C, M, R>(_cx: C, _module: M, rval: R) -> bool
+        pub unsafe fn ModuleEvaluate<C, M, R>(_cx: &C, _module: M, rval: R) -> bool
         where
             R: jsapi::SetJsapiValOut,
         {
@@ -5944,41 +5958,41 @@ pub mod rust {
             true
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn ModuleLink<C, M>(_cx: C, _module: M) -> bool {
+        pub unsafe fn ModuleLink<C, M>(_cx: &C, _module: M) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn ModuleLink<C, M>(_cx: C, _module: M) -> bool {
+        pub unsafe fn ModuleLink<C, M>(_cx: &C, _module: M) -> bool {
             true
         }
-        pub unsafe fn NewDateObject<C, T>(_cx: C, _time: T) -> *mut jsapi::JSObject {
+        pub unsafe fn NewDateObject<C, T>(_cx: &C, _time: T) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
-        pub unsafe fn ObjectIsDate<C, O>(_cx: C, _obj: O, out: *mut bool) -> bool {
+        pub unsafe fn ObjectIsDate<C, O>(_cx: &C, _obj: O, out: *mut bool) -> bool {
             if !out.is_null() {
                 *out = false;
             }
             true
         }
-        pub unsafe fn SetDOMCallbacks<C, D>(_cx: C, _callbacks: D) {}
-        pub unsafe fn SetGCSliceCallback<C, F>(_cx: C, _callback: F) {}
-        pub unsafe fn SetJobQueue<C, Q>(_cx: C, _queue: Q) {}
-        pub unsafe fn SetPreserveWrapperCallbacks<C, A, B>(_cx: C, _preserve: A, _has_released: B) {
+        pub unsafe fn SetDOMCallbacks<C, D>(_cx: &C, _callbacks: D) {}
+        pub unsafe fn SetGCSliceCallback<C, F>(_cx: &C, _callback: F) {}
+        pub unsafe fn SetJobQueue<C, Q>(_cx: &C, _queue: Q) {}
+        pub unsafe fn SetPreserveWrapperCallbacks<C, A, B>(_cx: &C, _preserve: A, _has_released: B) {
         }
-        pub unsafe fn SetPromiseRejectionTrackerCallback<C, F, D>(_cx: C, _callback: F, _data: D) {}
-        pub unsafe fn SetUpEventLoopDispatch<C, F, D>(_cx: C, _callback: F, _data: D) {}
-        pub unsafe fn SetWindowProxyClass<C, O>(_cx: C, _class: O) {}
+        pub unsafe fn SetPromiseRejectionTrackerCallback<C, F, D>(_cx: &C, _callback: F, _data: D) {}
+        pub unsafe fn SetUpEventLoopDispatch<C, F, D>(_cx: &C, _callback: F, _data: D) {}
+        pub unsafe fn SetWindowProxyClass<C, O>(_cx: &C, _class: O) {}
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn ThrowOnModuleEvaluationFailure<C, P, B>(
-            _cx: C,
+        pub unsafe fn ThrowOnModuleEvaluationFailure<C: ?Sized, P, B>(
+            _cx: &C,
             _promise: P,
             _behavior: B,
         ) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn ThrowOnModuleEvaluationFailure<C, P, B>(
-            _cx: C,
+        pub unsafe fn ThrowOnModuleEvaluationFailure<C: ?Sized, P, B>(
+            _cx: &C,
             _promise: P,
             _behavior: B,
         ) -> bool {
@@ -5986,7 +6000,7 @@ pub mod rust {
         }
     }
 
-    pub unsafe fn ToString<C, V>(_cx: C, _val: V) -> *mut super::jsapi::JSString {
+    pub unsafe fn ToString<C: ?Sized, V>(_cx: &C, _val: V) -> *mut super::jsapi::JSString {
         std::ptr::null_mut()
     }
     pub unsafe trait Trace {
@@ -6005,6 +6019,7 @@ pub mod gc {
     use std::ptr;
 
     pub use crate::rust::CustomAutoRooterGuard;
+    pub use super::jsapi::MutableHandle;
 
     pub unsafe trait Traceable {
         unsafe fn trace(&self, _tracer: *mut super::jsapi::JSTracer) {}

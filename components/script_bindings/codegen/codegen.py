@@ -5504,6 +5504,10 @@ def getUnionTypeTemplateVars(type: IDLType, descriptorProvider: DescriptorProvid
     jsConversion = string.Template(template).substitute({
         "val": "value",
     })
+    jsConversion = jsConversion.replace(
+        "windowproxy_from_handlevalue::<D>(value, cx)",
+        "windowproxy_from_handlevalue::<D>(value, crate::script_runtime::copy_cx(cx))",
+    )
     jsConversion = CGWrapper(CGGeneric(jsConversion), pre="Ok(Some(", post="))")
 
     return {
@@ -6433,7 +6437,7 @@ get_expando_object(proxy, expando.handle_mut());
 //if (!xpc::WrapperFactory::IsXrayWrapper(proxy) && (expando = GetExpandoObject(proxy))) {{
 if !expando.is_null() {{
     rooted!(&in(cx) let mut ignored = ptr::null_mut::<JSObject>());
-    if !JS_GetPropertyDescriptorById(cx, expando.handle(), id, desc.reborrow(), ignored.handle_mut(), is_none) {{
+            if !JS_GetPropertyDescriptorById(&mut *cx, *expando.handle(), id, desc.reborrow(), ignored.handle_mut(), is_none) {{
         return false;
     }}
     if !*is_none {{

@@ -2168,35 +2168,35 @@ pub mod jsapi {
         JSVal::default()
     }
     #[cfg(not(feature = "v8"))]
-    pub fn GetRealmErrorPrototype<C>(_cx: C) -> *mut JSObject {
+    pub fn GetRealmErrorPrototype<C: ?Sized>(_cx: &C) -> *mut JSObject {
         ptr::null_mut()
     }
     #[cfg(feature = "v8")]
-    pub fn GetRealmErrorPrototype<C>(_cx: C) -> *mut JSObject {
+    pub fn GetRealmErrorPrototype<C: ?Sized>(_cx: &C) -> *mut JSObject {
         crate::v8_glue::get_realm_error_prototype()
     }
     #[cfg(not(feature = "v8"))]
-    pub fn GetRealmFunctionPrototype<C>(_cx: C) -> *mut JSObject {
+    pub fn GetRealmFunctionPrototype<C: ?Sized>(_cx: &C) -> *mut JSObject {
         ptr::null_mut()
     }
     #[cfg(feature = "v8")]
-    pub fn GetRealmFunctionPrototype<C>(_cx: C) -> *mut JSObject {
+    pub fn GetRealmFunctionPrototype<C: ?Sized>(_cx: &C) -> *mut JSObject {
         crate::v8_glue::get_realm_function_prototype()
     }
     #[cfg(not(feature = "v8"))]
-    pub fn GetRealmIteratorPrototype<C>(_cx: C) -> *mut JSObject {
+    pub fn GetRealmIteratorPrototype<C: ?Sized>(_cx: &C) -> *mut JSObject {
         ptr::null_mut()
     }
     #[cfg(feature = "v8")]
-    pub fn GetRealmIteratorPrototype<C>(_cx: C) -> *mut JSObject {
+    pub fn GetRealmIteratorPrototype<C: ?Sized>(_cx: &C) -> *mut JSObject {
         crate::v8_glue::get_realm_iterator_prototype()
     }
     #[cfg(not(feature = "v8"))]
-    pub fn GetRealmObjectPrototype<C>(_cx: C) -> *mut JSObject {
+    pub fn GetRealmObjectPrototype<C: ?Sized>(_cx: &C) -> *mut JSObject {
         ptr::null_mut()
     }
     #[cfg(feature = "v8")]
-    pub fn GetRealmObjectPrototype<C>(_cx: C) -> *mut JSObject {
+    pub fn GetRealmObjectPrototype<C: ?Sized>(_cx: &C) -> *mut JSObject {
         crate::v8_glue::get_realm_object_prototype()
     }
     #[cfg(not(feature = "v8"))]
@@ -2815,11 +2815,11 @@ pub mod jsapi {
         crate::v8_glue::new_typed_array_with_buffer(obj.get(), offset, len as i64, Type::Uint8)
     }
     #[cfg(not(feature = "v8"))]
-    pub fn CurrentGlobalOrNull<C>(_cx: C) -> *mut JSObject {
+    pub fn CurrentGlobalOrNull<C: ?Sized>(_cx: &C) -> *mut JSObject {
         ptr::null_mut()
     }
     #[cfg(feature = "v8")]
-    pub fn CurrentGlobalOrNull<C>(_cx: C) -> *mut JSObject {
+    pub fn CurrentGlobalOrNull<C: ?Sized>(_cx: &C) -> *mut JSObject {
         crate::v8_glue::current_global_object()
     }
     pub fn DisableJitBackend() {}
@@ -2843,13 +2843,13 @@ pub mod jsapi {
     {
         crate::v8_glue::get_property_keys(obj.into(), props.into())
     }
-    pub fn GetPromiseUserInputEventHandlingState<C>(_cx: C) -> PromiseUserInputEventHandlingState {
+    pub fn GetPromiseUserInputEventHandlingState<C: ?Sized>(_cx: &C) -> PromiseUserInputEventHandlingState {
         PromiseUserInputEventHandlingState::DontCare
     }
     pub fn GetRealmPrincipals<R>(_realm: R) -> *mut JSPrincipals {
         ptr::null_mut()
     }
-    pub fn GetScriptedCallerGlobal<C>(_cx: C) -> *mut JSObject {
+    pub fn GetScriptedCallerGlobal<C: ?Sized>(_cx: &C) -> *mut JSObject {
         ptr::null_mut()
     }
     #[cfg(not(feature = "v8"))]
@@ -3273,7 +3273,7 @@ pub mod jsapi {
         crate::v8_glue::get_function_native_reserved(fun.to_function_object_ptr(), which)
     }
     pub fn SetModulePrivate<M, V>(_module: M, _value: V) {}
-    pub fn GetModuleResolveHook<C>(_cx: C) -> Option<*mut std::ffi::c_void> {
+    pub fn GetModuleResolveHook<C: ?Sized>(_cx: &C) -> Option<*mut std::ffi::c_void> {
         None
     }
     pub fn SetModulePrivateReferenceHooks<C, G, S>(_cx: C, _get: G, _set: S) {}
@@ -3360,11 +3360,11 @@ pub mod jsapi {
         true
     }
     #[cfg(not(feature = "v8"))]
-    pub fn JS_NewPlainObject<C>(_cx: C) -> *mut JSObject {
+    pub fn JS_NewPlainObject<C: ?Sized>(_cx: &C) -> *mut JSObject {
         ptr::null_mut()
     }
     #[cfg(feature = "v8")]
-    pub fn JS_NewPlainObject<C>(_cx: C) -> *mut JSObject {
+    pub fn JS_NewPlainObject<C: ?Sized>(_cx: &C) -> *mut JSObject {
         crate::v8_glue::js_new_object()
     }
     #[cfg(not(feature = "v8"))]
@@ -3562,11 +3562,11 @@ pub mod jsapi {
         crate::v8_glue::current_global_object()
     }
     #[cfg(not(feature = "v8"))]
-    pub fn GetRealmGlobalOrNull<C>(_cx: C) -> *mut JSObject {
+    pub fn GetRealmGlobalOrNull<C: ?Sized>(_cx: &C) -> *mut JSObject {
         ptr::null_mut()
     }
     #[cfg(feature = "v8")]
-    pub fn GetRealmGlobalOrNull<C>(_cx: C) -> *mut JSObject {
+    pub fn GetRealmGlobalOrNull<C: ?Sized>(_cx: &C) -> *mut JSObject {
         crate::v8_glue::current_global_object()
     }
     pub fn IsSharableCompartment(_comp: *mut std::ffi::c_void) -> bool {
@@ -5040,6 +5040,16 @@ pub mod rust {
                 _rval: super::MutableHandleValue,
             ) {
             }
+
+            fn safe_to_jsval(
+                &self,
+                cx: &mut crate::context::JSContext,
+                rval: super::MutableHandleValue<'_>,
+            ) {
+                unsafe {
+                    self.to_jsval(cx.raw_cx(), rval);
+                }
+            }
         }
         pub trait FromJSValConvertible: Sized {
             type Config;
@@ -5066,7 +5076,7 @@ pub mod rust {
     pub type MutableHandleValue<'a> = super::jsapi::MutableHandle<'a, super::jsapi::JSVal>;
     pub struct IdVector(Vec<super::jsapi::jsid>);
     impl IdVector {
-        pub unsafe fn new<C>(_cx: C) -> Self {
+        pub unsafe fn new<C: ?Sized>(_cx: &C) -> Self {
             Self(Vec::new())
         }
         pub fn handle_mut(&mut self) -> super::jsapi::MutableHandleIdVector {
@@ -5208,7 +5218,7 @@ pub mod rust {
             super::jsapi::JSVal::default()
         }
     }
-    pub fn get_context_realm<C>(_cx: C) -> *mut super::jsapi::JSObject {
+    pub fn get_context_realm<C: ?Sized>(_cx: &C) -> *mut super::jsapi::JSObject {
         ptr::null_mut()
     }
     #[cfg(not(feature = "v8"))]
@@ -5325,7 +5335,7 @@ pub mod rust {
         pub line: u32,
         pub col: u32,
     }
-    pub fn describe_scripted_caller<C>(_cx: C) -> Option<ScriptedCaller> {
+    pub fn describe_scripted_caller<C: ?Sized>(_cx: &C) -> Option<ScriptedCaller> {
         None
     }
     pub fn error_info_from_exception_stack<C>(
@@ -5357,11 +5367,11 @@ pub mod rust {
             ptr::null_mut()
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_IsExceptionPending<C>(_cx: C) -> bool {
+        pub unsafe fn JS_IsExceptionPending<C: ?Sized>(_cx: &C) -> bool {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_IsExceptionPending<C>(_cx: C) -> bool {
+        pub unsafe fn JS_IsExceptionPending<C: ?Sized>(_cx: &C) -> bool {
             crate::v8_glue::is_exception_pending()
         }
         pub unsafe fn JS_WrapObject<C, O>(_cx: C, _obj: O) -> bool {
@@ -5371,9 +5381,9 @@ pub mod rust {
             false
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn JS_ClearPendingException<C>(_cx: C) {}
+        pub unsafe fn JS_ClearPendingException<C: ?Sized>(_cx: &C) {}
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_ClearPendingException<C>(_cx: C) {
+        pub unsafe fn JS_ClearPendingException<C: ?Sized>(_cx: &C) {
             crate::v8_glue::clear_pending_exception();
         }
         #[cfg(not(feature = "v8"))]
@@ -5776,7 +5786,7 @@ pub mod rust {
         pub unsafe fn Construct1<C, F, A, R>(_cx: C, _fun: F, _args: A, _rval: R) -> bool {
             false
         }
-        pub unsafe fn ContextOptionsRef<C>(_cx: C) -> *mut jsapi::ContextOptions {
+        pub unsafe fn ContextOptionsRef<C: ?Sized>(_cx: &C) -> *mut jsapi::ContextOptions {
             jsapi::context_options_ref()
         }
         pub unsafe fn DateGetMsecSinceEpoch<C, O>(_cx: C, _obj: O, _ms: *mut f64) -> bool {
@@ -5857,7 +5867,7 @@ pub mod rust {
             0
         }
         pub unsafe fn InitConsumeStreamCallback<C, F, E>(_cx: C, _callback: F, _error: E) {}
-        pub unsafe fn JobQueueIsEmpty<C>(_cx: C) -> bool {
+        pub unsafe fn JobQueueIsEmpty<C: ?Sized>(_cx: &C) -> bool {
             true
         }
         pub unsafe fn JS_AddExtraGCRootsTracer<C, F, D>(_cx: C, _tracer: F, _data: D) {}
@@ -6329,6 +6339,16 @@ pub mod context {
         }
         pub unsafe fn from_raw_ptr(ptr: *mut RawJSContext) -> Self {
             Self::from_ptr(std::ptr::NonNull::new(ptr).expect("null JSContext"))
+        }
+        pub unsafe fn get_from_thread() -> Option<Self> {
+            #[cfg(feature = "v8")]
+            {
+                crate::v8_glue::thread_js_context()
+            }
+            #[cfg(not(feature = "v8"))]
+            {
+                Some(unsafe { Self::from_ptr(std::ptr::NonNull::dangling()) })
+            }
         }
         pub unsafe fn raw_cx(&mut self) -> *mut RawJSContext {
             self.ptr.as_ptr()

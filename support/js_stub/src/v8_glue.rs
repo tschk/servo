@@ -1415,3 +1415,12 @@ fn with_scope<R>(f: impl FnOnce(&mut v8::ContextScope<v8::HandleScope>) -> R) ->
         f(cs)
     })
 }
+
+/// Thread-local JSContext token for Servo bindings that cannot thread `&mut JSContext`.
+pub(crate) fn thread_js_context() -> Option<crate::context::JSContext> {
+    GLOBAL_ID.with(|g| {
+        g.borrow().map(|_| unsafe {
+            crate::context::JSContext::from_ptr(std::ptr::NonNull::dangling())
+        })
+    })
+}

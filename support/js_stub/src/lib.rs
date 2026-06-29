@@ -7140,133 +7140,50 @@ pub mod typedarray {
             .collect()
     }
 
-    macro_rules! typed_array {
-        ($name:ident, $element:ty, $array_type:expr) => {
-            #[derive(Clone, Copy)]
-            pub struct $name(pub *mut jsapi::JSObject);
-            impl $name {
-                pub fn from(obj: *mut jsapi::JSObject) -> Result<Self, ()> {
-                    Ok(Self(obj))
-                }
-                pub fn as_slice(&self) -> &[$element] {
-                    &[]
-                }
-                pub fn as_mut_slice(&mut self) -> &mut [$element] {
-                    &mut []
-                }
-                pub fn len(&self) -> usize {
-                    #[cfg(feature = "v8")]
-                    {
-                        crate::v8_glue::typed_array_length(self.0)
-                    }
-                    #[cfg(not(feature = "v8"))]
-                    {
-                        0
-                    }
-                }
-                pub fn to_vec(&self) -> Vec<$element> {
-                    #[cfg(feature = "v8")]
-                    {
-                        bytes_to_elements(&crate::v8_glue::array_view_bytes(self.0))
-                    }
-                    #[cfg(not(feature = "v8"))]
-                    {
-                        Vec::new()
-                    }
-                }
-                pub fn update(&mut self, _value: &[$element]) {}
-                pub fn underlying_object(&self) -> jsapi::Heap<*mut jsapi::JSObject> {
-                    jsapi::Heap::new(self.0)
-                }
-                pub fn get_array_type(&self) -> jsapi::Type {
-                    $array_type
-                }
-                pub fn create<C, R>(
-                    _cx: C,
-                    with: CreateWith<'_, $element>,
-                    rval: R,
-                ) -> Result<(), ()>
-                where
-                    R: jsapi::SetJsapiObjectOut,
-                {
-                    #[cfg(feature = "v8")]
-                    {
-                        let obj = match with {
-                            CreateWith::Slice(values) => {
-                                crate::v8_glue::new_typed_array_from_bytes(
-                                    elements_to_bytes(values),
-                                    $array_type,
-                                )
-                            },
-                            CreateWith::Length(len) => {
-                                let byte_len = len.saturating_mul(std::mem::size_of::<$element>());
-                                crate::v8_glue::new_typed_array_from_bytes(
-                                    &vec![0; byte_len],
-                                    $array_type,
-                                )
-                            },
-                        };
-                        if obj.is_null() {
-                            Err(())
-                        } else {
-                            rval.set_jsapi_object_out(obj);
-                            Ok(())
-                        }
-                    }
-                    #[cfg(not(feature = "v8"))]
-                    {
-                        let _ = (with, rval);
-                        Ok(())
-                    }
-                }
-            }
-            impl ToJSValConvertible for $name {
-                unsafe fn to_jsval(
-                    &self,
-                    _cx: *mut jsapi::JSContext,
-                    mut rval: jsapi::MutableHandleValue,
-                ) {
-                    rval.set(jsapi::JSVal::default());
-                }
-            }
-            impl TypedArrayElement for $name {
+    macro_rules! typed_array_element {
+        ($t:ident, $element:ty, $array_type:expr) => {
+            pub struct $t;
+            impl TypedArrayElement for $t {
                 type Element = $element;
                 fn array_type() -> jsapi::Type {
                     $array_type
                 }
             }
-            impl TypedArrayElementCreator for $name {}
-            unsafe impl super::gc::Traceable for $name {}
+            impl TypedArrayElementCreator for $t {}
+            unsafe impl super::gc::Traceable for $t {}
         };
     }
 
-    typed_array!(ArrayBuffer, u8, jsapi::Type::Uint8);
-    typed_array!(ArrayBufferView, u8, jsapi::Type::Uint8);
-    typed_array!(Float32Array, f32, jsapi::Type::Float32);
-    typed_array!(Float64Array, f64, jsapi::Type::Float64);
-    typed_array!(Int8Array, i8, jsapi::Type::Int8);
-    typed_array!(Int32Array, i32, jsapi::Type::Int32);
-    typed_array!(Uint8Array, u8, jsapi::Type::Uint8);
-    typed_array!(Uint8ClampedArray, u8, jsapi::Type::Uint8Clamped);
-    typed_array!(Uint32Array, u32, jsapi::Type::Uint32);
-    pub type HeapArrayBuffer = TypedArray<ArrayBuffer, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
-    pub type HeapArrayBufferView = TypedArray<ArrayBufferView, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
-    pub type HeapFloat32Array = TypedArray<Float32Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
-    pub type HeapFloat64Array = TypedArray<Float64Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
-    pub type HeapInt8Array = TypedArray<Int8Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
-    pub type HeapInt32Array = TypedArray<Int32Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
-    pub type HeapUint8Array = TypedArray<Uint8Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
-    pub type HeapUint8ClampedArray = TypedArray<Uint8ClampedArray, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
-    pub type HeapUint32Array = TypedArray<Uint32Array, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
+    typed_array_element!(Uint8, u8, jsapi::Type::Uint8);
+    typed_array_element!(Uint16, u16, jsapi::Type::Uint16);
+    typed_array_element!(Uint32, u32, jsapi::Type::Uint32);
+    typed_array_element!(Int8, i8, jsapi::Type::Int8);
+    typed_array_element!(Int16, i16, jsapi::Type::Int16);
+    typed_array_element!(Int32, i32, jsapi::Type::Int32);
+    typed_array_element!(Float32, f32, jsapi::Type::Float32);
+    typed_array_element!(Float64, f64, jsapi::Type::Float64);
+    typed_array_element!(ClampedU8, u8, jsapi::Type::Uint8Clamped);
+    typed_array_element!(ArrayBufferU8, u8, jsapi::Type::Uint8);
+    typed_array_element!(ArrayBufferViewU8, u8, jsapi::Type::Uint8);
 
-    pub type ArrayBufferU8 = ArrayBuffer;
-    pub type ArrayBufferViewU8 = ArrayBufferView;
-    pub type ClampedU8 = Uint8ClampedArray;
-    pub type Float32 = Float32Array;
-    pub type Int8 = Int8Array;
-    pub type Int32 = Int32Array;
-    pub type Uint8 = Uint8Array;
-    pub type Uint32 = Uint32Array;
+    macro_rules! array_alias {
+        ($arr:ident, $heap_arr:ident, $elem:ty) => {
+            pub type $arr = TypedArray<$elem, *mut jsapi::JSObject>;
+            pub type $heap_arr = TypedArray<$elem, Box<jsapi::Heap<*mut jsapi::JSObject>>>;
+        };
+    }
+
+    array_alias!(Uint8ClampedArray, HeapUint8ClampedArray, ClampedU8);
+    array_alias!(Uint8Array, HeapUint8Array, Uint8);
+    array_alias!(Int8Array, HeapInt8Array, Int8);
+    array_alias!(Uint16Array, HeapUint16Array, Uint16);
+    array_alias!(Int16Array, HeapInt16Array, Int16);
+    array_alias!(Uint32Array, HeapUint32Array, Uint32);
+    array_alias!(Int32Array, HeapInt32Array, Int32);
+    array_alias!(Float32Array, HeapFloat32Array, Float32);
+    array_alias!(Float64Array, HeapFloat64Array, Float64);
+    array_alias!(ArrayBuffer, HeapArrayBuffer, ArrayBufferU8);
+    array_alias!(ArrayBufferView, HeapArrayBufferView, ArrayBufferViewU8);
     impl jsapi::Type {
         pub fn byte_size(&self) -> Option<usize> {
             match self {
@@ -7338,11 +7255,18 @@ pub mod typedarray {
         pub fn object(&self) -> *mut jsapi::JSObject {
             self.object
         }
+        pub fn len(&self) -> usize {
+            self.data.len()
+        }
         pub fn as_slice(&self) -> &[T::Element] {
             &self.data
         }
         pub fn as_mut_slice(&mut self) -> &mut [T::Element] {
             &mut self.data
+        }
+        pub fn update(&mut self, value: &[T::Element]) {
+            self.data.clear();
+            self.data.extend_from_slice(value);
         }
         pub fn to_vec(&self) -> Vec<T::Element>
         where

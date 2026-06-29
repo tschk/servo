@@ -75,7 +75,7 @@ use crate::dom::bindings::refcounted::{Trusted, TrustedPromise};
 use crate::dom::bindings::reflector::DomGlobal;
 use crate::dom::bindings::root::DomRoot;
 use crate::dom::bindings::str::{DOMString, serialize_jsval_to_json_utf8};
-use crate::dom::bindings::trace::RootedTraceableBox;
+use crate::dom::bindings::trace::{JSTraceable, RootedTraceableBox};
 use crate::dom::cryptokey::{CryptoKey, CryptoKeyOrCryptoKeyPair};
 use crate::dom::globalscope::GlobalScope;
 use crate::dom::promise::Promise;
@@ -4024,7 +4024,7 @@ fn get_required_parameter<T: FromJSValConvertible>(
 }
 
 /// Helper to retrieve a required paramter, in RootedTraceableBox, from WebIDL dictionary.
-fn get_required_parameter_in_box<T: FromJSValConvertible + Trace>(
+fn get_required_parameter_in_box<T: FromJSValConvertible + JSTraceable>(
     cx: &mut js::context::JSContext,
     object: HandleObject,
     parameter: &std::ffi::CStr,

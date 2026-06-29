@@ -826,7 +826,7 @@ impl CustomElementDefinition {
         rooted!(&in(cx) let mut element = ptr::null_mut::<JSObject>());
         {
             // Go into the constructor's realm
-            let mut realm = AutoRealm::new(cx, NonNull::new(self.constructor.callback()).unwrap());
+            let mut realm = AutoRealm::new(&mut *cx, NonNull::new(self.constructor.callback()).unwrap());
             let cx = &mut realm;
 
             // Step 5.3.1. Set result to the result of constructing C, with no arguments.
@@ -1285,12 +1285,12 @@ impl CustomElementReactionStack {
 
                 rooted!(&in(cx) let mut old_value = NullValue());
                 if let Some(old_val) = old_val {
-                    old_val.safe_to_jsval(cx, old_value.handle_mut());
+                    DOMString::from(&**old_val).safe_to_jsval(cx, old_value.handle_mut());
                 }
 
                 rooted!(&in(cx) let mut value = NullValue());
                 if let Some(val) = val {
-                    val.safe_to_jsval(cx, value.handle_mut());
+                    DOMString::from(&**val).safe_to_jsval(cx, value.handle_mut());
                 }
 
                 rooted!(&in(cx) let mut namespace_value = NullValue());

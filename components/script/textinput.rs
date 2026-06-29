@@ -116,6 +116,7 @@ pub struct TextInput<T: ClipboardProvider> {
     selection_origin: Option<RopeIndex>,
     selection_direction: SelectionDirection,
 
+    #[no_trace = "Clipboard provider is not JS-managed"]
     #[ignore_malloc_size_of = "Can't easily measure this generic type"]
     clipboard_provider: T,
 

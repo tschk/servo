@@ -607,7 +607,7 @@ impl WorkletThread {
     /// The current memory usage of the thread
     #[expect(unsafe_code)]
     fn current_memory_usage(&self) -> u32 {
-        unsafe { JS_GetGCParameter(self.runtime.cx_no_gc(), JSGCParamKey::JSGC_BYTES) }
+        unsafe { JS_GetGCParameter(&self.runtime.cx_no_gc(), JSGCParamKey::JSGC_BYTES) }
     }
 
     /// Perform a GC.

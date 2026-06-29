@@ -1052,7 +1052,7 @@ impl ScriptThread {
 
     #[expect(unsafe_code)]
     pub(crate) fn get_cx(&self) -> JSContext {
-        unsafe { JSContext::from_ptr(js::rust::Runtime::get().unwrap().as_ptr()) }
+        unsafe { JSContext::from_raw_ptr(js::rust::Runtime::get().unwrap().as_ptr()) }
     }
 
     /// Check if we are closing.

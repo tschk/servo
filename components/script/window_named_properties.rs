@@ -259,7 +259,7 @@ pub(crate) fn create(
 ) {
     unsafe {
         properties_obj.set(NewProxyObject(
-            *cx,
+            cx.raw_cx_no_gc(),
             HANDLER.0,
             UndefinedHandleValue,
             proto.get(),
@@ -269,7 +269,7 @@ pub(crate) fn create(
         assert!(!properties_obj.get().is_null());
         let mut succeeded = false;
         assert!(JS_SetImmutablePrototype(
-            *cx,
+            cx.raw_cx_no_gc(),
             properties_obj.handle().into_handle(),
             &mut succeeded
         ));

@@ -2868,7 +2868,7 @@ pub mod jsapi {
     {
         crate::v8_glue::get_property_keys(obj.into(), props.into())
     }
-    pub fn GetPromiseUserInputEventHandlingState<C: ?Sized>(_cx: &C) -> PromiseUserInputEventHandlingState {
+    pub fn GetPromiseUserInputEventHandlingState<P: ?Sized>(_promise: &P) -> PromiseUserInputEventHandlingState {
         PromiseUserInputEventHandlingState::DontCare
     }
     pub fn GetRealmPrincipals<R>(_realm: R) -> *mut JSPrincipals {
@@ -3298,7 +3298,7 @@ pub mod jsapi {
         crate::v8_glue::get_function_native_reserved(fun.to_function_object_ptr(), which)
     }
     pub fn SetModulePrivate<M, V>(_module: M, _value: V) {}
-    pub fn GetModuleResolveHook<C: ?Sized>(_cx: &C) -> Option<*mut std::ffi::c_void> {
+    pub fn GetModuleResolveHook<C>(_rt: C) -> Option<*mut std::ffi::c_void> {
         None
     }
     pub fn SetModulePrivateReferenceHooks<C, G, S>(_cx: C, _get: G, _set: S) {}
@@ -5231,10 +5231,7 @@ pub mod rust {
         pub fn new(data: T) -> Self {
             Self { data }
         }
-        pub fn root<'a>(
-            &'a mut self,
-            cx: *mut super::jsapi::JSContext,
-        ) -> CustomAutoRooterGuard<'a, T> {
+        pub fn root<'a, C: ?Sized>(&'a mut self, cx: &C) -> CustomAutoRooterGuard<'a, T> {
             CustomAutoRooterGuard::new(cx, self)
         }
     }

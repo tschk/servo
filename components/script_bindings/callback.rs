@@ -90,12 +90,12 @@ impl<D: DomTypes> CallbackObject<D> {
     }
 
     #[expect(unsafe_code)]
-    unsafe fn init(&mut self, cx: JSContext, callback: *mut JSObject) {
+    unsafe fn init(&mut self, mut cx: JSContext, callback: *mut JSObject) {
         self.callback.set(callback);
         self.permanent_js_root.set(ObjectValue(callback));
         unsafe {
             assert!(AddRawValueRoot(
-                *cx,
+                cx.raw_cx(),
                 self.permanent_js_root.get_unsafe(),
                 c"CallbackObject::root".as_ptr()
             ));
@@ -127,7 +127,7 @@ pub trait CallbackContainer<D: DomTypes> {
     ///
     /// # Safety
     /// `callback` must point to a valid, non-null JSObject.
-    unsafe fn new(cx: JSContext, callback: *mut JSObject) -> Rc<Self>;
+    unsafe fn new(cx: &mut js::context::JSContext, callback: *mut JSObject) -> Rc<Self>;
     /// Returns the underlying `CallbackObject`.
     fn callback_holder(&self) -> &CallbackObject<D>;
     /// Returns the underlying `JSObject`.
@@ -275,13 +275,13 @@ pub fn call_setup<D: DomTypes, T: CallbackContainer<D>, R>(
     // Step 8: Prepare to run script with relevant settings.
     run_a_script::<D, R>(global, move || {
         let actual_callback = || {
-            let old_realm = unsafe { EnterRealm(&mut *cx, callback.callback()) };
-            let result = f(&mut *cx);
+            let old_realm = unsafe { EnterRealm(cx.raw_cx(), callback.callback()) };
+            let result = f(cx);
             unsafe {
-                LeaveRealm(&mut *cx, old_realm);
+                LeaveRealm(cx.raw_cx(), old_realm);
             }
             if handling == ExceptionHandling::Report {
-                let mut realm = enter_auto_realm::<D>(&mut *cx, &**global);
+                let mut realm = enter_auto_realm::<D>(cx, &**global);
                 let cx = &mut realm.current_realm();
                 <D as DomHelpers<D>>::report_pending_exception(cx);
             }

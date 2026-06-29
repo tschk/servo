@@ -155,7 +155,7 @@ pub fn is_token(s: &[u8]) -> bool {
 /// but we generally do not operate on anything that is truly a WTF-16 string.
 ///
 /// <https://infra.spec.whatwg.org/#serialize-a-javascript-value-to-a-json-string>
-pub fn serialize_jsval_to_json_utf8(cx: JSContext, data: HandleValue) -> Result<DOMString, Error> {
+pub fn serialize_jsval_to_json_utf8(mut cx: JSContext, data: HandleValue) -> Result<DOMString, Error> {
     #[repr(C)]
     struct ToJSONCallbackData {
         string: Option<String>,
@@ -181,7 +181,7 @@ pub fn serialize_jsval_to_json_utf8(cx: JSContext, data: HandleValue) -> Result<
     // 1. Let result be ? Call(%JSON.stringify%, undefined, « value »).
     unsafe {
         let stringify_result = ToJSON(
-            *cx,
+            cx.raw_cx(),
             data,
             HandleObject::null(),
             HandleValue::null(),

@@ -4,62 +4,31 @@
 
 use std::cell::Cell;
 use std::marker::PhantomData;
-use std::ops::Deref;
 
-use js::context::JSContext as SafeJSContext;
+use js::context::JSContext as JsContext;
 use js::jsapi::JSContext as RawJSContext;
 use js::realm::{AutoRealm, CurrentRealm};
 
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct JSContext(*mut RawJSContext);
+/// Servo bindings view of the active JS context.
+pub type JSContext = JsContext;
+pub type SafeJSContext = JsContext;
 
-impl From<&mut SafeJSContext> for JSContext {
-    fn from(safe_cx: &mut SafeJSContext) -> Self {
-        unsafe { JSContext(safe_cx.raw_cx()) }
-    }
+/// Copy a mutable JS context reference for APIs that take `JSContext` by value.
+#[inline]
+pub fn copy_cx(cx: &mut JsContext) -> JsContext {
+    unsafe { JsContext::from_raw_ptr(cx.raw_cx()) }
 }
 
-impl<'a> From<&mut CurrentRealm<'a>> for JSContext {
-    fn from(safe_cx: &mut CurrentRealm<'a>) -> Self {
-        unsafe { JSContext(safe_cx.raw_cx()) }
-    }
+/// Construct a `JSContext` from a realm guard.
+#[inline]
+pub unsafe fn cx_from_realm<'a>(realm: &mut CurrentRealm<'a>) -> JsContext {
+    JsContext::from_raw_ptr(realm.raw_cx())
 }
 
-impl<'a> From<&mut AutoRealm<'a>> for JSContext {
-    fn from(safe_cx: &mut AutoRealm<'a>) -> Self {
-        unsafe { JSContext(safe_cx.raw_cx()) }
-    }
-}
-
-#[expect(unsafe_code)]
-impl JSContext {
-    /// Create a new [`JSContext`] object from the given raw pointer.
-    ///
-    /// # Safety
-    ///
-    /// The `RawJSContext` argument must point to a valid `RawJSContext` in memory.
-    pub unsafe fn from_ptr(raw_js_context: *mut RawJSContext) -> Self {
-        JSContext(raw_js_context)
-    }
-
-    /// For compatibility with [js::context::JSContext]
-    pub fn raw_cx(&self) -> *mut RawJSContext {
-        self.0
-    }
-
-    /// For compatibility with [js::context::JSContext]
-    pub fn raw_cx_no_gc(&self) -> *mut RawJSContext {
-        self.0
-    }
-}
-
-impl Deref for JSContext {
-    type Target = *mut RawJSContext;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+/// Construct a `JSContext` from an auto-realm guard.
+#[inline]
+pub unsafe fn cx_from_auto_realm<'a>(realm: &mut AutoRealm<'a>) -> JsContext {
+    JsContext::from_raw_ptr(realm.raw_cx())
 }
 
 thread_local!(
@@ -83,7 +52,7 @@ pub fn mark_runtime_dead() {
 ///
 /// As such all it's usages will need to be eventually replaced with proper &mut SafeJSContext references.
 pub unsafe fn temp_cx() -> SafeJSContext {
-    unsafe { SafeJSContext::from_ptr(js::rust::Runtime::get().unwrap()) }
+    unsafe { JSContext::from_raw_ptr(js::rust::Runtime::get().unwrap().as_ptr()) }
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -345,8 +345,8 @@ impl<T: JSTraceable + 'static> RootedTraceableBox<T> {
     }
 
     /// Consumes a boxed JSTraceable and roots it for the life of this RootedTraceableBox.
-    pub fn from_box(boxed_traceable: T) -> RootedTraceableBox<T> {
-        Self(js::gc::RootedTraceableBox::new(boxed_traceable))
+    pub fn from_box(boxed_traceable: Box<T>) -> RootedTraceableBox<T> {
+        Self(js::gc::RootedTraceableBox::from_box(boxed_traceable))
     }
 
     pub unsafe fn trace(&self, tracer: *mut JSTracer) {

@@ -23,21 +23,21 @@ use crate::script_runtime::JSContext as SafeJSContext;
 use crate::utils::ProtoOrIfaceArray;
 
 pub(crate) unsafe fn call_default_constructor<D: crate::DomTypes>(
-    cx: &mut js::context::JSContext,
+    cx: &mut SafeJSContext,
     args: &CallArgs,
     global: &D::GlobalScope,
     proto_id: PrototypeList::ID,
     ctor_name: &str,
-    creator: unsafe fn(&mut js::context::JSContext, HandleObject, *mut ProtoOrIfaceArray),
+    creator: unsafe fn(&mut SafeJSContext, HandleObject, *mut ProtoOrIfaceArray),
     constructor: impl FnOnce(
-        &mut js::context::JSContext,
+        &mut SafeJSContext,
         &CallArgs,
         &D::GlobalScope,
         HandleObject,
     ) -> bool,
 ) -> bool {
     if !args.is_constructing() {
-        throw_constructor_without_new(cx.into(), ctor_name);
+        throw_constructor_without_new(*cx, ctor_name);
         return false;
     }
 
@@ -92,16 +92,16 @@ pub(crate) unsafe fn create_namespace_interface_objects<D: DomTypes>(
     rooted!(&in(cx) let mut proto: *mut JSObject = std::ptr::null_mut());
     unsafe {
         if init.is_proto_hack {
-            proto.set(GetRealmObjectPrototype(&mut *cx))
+            proto.set(GetRealmObjectPrototype(crate::script_runtime::copy_cx(cx)))
         } else {
-            proto.set(JS_NewPlainObject(&mut *cx))
+            proto.set(JS_NewPlainObject(crate::script_runtime::copy_cx(cx)))
         };
     }
 
     assert!(!proto.is_null());
     rooted!(&in(cx) let mut namespace = ptr::null_mut::<JSObject>());
     create_namespace_object::<D>(
-        SafeJSContext::from(&mut *cx),
+        crate::script_runtime::copy_cx(cx),
         global,
         proto.handle(),
         init.namespace_object_class,
@@ -126,7 +126,7 @@ pub(crate) unsafe fn create_callback_interface_objects<D: DomTypes>(
 ) {
     rooted!(&in(cx) let mut interface = ptr::null_mut::<JSObject>());
     create_callback_interface_object::<D>(
-        cx.into(),
+        crate::script_runtime::copy_cx(cx),
         global,
         init.constants,
         init.name,

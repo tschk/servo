@@ -12,9 +12,9 @@ use num_traits::Float;
 
 /// Encapsulates the IDL restricted float type.
 #[derive(Clone, Copy, Debug, Eq, JSTraceable, PartialEq)]
-pub struct Finite<T: Float>(T);
+pub struct Finite<T: Float + crate::JSTraceable>(T);
 
-impl<T: Float> Finite<T> {
+impl<T: Float + crate::JSTraceable> Finite<T> {
     /// Create a new `Finite<T: Float>` safely.
     pub fn new(value: T) -> Option<Finite<T>> {
         if value.is_finite() {
@@ -35,7 +35,7 @@ impl<T: Float> Finite<T> {
     }
 }
 
-impl<T: Float> Deref for Finite<T> {
+impl<T: Float + crate::JSTraceable> Deref for Finite<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -44,13 +44,13 @@ impl<T: Float> Deref for Finite<T> {
     }
 }
 
-impl<T: Float + MallocSizeOf> MallocSizeOf for Finite<T> {
+impl<T: Float + crate::JSTraceable + MallocSizeOf> MallocSizeOf for Finite<T> {
     fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
         (**self).size_of(ops)
     }
 }
 
-impl<T: Float + Default> Default for Finite<T> {
+impl<T: Float + crate::JSTraceable + Default> Default for Finite<T> {
     fn default() -> Finite<T> {
         Finite::wrap(T::default())
     }

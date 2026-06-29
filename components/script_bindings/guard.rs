@@ -71,10 +71,10 @@ pub(crate) enum Condition {
     Satisfied,
 }
 
-fn is_secure_context<D: DomTypes>(cx: JSContext) -> bool {
+fn is_secure_context<D: DomTypes>(mut cx: JSContext) -> bool {
     unsafe {
-        let in_realm_proof = AlreadyInRealm::assert_for_cx(JSContext::from_ptr(*cx));
-        D::GlobalScope::from_context(*cx, InRealm::Already(&in_realm_proof)).is_secure_context()
+        let in_realm_proof = AlreadyInRealm::assert_for_cx(cx);
+        D::GlobalScope::from_context(cx.raw_cx(), InRealm::Already(&in_realm_proof)).is_secure_context()
     }
 }
 

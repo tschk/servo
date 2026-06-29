@@ -97,22 +97,22 @@ pub type ErrorResult = Fallible<()>;
 
 /// Throw an exception to signal that a `JSObject` can not be converted to a
 /// given DOM type.
-pub fn throw_invalid_this(cx: SafeJSContext, proto_id: u16) {
-    debug_assert!(unsafe { !JS_IsExceptionPending(*cx) });
+pub fn throw_invalid_this(mut cx: SafeJSContext, proto_id: u16) {
+    debug_assert!(unsafe { !JS_IsExceptionPending(cx.raw_cx()) });
     let mut vec = "\"this\" object does not implement interface "
         .as_bytes()
         .to_vec();
     vec.extend_from_slice(proto_id_to_name(proto_id).as_bytes());
     let error = CString::new(vec).expect("WebIDL name should not contain nul byte");
-    unsafe { throw_type_error(*cx, &error) };
+    unsafe { throw_type_error(cx.raw_cx(), &error) };
 }
 
-pub fn throw_constructor_without_new(cx: SafeJSContext, name: &str) {
-    debug_assert!(unsafe { !JS_IsExceptionPending(*cx) });
+pub fn throw_constructor_without_new(mut cx: SafeJSContext, name: &str) {
+    debug_assert!(unsafe { !JS_IsExceptionPending(cx.raw_cx()) });
     let mut error = name.as_bytes().to_vec();
     error.extend_from_slice(b" constructor: 'new' is required");
     let error = CString::new(error).expect("WebIDL name should not contain nul byte");
-    unsafe { throw_type_error(*cx, &error) };
+    unsafe { throw_type_error(cx.raw_cx(), &error) };
 }
 
 #[macro_export]

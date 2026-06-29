@@ -59,7 +59,7 @@ macro_rules! rooted {
 #[macro_export]
 macro_rules! auto_root {
     (&in($cx:expr) let $var:ident = $init:expr) => {
-        let $var = $init;
+        let $var = js::rust::CustomAutoRooterGuard::from($init);
     };
 }
 

@@ -229,6 +229,12 @@ unsafe impl Trace for DOMStringType {
     }
 }
 
+unsafe impl js::gc::Traceable for DOMStringType {
+    unsafe fn trace(&self, tracer: *mut js::jsapi::JSTracer) {
+        unsafe { Trace::trace(self, tracer) }
+    }
+}
+
 impl malloc_size_of::MallocSizeOf for DOMStringType {
     fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
         match self {

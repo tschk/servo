@@ -54,12 +54,12 @@ impl ConstantSpec {
 
 /// Defines constants on `obj`.
 /// Fails on JSAPI failure.
-pub fn define_constants(cx: JSContext, obj: HandleObject, constants: &[ConstantSpec]) {
+pub fn define_constants(mut cx: JSContext, obj: HandleObject, constants: &[ConstantSpec]) {
     for spec in constants {
-        rooted!(in(*cx) let value = spec.get_value());
+        rooted!(in(cx.raw_cx()) let value = spec.get_value());
         unsafe {
             assert!(JS_DefineProperty(
-                *cx,
+                cx.raw_cx(),
                 obj,
                 spec.name.as_ptr(),
                 value.handle(),

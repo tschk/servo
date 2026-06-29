@@ -65,25 +65,29 @@ pub(crate) unsafe fn wrap<T: MutDomObject, D: DomTypes>(
         if config.is_proxy {
             let handler: *const libc::c_void = config.proxy_handler.unwrap();
 
-            if config.is_maybe_cross_origin_object {
-                obj.set(NewProxyObject(
-                    &mut *cx,
-                    handler,
-                    Handle::undefined(),
-                    ptr::null_mut(),
-                    ptr::null(),
-                    true,
-                ));
-            } else {
-                obj.set(NewProxyObject(
-                    &mut *cx,
-                    handler,
-                    Handle::undefined(),
-                    canonical_proto.get(),
-                    ptr::null(),
-                    false,
-                ));
+            let proxy = {
+                let inner_cx = &mut *cx;
+                if config.is_maybe_cross_origin_object {
+                    NewProxyObject(
+                        inner_cx,
+                        handler,
+                        Handle::undefined(),
+                        ptr::null_mut(),
+                        ptr::null(),
+                        true,
+                    )
+                } else {
+                    NewProxyObject(
+                        inner_cx,
+                        handler,
+                        Handle::undefined(),
+                        canonical_proto.get(),
+                        ptr::null(),
+                        false,
+                    )
+                }
             };
+            obj.set(proxy);
 
             assert!(!obj.is_null());
             SetProxyReservedSlot(

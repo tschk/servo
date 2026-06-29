@@ -95,7 +95,7 @@ pub(crate) unsafe extern "C" fn define_property(
 ) -> bool {
     rooted!(in(cx) let mut expando = ptr::null_mut::<JSObject>());
     ensure_expando_object(cx, proxy, expando.handle_mut());
-    JS_DefinePropertyById(cx, expando.handle().into(), id, desc, result)
+    JS_DefinePropertyById(cx, expando.handle().get(), id, desc, result)
 }
 
 /// Deletes an expando off the given `proxy`.
@@ -220,20 +220,20 @@ pub fn set_property_descriptor(
     *is_none = false;
 }
 
-pub(crate) fn id_to_source(cx: SafeJSContext, id: RawHandleId) -> Option<DOMString> {
+pub(crate) fn id_to_source(mut cx: SafeJSContext, id: RawHandleId) -> Option<DOMString> {
     unsafe {
         if js::glue::RUST_JSID_IS_VOID(id) {
             return None;
         }
-        rooted!(in(*cx) let mut value = UndefinedValue());
-        rooted!(in(*cx) let mut jsstr = ptr::null_mut::<jsapi::JSString>());
-        jsapi::JS_IdToValue(*cx, id.get(), value.handle_mut().into())
+        rooted!(in(cx.raw_cx()) let mut value = UndefinedValue());
+        rooted!(in(cx.raw_cx()) let mut jsstr = ptr::null_mut::<jsapi::JSString>());
+        jsapi::JS_IdToValue(cx.raw_cx(), id.get(), value.handle_mut().into())
             .then(|| {
-                jsstr.set(jsapi::JS_ValueToSource(*cx, value.handle().into()));
+                jsstr.set(jsapi::JS_ValueToSource(cx.raw_cx(), value.handle().into()));
                 jsstr.get()
             })
             .and_then(ptr::NonNull::new)
-            .map(|jsstr| jsstr_to_string(*cx, jsstr).into())
+            .map(|jsstr| jsstr_to_string(cx.raw_cx(), jsstr).into())
     }
 }
 
@@ -271,10 +271,10 @@ pub(crate) fn cross_origin_own_property_keys(
     // >    `e.[[Property]]` to `keys`.
     for key in cross_origin_properties.keys() {
         unsafe {
-            rooted!(&in(cx) let rooted = js::rust::wrappers2::JS_AtomizeAndPinString(&mut *cx, key));
+            rooted!(&in(cx) let rooted = js::rust::wrappers2::JS_AtomizeAndPinString(crate::script_runtime::copy_cx(cx), key));
             rooted!(&in(cx) let mut rooted_jsid: jsid);
             js::rust::wrappers2::RUST_INTERNED_STRING_TO_JSID(
-                &mut *cx,
+                crate::script_runtime::copy_cx(cx),
                 rooted.handle().get(),
                 rooted_jsid.handle_mut(),
             );
@@ -450,10 +450,10 @@ fn append_cross_origin_allowlisted_prop_keys(
     unsafe {
         rooted!(&in(cx) let mut id: jsid);
 
-        let jsstring = js::rust::wrappers2::JS_AtomizeAndPinString(&mut *cx, c"then".as_ptr());
+        let jsstring = js::rust::wrappers2::JS_AtomizeAndPinString(crate::script_runtime::copy_cx(cx), c"then".as_ptr());
         rooted!(&in(cx) let rooted = jsstring);
         js::rust::wrappers2::RUST_INTERNED_STRING_TO_JSID(
-            &mut *cx,
+            crate::script_runtime::copy_cx(cx),
             rooted.handle().get(),
             id.handle_mut(),
         );
@@ -461,7 +461,7 @@ fn append_cross_origin_allowlisted_prop_keys(
 
         for &allowed_code in ALLOWLISTED_SYMBOL_CODES.iter() {
             id.set(SymbolId(js::rust::wrappers2::GetWellKnownSymbol(
-                &mut *cx,
+                crate::script_runtime::copy_cx(cx),
                 allowed_code,
             )));
             AppendToIdVector(props, id.handle());
@@ -494,20 +494,21 @@ fn ensure_cross_origin_property_holder(
 
     // Create a holder for the current Realm
     unsafe {
+        let mut safe_cx = crate::script_runtime::cx_from_realm(cx);
         out_holder.set(js::rust::wrappers2::JS_NewObjectWithGivenProto(
-            &mut *cx,
+            crate::script_runtime::copy_cx(&mut safe_cx),
             ptr::null_mut(),
             HandleObject::null(),
         ));
 
         if out_holder.get().is_null() ||
             !js::rust::wrappers2::JS_DefineProperties(
-                &mut *cx,
+                crate::script_runtime::copy_cx(&mut safe_cx),
                 out_holder.handle(),
                 cross_origin_properties.attributes.as_ptr(),
             ) ||
             !js::rust::wrappers2::JS_DefineFunctions(
-                &mut *cx,
+                crate::script_runtime::copy_cx(&mut safe_cx),
                 out_holder.handle(),
                 cross_origin_properties.methods.as_ptr(),
             )
@@ -526,11 +527,11 @@ fn ensure_cross_origin_property_holder(
 /// IDL operations on a cross-origin object involve [a security check][1].
 ///
 /// [1]: https://html.spec.whatwg.org/multipage/#integration-with-idl
-pub(crate) fn is_cross_origin_object<D: DomTypes>(cx: SafeJSContext, obj: RawHandleObject) -> bool {
+pub(crate) fn is_cross_origin_object<D: DomTypes>(mut cx: SafeJSContext, obj: RawHandleObject) -> bool {
     unsafe {
         jsapi::IsWindowProxy(*obj) ||
-            native_from_object::<D::Location>(*obj, *cx).is_ok() ||
-            native_from_object::<D::DissimilarOriginLocation>(*obj, *cx).is_ok()
+            native_from_object::<D::Location>(*obj, cx.raw_cx()).is_ok() ||
+            native_from_object::<D::DissimilarOriginLocation>(*obj, cx.raw_cx()).is_ok()
     }
 }
 
@@ -545,7 +546,7 @@ pub(crate) fn report_cross_origin_denial<D: DomTypes>(
     id: RawHandleId,
     access: &str,
 ) -> bool {
-    if let Some(id) = id_to_source(cx.into(), id) {
+    if let Some(id) = id_to_source(unsafe { crate::script_runtime::cx_from_realm(cx) }, id) {
         debug!(
             "permission denied to {} property {} on cross-origin object",
             access,
@@ -555,11 +556,12 @@ pub(crate) fn report_cross_origin_denial<D: DomTypes>(
         debug!("permission denied to {} on cross-origin object", access);
     }
     unsafe {
-        if !js::rust::wrappers2::JS_IsExceptionPending(&mut *cx) {
+        let mut safe_cx = crate::script_runtime::cx_from_realm(cx);
+        if !js::rust::wrappers2::JS_IsExceptionPending(crate::script_runtime::copy_cx(&mut safe_cx)) {
             let global = D::GlobalScope::from_current_realm(cx);
             // TODO: include `id` and `access` in the exception message
             <D as DomHelpers<D>>::throw_dom_exception(
-                cx.into(),
+                crate::script_runtime::copy_cx(&mut safe_cx),
                 &global,
                 Error::Security(None),
                 CanGc::deprecated_note(),
@@ -677,10 +679,11 @@ pub(crate) fn cross_origin_get<D: DomTypes>(
     let id = unsafe { Handle::from_raw(id) };
     let mut vp = unsafe { MutableHandle::from_raw(vp) };
     let mut is_none = false;
+    let mut safe_cx = unsafe { crate::script_runtime::cx_from_realm(cx) };
     if !unsafe {
         js::rust::wrappers2::InvokeGetOwnPropertyDescriptor(
             GetProxyHandler(*proxy),
-            &mut *cx,
+            crate::script_runtime::copy_cx(&mut safe_cx),
             proxy,
             id,
             descriptor.handle_mut(),
@@ -720,13 +723,13 @@ pub(crate) fn cross_origin_get<D: DomTypes>(
     unsafe {
         getter
             .get()
-            .to_jsval(cx.raw_cx(), getter_jsval.handle_mut());
+            .to_jsval(crate::script_runtime::copy_cx(&mut safe_cx).raw_cx(), getter_jsval.handle_mut());
     }
 
     // > 7. Return `? Call(getter, Receiver)`.
     unsafe {
         js::rust::wrappers2::Call(
-            cx,
+            crate::script_runtime::copy_cx(&mut safe_cx),
             receiver,
             getter_jsval.handle(),
             &jsapi::HandleValueArray::empty(),
@@ -752,9 +755,10 @@ pub(crate) unsafe fn cross_origin_set<D: DomTypes>(
     // > 1. Let desc be ? O.[[GetOwnProperty]](P).
     rooted!(&in(cx) let mut descriptor = PropertyDescriptor::default());
     let mut is_none = false;
+    let mut safe_cx = crate::script_runtime::cx_from_realm(cx);
     if !js::rust::wrappers2::InvokeGetOwnPropertyDescriptor(
         GetProxyHandler(*proxy),
-        &mut *cx,
+        crate::script_runtime::copy_cx(&mut safe_cx),
         proxy,
         id,
         descriptor.handle_mut(),
@@ -782,14 +786,14 @@ pub(crate) unsafe fn cross_origin_set<D: DomTypes>(
     rooted!(&in(cx) let mut setter_jsval = UndefinedValue());
     setter
         .get()
-        .to_jsval(cx.raw_cx(), setter_jsval.handle_mut());
+        .to_jsval(crate::script_runtime::copy_cx(&mut safe_cx).raw_cx(), setter_jsval.handle_mut());
 
     // > 3.1. Perform ? Call(setter, Receiver, «V»).
     // >
     // > 3.2. Return true.
     rooted!(&in(cx) let mut ignored = UndefinedValue());
     if !js::rust::wrappers2::Call(
-        &mut *cx,
+        crate::script_runtime::copy_cx(&mut safe_cx),
         receiver,
         setter_jsval.handle(),
         // FIXME: Our binding lacks `HandleValueArray(Handle<Value>)`

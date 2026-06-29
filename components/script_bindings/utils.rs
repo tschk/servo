@@ -253,7 +253,7 @@ pub fn get_dictionary_property(
     }
 
     let mut found = false;
-    if unsafe { !JS_HasProperty(&mut *cx, object, property.as_ptr(), &mut found) } {
+    if unsafe { !JS_HasProperty(crate::script_runtime::copy_cx(cx), object, property.as_ptr(), &mut found) } {
         return Err(());
     }
 
@@ -261,7 +261,7 @@ pub fn get_dictionary_property(
         return Ok(false);
     }
 
-    if unsafe { !JS_GetProperty(&mut *cx, object, property.as_ptr(), rval) } {
+    if unsafe { !JS_GetProperty(crate::script_runtime::copy_cx(cx), object, property.as_ptr(), rval) } {
         return Err(());
     }
 
@@ -273,7 +273,7 @@ pub fn get_dictionary_property(
 /// and Ok(()) otherwise
 #[allow(clippy::result_unit_err)]
 pub fn set_dictionary_property(
-    cx: SafeJSContext,
+    mut cx: SafeJSContext,
     object: HandleObject,
     property: &CStr,
     value: HandleValue,
@@ -283,7 +283,7 @@ pub fn set_dictionary_property(
     }
 
     unsafe {
-        if !JS_SetProperty(*cx, object, property.as_ptr(), value) {
+        if !JS_SetProperty(cx.raw_cx(), object, property.as_ptr(), value) {
             return Err(());
         }
     }
@@ -296,7 +296,7 @@ pub fn set_dictionary_property(
 /// and Ok(()) otherwise.
 #[allow(clippy::result_unit_err)]
 pub fn define_dictionary_property(
-    cx: SafeJSContext,
+    mut cx: SafeJSContext,
     object: HandleObject,
     property: &CStr,
     value: HandleValue,
@@ -307,7 +307,7 @@ pub fn define_dictionary_property(
 
     unsafe {
         if !JS_DefineProperty(
-            *cx,
+            cx.raw_cx(),
             object,
             property.as_ptr(),
             value,
@@ -325,7 +325,7 @@ pub fn define_dictionary_property(
 /// and `Ok(false)` for null objects or when the property is not own.
 #[allow(clippy::result_unit_err)]
 pub fn has_own_property(
-    cx: SafeJSContext,
+    mut cx: SafeJSContext,
     object: HandleObject,
     property: &CStr,
 ) -> Result<bool, ()> {
@@ -335,7 +335,7 @@ pub fn has_own_property(
 
     let mut found = false;
     unsafe {
-        if !JS_HasOwnProperty(*cx, object, property.as_ptr(), &mut found) {
+        if !JS_HasOwnProperty(cx.raw_cx(), object, property.as_ptr(), &mut found) {
             return Err(());
         }
     }
@@ -554,7 +554,7 @@ unsafe fn generic_call<D: DomTypes, const EXCEPTION_TO_REJECTION: bool>(
     if !thisobj.get().is_null_or_undefined() && !thisobj.get().is_object() {
         // `thisobj` is not a platform object, so the security check is not
         // invoked in this case
-        throw_invalid_this((&mut cx).into(), proto_id);
+        throw_invalid_this(crate::script_runtime::copy_cx(&mut cx), proto_id);
         return if EXCEPTION_TO_REJECTION {
             exception_to_promise(cx.raw_cx(), args.rval(), can_gc)
         } else {
@@ -588,7 +588,7 @@ unsafe fn generic_call<D: DomTypes, const EXCEPTION_TO_REJECTION: bool>(
                 *vp = UndefinedValue();
                 return true;
             } else {
-                throw_invalid_this((&mut cx).into(), proto_id);
+                throw_invalid_this(crate::script_runtime::copy_cx(&mut cx), proto_id);
                 return if EXCEPTION_TO_REJECTION {
                     exception_to_promise(cx.raw_cx(), args.rval(), can_gc)
                 } else {
@@ -603,7 +603,7 @@ unsafe fn generic_call<D: DomTypes, const EXCEPTION_TO_REJECTION: bool>(
     if needs_security_check_on_interface_match {
         let mut realm = js::realm::CurrentRealm::assert(&mut cx);
         // [cross_origin_operation == false]
-        if is_cross_origin_object::<D>((&mut realm).into(), obj.handle().into()) &&
+        if is_cross_origin_object::<D>(unsafe { crate::script_runtime::cx_from_realm(&mut realm) }, obj.handle().into()) &&
             !<D as DomHelpers<D>>::is_platform_object_same_origin(&realm, obj.handle().into())
         {
             // [this_class_cross_origin == true && this_same_origin == false]

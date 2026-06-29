@@ -18,14 +18,14 @@ impl AlreadyInRealm {
     #![expect(unsafe_code)]
     pub fn assert<D: DomTypes>() -> AlreadyInRealm {
         unsafe {
-            assert!(!GetCurrentRealmOrNull(*D::GlobalScope::get_cx()).is_null());
+            assert!(!GetCurrentRealmOrNull(D::GlobalScope::get_cx().raw_cx()).is_null());
         }
         AlreadyInRealm(())
     }
 
-    pub fn assert_for_cx(cx: JSContext) -> AlreadyInRealm {
+    pub fn assert_for_cx(mut cx: JSContext) -> AlreadyInRealm {
         unsafe {
-            assert!(!GetCurrentRealmOrNull(*cx).is_null());
+            assert!(!GetCurrentRealmOrNull(cx.raw_cx()).is_null());
         }
         AlreadyInRealm(())
     }
@@ -66,8 +66,9 @@ impl InRealm<'_> {
 }
 
 pub fn enter_realm<D: DomTypes>(object: &impl DomObject) -> JSAutoRealm {
+    let mut cx = D::GlobalScope::get_cx();
     JSAutoRealm::new(
-        *D::GlobalScope::get_cx(),
+        unsafe { cx.raw_cx() },
         object.reflector().get_jsobject().get(),
     )
 }

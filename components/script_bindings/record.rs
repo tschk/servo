@@ -54,9 +54,9 @@ impl RecordKey for USVString {
 
     fn from_id(cx: &mut JSContext, id: HandleId) -> Result<ConversionResult<Self>, ()> {
         rooted!(&in(cx) let mut jsid_value = UndefinedValue());
-        unsafe { JS_IdToValue(&mut *cx, *id.as_ref(cx), jsid_value.handle_mut()) };
+        unsafe { JS_IdToValue(crate::script_runtime::copy_cx(cx), id.get(), jsid_value.handle_mut()) };
 
-        USVString::safe_from_jsval(&mut *cx, jsid_value.handle(), ())
+        USVString::safe_from_jsval(cx, jsid_value.handle(), ())
     }
 }
 
@@ -67,20 +67,20 @@ impl RecordKey for ByteString {
 
     fn from_id(cx: &mut JSContext, id: HandleId) -> Result<ConversionResult<Self>, ()> {
         rooted!(&in(cx) let mut jsid_value = UndefinedValue());
-        unsafe { JS_IdToValue(&mut *cx, *id.as_ref(cx), jsid_value.handle_mut()) };
+        unsafe { JS_IdToValue(crate::script_runtime::copy_cx(cx), id.get(), jsid_value.handle_mut()) };
 
-        ByteString::safe_from_jsval(&mut *cx, jsid_value.handle(), ())
+        ByteString::safe_from_jsval(cx, jsid_value.handle(), ())
     }
 }
 
 /// The `Record` (open-ended dictionary) type.
 #[derive(Clone, JSTraceable)]
-pub struct Record<K: RecordKey, V> {
+pub struct Record<K: RecordKey + crate::JSTraceable, V: crate::JSTraceable> {
     #[custom_trace]
     map: IndexMap<K, V>,
 }
 
-impl<K: RecordKey, V> Record<K, V> {
+impl<K: RecordKey + crate::JSTraceable, V: crate::JSTraceable> Record<K, V> {
     /// Create an empty `Record`.
     pub fn new() -> Self {
         Record {
@@ -89,7 +89,7 @@ impl<K: RecordKey, V> Record<K, V> {
     }
 }
 
-impl<K: RecordKey, V> Deref for Record<K, V> {
+impl<K: RecordKey + crate::JSTraceable, V: crate::JSTraceable> Deref for Record<K, V> {
     type Target = IndexMap<K, V>;
 
     fn deref(&self) -> &Self::Target {
@@ -97,7 +97,7 @@ impl<K: RecordKey, V> Deref for Record<K, V> {
     }
 }
 
-impl<K: RecordKey, V> DerefMut for Record<K, V> {
+impl<K: RecordKey + crate::JSTraceable, V: crate::JSTraceable> DerefMut for Record<K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.map
     }
@@ -105,8 +105,8 @@ impl<K: RecordKey, V> DerefMut for Record<K, V> {
 
 impl<K, V, C> FromJSValConvertible for Record<K, V>
 where
-    K: RecordKey,
-    V: FromJSValConvertible<Config = C>,
+    K: RecordKey + crate::JSTraceable,
+    V: FromJSValConvertible<Config = C> + crate::JSTraceable,
     C: Clone,
 {
     type Config = C;
@@ -135,7 +135,7 @@ where
         let mut ids = unsafe { IdVector::new(cx.raw_cx()) };
         if unsafe {
             !GetPropertyKeys(
-                &mut *cx,
+                crate::script_runtime::copy_cx(cx),
                 object.handle(),
                 JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS,
                 ids.handle_mut(),
@@ -152,7 +152,7 @@ where
             let mut is_none = false;
             if unsafe {
                 !JS_GetOwnPropertyDescriptorById(
-                    &mut *cx,
+                    crate::script_runtime::copy_cx(cx),
                     object.handle(),
                     id.handle(),
                     desc.handle_mut(),
@@ -166,7 +166,7 @@ where
                 continue;
             }
 
-            let key = match K::from_id(&mut *cx, id.handle())? {
+            let key = match K::from_id(cx, id.handle())? {
                 ConversionResult::Success(key) => key,
                 ConversionResult::Failure(message) => {
                     return Ok(ConversionResult::Failure(message));
@@ -175,12 +175,12 @@ where
 
             rooted!(&in(cx) let mut property = UndefinedValue());
             if unsafe {
-                !JS_GetPropertyById(&mut *cx, object.handle(), id.handle(), property.handle_mut())
+                !JS_GetPropertyById(crate::script_runtime::copy_cx(cx), object.handle(), id.handle(), property.handle_mut())
             } {
                 return Err(());
             }
 
-            let property = match V::safe_from_jsval(&mut *cx, property.handle(), config.clone())? {
+            let property = match V::safe_from_jsval(cx, property.handle(), config.clone())? {
                 ConversionResult::Success(property) => property,
                 ConversionResult::Failure(message) => {
                     return Ok(ConversionResult::Failure(message));
@@ -195,8 +195,8 @@ where
 
 impl<K, V> ToJSValConvertible for Record<K, V>
 where
-    K: RecordKey,
-    V: ToJSValConvertible,
+    K: RecordKey + crate::JSTraceable,
+    V: ToJSValConvertible + crate::JSTraceable,
 {
     #[inline]
     unsafe fn to_jsval(&self, cx: *mut RawJSContext, mut rval: MutableHandleValue) {
@@ -222,7 +222,7 @@ where
     }
 }
 
-impl<K: RecordKey, V> Default for Record<K, V> {
+impl<K: RecordKey + crate::JSTraceable, V: crate::JSTraceable> Default for Record<K, V> {
     fn default() -> Self {
         Self::new()
     }

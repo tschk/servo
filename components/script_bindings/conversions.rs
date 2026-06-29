@@ -43,8 +43,8 @@ pub trait SafeToJSValConvertible {
 }
 
 impl<T: ToJSValConvertible + ?Sized> SafeToJSValConvertible for T {
-    fn safe_to_jsval(&self, cx: SafeJSContext, rval: MutableHandleValue, _can_gc: CanGc) {
-        unsafe { self.to_jsval(*cx, rval) };
+    fn safe_to_jsval(&self, mut cx: SafeJSContext, rval: MutableHandleValue, _can_gc: CanGc) {
+        unsafe { self.to_jsval(cx.raw_cx(), rval) };
     }
 }
 
@@ -95,12 +95,12 @@ impl<T: FromJSValConvertible> SafeFromJSValConvertible for T {
     type Config = <T as FromJSValConvertible>::Config;
 
     fn safe_from_jsval(
-        cx: SafeJSContext,
+        mut cx: SafeJSContext,
         value: HandleValue,
         option: Self::Config,
         _can_gc: CanGc,
     ) -> Result<ConversionResult<Self>, ()> {
-        unsafe { T::from_jsval(*cx, value, option) }
+        unsafe { T::from_jsval(cx.raw_cx(), value, option) }
     }
 }
 
@@ -206,7 +206,8 @@ impl FromJSValConvertible for ByteString {
             let latin1 = JS_DeprecatedStringHasLatin1Chars(string);
             if latin1 {
                 let mut length = 0;
-                let chars = JS_GetLatin1StringCharsAndLength(cx, string, &mut length);
+                let chars =
+                    JS_GetLatin1StringCharsAndLength(cx.raw_cx(), ptr::null(), string, &mut length);
                 assert!(!chars.is_null());
 
                 let char_slice = slice::from_raw_parts(chars as *mut u8, length);
@@ -216,7 +217,7 @@ impl FromJSValConvertible for ByteString {
             }
 
             let mut length = 0;
-            let chars = JS_GetTwoByteStringCharsAndLength(cx, string, &mut length);
+            let chars = JS_GetTwoByteStringCharsAndLength(cx.raw_cx(), ptr::null(), string, &mut length);
             let char_vec = slice::from_raw_parts(chars, length);
 
             if char_vec.iter().any(|&c| c > 0xFF) {
@@ -258,7 +259,7 @@ impl<T: DomObject + IDLInterface> FromJSValConvertible for DomRoot<T> {
         value: HandleValue,
         _config: Self::Config,
     ) -> Result<ConversionResult<DomRoot<T>>, ()> {
-        Ok(match root_from_handlevalue(value, cx.into()) {
+        Ok(match root_from_handlevalue(value, cx) {
             Ok(result) => ConversionResult::Success(result),
             Err(()) => ConversionResult::Failure(c"value is not an object".into()),
         })
@@ -427,7 +428,7 @@ where
 /// # Safety
 /// cx must point to a valid, non-null JS context.
 #[allow(clippy::result_unit_err)]
-pub fn root_from_handlevalue<T>(v: HandleValue, cx: SafeJSContext) -> Result<DomRoot<T>, ()>
+pub fn root_from_handlevalue<T>(v: HandleValue, cx: &mut js::context::JSContext) -> Result<DomRoot<T>, ()>
 where
     T: DomObject + IDLInterface,
 {
@@ -436,7 +437,7 @@ where
     }
     #[expect(unsafe_code)]
     unsafe {
-        root_from_object(v.get().to_object(), *cx)
+        root_from_object(v.get().to_object(), cx.raw_cx())
     }
 }
 
@@ -461,7 +462,7 @@ pub fn jsid_to_string(cx: &mut js::context::JSContext, id: HandleId) -> Option<D
     None
 }
 
-impl<T: Float + ToJSValConvertible> ToJSValConvertible for Finite<T> {
+impl<T: Float + crate::JSTraceable + ToJSValConvertible> ToJSValConvertible for Finite<T> {
     #[inline]
     unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {
         let value = **self;
@@ -469,7 +470,7 @@ impl<T: Float + ToJSValConvertible> ToJSValConvertible for Finite<T> {
     }
 }
 
-impl<T: Float + FromJSValConvertible<Config = ()>> FromJSValConvertible for Finite<T> {
+impl<T: Float + crate::JSTraceable + FromJSValConvertible<Config = ()>> FromJSValConvertible for Finite<T> {
     type Config = ();
 
     unsafe fn from_jsval(
@@ -550,7 +551,7 @@ where
 /// # Safety
 /// `cx` must point to a valid, non-null JSContext.
 #[allow(clippy::result_unit_err)]
-pub fn native_from_handlevalue<T>(v: HandleValue, cx: SafeJSContext) -> Result<*const T, ()>
+pub fn native_from_handlevalue<T>(v: HandleValue, cx: &mut js::context::JSContext) -> Result<*const T, ()>
 where
     T: DomObject + IDLInterface,
 {
@@ -560,7 +561,7 @@ where
 
     #[expect(unsafe_code)]
     unsafe {
-        native_from_object(v.get().to_object(), *cx)
+        native_from_object(v.get().to_object(), cx.raw_cx())
     }
 }
 
@@ -611,7 +612,7 @@ pub fn is_array_like<D: crate::DomTypes>(
     value: HandleValue,
 ) -> bool {
     let mut is_array = false;
-    assert!(unsafe { IsArrayObject(&mut *cx, value, &mut is_array) });
+    assert!(unsafe { IsArrayObject(crate::script_runtime::copy_cx(cx), value, &mut is_array) });
     if is_array {
         return true;
     }

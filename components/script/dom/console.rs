@@ -54,7 +54,7 @@ impl Console {
         arguments: Vec<DebuggerValue>,
         stacktrace: Option<Vec<StackFrame>>,
     ) -> ConsoleMessage {
-        let caller = unsafe { describe_scripted_caller(cx.raw_cx()) }.unwrap_or_default();
+        let caller = unsafe { describe_scripted_caller(cx) }.unwrap_or_default();
 
         ConsoleMessage {
             fields: ConsoleMessageFields {
@@ -230,7 +230,7 @@ fn console_argument_from_handle_value(
     match inner(cx, handle_value, seen) {
         Ok(arg) => arg,
         Err(()) => {
-            report_pending_exception(&mut CurrentRealm::assert(cx));
+            report_pending_exception(&mut CurrentRealm::assert(&mut *cx));
             DebuggerValue::StringValue("<error>".into())
         },
     }
@@ -328,7 +328,7 @@ fn console_object_from_handle_value(
 
     let mut own_properties = Vec::new();
     let mut items: Vec<(i32, DebuggerValue)> = Vec::new();
-    let mut ids = unsafe { IdVector::new(cx.raw_cx()) };
+    let mut ids = unsafe { IdVector::new(&mut *cx) };
     // https://console.spec.whatwg.org/#printer
     // Objects with either generic JavaScript object formatting or optimally useful formatting applied.
     if !unsafe {
@@ -426,7 +426,7 @@ fn console_object_from_handle_value(
             )
         },
         ESClass::Function => {
-            rooted!(&in(cx) let fun = unsafe { JS_ValueToFunction(cx, handle_value) });
+            rooted!(&in(cx) let fun = unsafe { JS_ValueToFunction(cx, handle_value.get()) });
             rooted!(&in(cx) let mut name = std::ptr::null_mut::<jsapi::JSString>());
             rooted!(&in(cx) let mut display_name = std::ptr::null_mut::<jsapi::JSString>());
             let arity;
@@ -493,7 +493,7 @@ pub(crate) fn stringify_handle_value(cx: &mut JSContext, message: HandleValue) -
         if !unsafe { GetBuiltinClass(cx, obj.handle(), &mut object_class as *mut _) } {
             return DOMString::from("/* invalid */");
         }
-        let mut ids = unsafe { IdVector::new(cx.raw_cx()) };
+        let mut ids = unsafe { IdVector::new(&mut *cx) };
         if !unsafe {
             GetPropertyKeys(
                 cx,
@@ -687,7 +687,7 @@ fn apply_sprintf_substitutions(cx: &mut JSContext, messages: &[HandleValue]) -> 
             Some('d') | Some('i') => {
                 let spec = chars.next().unwrap();
                 if arg_index < messages.len() {
-                    let num = unsafe { ToNumber(cx.raw_cx(), messages[arg_index]) };
+                    let num = unsafe { ToNumber(&mut *cx, messages[arg_index]) };
                     if num.is_err() {
                         unsafe { JS_ClearPendingException(cx) };
                     }
@@ -701,7 +701,7 @@ fn apply_sprintf_substitutions(cx: &mut JSContext, messages: &[HandleValue]) -> 
             Some('f') => {
                 chars.next();
                 if arg_index < messages.len() {
-                    let num = unsafe { ToNumber(cx.raw_cx(), messages[arg_index]) };
+                    let num = unsafe { ToNumber(&mut *cx, messages[arg_index]) };
                     if num.is_err() {
                         unsafe { JS_ClearPendingException(cx) };
                     }
@@ -1023,7 +1023,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
     let mut frames = vec![];
     rooted!(&in(cx) let mut handle =  ptr::null_mut());
     let captured_js_stack =
-        unsafe { CapturedJSStack::new(cx.raw_cx(), handle, Some(MAX_FRAME_COUNT)) };
+        unsafe { CapturedJSStack::new(&mut *cx, handle, Some(MAX_FRAME_COUNT)) };
     let Some(captured_js_stack) = captured_js_stack else {
         return frames;
     };
@@ -1034,7 +1034,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
         // Get function name
         unsafe {
             GetSavedFrameFunctionDisplayName(
-                cx,
+                cx.raw_cx(),
                 ptr::null_mut(),
                 frame,
                 result.handle_mut(),
@@ -1051,7 +1051,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
         result.set(ptr::null_mut());
         unsafe {
             GetSavedFrameSource(
-                cx,
+                cx.raw_cx(),
                 ptr::null_mut(),
                 frame,
                 result.handle_mut(),
@@ -1068,7 +1068,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
         let mut line_number = 0;
         unsafe {
             GetSavedFrameLine(
-                cx,
+                cx.raw_cx(),
                 ptr::null_mut(),
                 frame,
                 &mut line_number,
@@ -1079,7 +1079,7 @@ fn get_js_stack(cx: &mut JSContext) -> Vec<StackFrame> {
         let mut column_number = jsapi::JS::TaggedColumnNumberOneOrigin { value_: 0 };
         unsafe {
             GetSavedFrameColumn(
-                cx,
+                cx.raw_cx(),
                 ptr::null_mut(),
                 frame,
                 &mut column_number,

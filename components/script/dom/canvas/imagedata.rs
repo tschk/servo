@@ -70,7 +70,7 @@ impl ImageData {
             let _buffer_source =
                 create_buffer_source::<ClampedU8>(cx, &d[..], js_object.handle_mut())
                     .map_err(|_| Error::JSFailed)?;
-            auto_root!(&in(cx) let data = TypedArray::<ClampedU8, *mut JSObject>::from(js_object.get()).map_err(|_| Error::JSFailed)?);
+            auto_root!(&in(cx) let data = Uint8ClampedArray::from(js_object.get()).map_err(|_| Error::JSFailed)?);
 
             Self::Constructor_(cx, global, None, data, width, Some(height), &settings)
         } else {

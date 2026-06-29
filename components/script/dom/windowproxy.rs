@@ -192,7 +192,7 @@ impl WindowProxy {
             let _ac = JSAutoRealm::new(*cx, window_jsobject.get());
 
             // Create a new window proxy.
-            rooted!(in(*cx) let js_proxy = handler.new_window_proxy(&cx, window_jsobject));
+            rooted!(in(cx) let js_proxy = handler.new_window_proxy(&cx, window_jsobject));
             assert!(!js_proxy.is_null());
 
             // Create a new browsing context.
@@ -743,7 +743,7 @@ impl WindowProxy {
             // that's not what we are doing here. We need to do this just
             // because we want to replace the wrapper's `ProxyTraps`, but we
             // don't want to update its identity.
-            rooted!(in(*cx) let new_js_proxy = handler.new_window_proxy(&cx, window_jsobject));
+            rooted!(in(cx) let new_js_proxy = handler.new_window_proxy(&cx, window_jsobject));
             // Explicitly set this slot to a null pointer in case a GC occurs before we
             // are ready to set it to a real value.
             SetProxyReservedSlot(new_js_proxy.get(), 0, &PrivateValue(ptr::null_mut()));
@@ -752,7 +752,7 @@ impl WindowProxy {
                 old_js_proxy.get(),
                 new_js_proxy.get()
             );
-            rooted!(in(*cx) let new_js_proxy = JS_TransplantObject(*cx, old_js_proxy, new_js_proxy.handle()));
+            rooted!(in(cx) let new_js_proxy = JS_TransplantObject(*cx, old_js_proxy, new_js_proxy.handle()));
             debug!("Transplanted proxy is {:p}.", new_js_proxy.get());
 
             // Transfer ownership of this browsing context from the old window proxy to the new one.

@@ -65,7 +65,7 @@ pub(crate) fn to_frozen_array<T: ToJSValConvertible>(
         can_gc,
     );
 
-    rooted!(in(*cx) let obj = rval.to_object());
+    rooted!(in(cx) let obj = rval.to_object());
     unsafe { JS_FreezeObject(*cx, RawHandleObject::from(obj.handle())) };
 }
 

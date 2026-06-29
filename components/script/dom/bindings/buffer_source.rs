@@ -86,7 +86,7 @@ where
     T: TypedArrayElement + TypedArrayElementCreator + 'static,
     T::Element: Clone + Copy,
 {
-    rooted!(in (*cx) let mut array = ptr::null_mut::<JSObject>());
+    rooted!(in (cx) let mut array = ptr::null_mut::<JSObject>());
     let typed_array_result =
         create_buffer_source_with_length::<T>(cx, len as usize, array.handle_mut(), can_gc);
     if typed_array_result.is_err() {
@@ -151,7 +151,7 @@ where
         chunk: CustomAutoRooterGuard<TypedArray<T, *mut JSObject>>,
     ) -> RootedTraceableBox<HeapBufferSource<T>> {
         RootedTraceableBox::new(HeapBufferSource::<T>::new(BufferSource::ArrayBufferView(
-            Heap::boxed(unsafe { *chunk.underlying_object() }),
+            Heap::boxed(chunk.underlying_object().get()),
         )))
     }
 
@@ -186,7 +186,7 @@ where
     ) {
         match &self.buffer_source {
             BufferSource::ArrayBufferView(buffer) => {
-                rooted!(in(*cx) let value = ObjectValue(buffer.get()));
+                rooted!(in(cx) let value = ObjectValue(buffer.get()));
                 handle_mut.set(*value);
             },
             BufferSource::ArrayBuffer(_) => {
@@ -202,7 +202,7 @@ where
         match &self.buffer_source {
             BufferSource::ArrayBufferView(buffer) => unsafe {
                 let mut is_shared = false;
-                rooted!(in (*cx) let view_buffer =
+                rooted!(in (cx) let view_buffer =
                          JS_GetArrayBufferViewBuffer(*cx, buffer.handle(), &mut is_shared));
 
                 RootedTraceableBox::new(HeapBufferSource::<ArrayBufferU8>::new(
@@ -224,7 +224,7 @@ where
                 unsafe {
                     // assert buffer is an ArrayBuffer view
                     assert!(JS_IsArrayBufferViewObject(*buffer.handle()));
-                    rooted!(in (*cx) let view_buffer =
+                    rooted!(in (cx) let view_buffer =
                             JS_GetArrayBufferViewBuffer(*cx, buffer.handle(), &mut is_shared));
                     // This buffer is always created unshared
                     debug_assert!(!is_shared);
@@ -254,7 +254,7 @@ where
                 let mut is_shared = false;
                 unsafe {
                     assert!(JS_IsArrayBufferViewObject(*buffer.handle()));
-                    rooted!(in (*cx) let view_buffer =
+                    rooted!(in (cx) let view_buffer =
                             JS_GetArrayBufferViewBuffer(*cx, buffer.handle(), &mut is_shared));
                     debug_assert!(!is_shared);
                     IsDetachedArrayBufferObject(*view_buffer.handle())
@@ -273,7 +273,7 @@ where
                 let mut is_shared = false;
                 unsafe {
                     assert!(JS_IsArrayBufferViewObject(*buffer.handle()));
-                    rooted!(in (*cx) let view_buffer =
+                    rooted!(in (cx) let view_buffer =
                             JS_GetArrayBufferViewBuffer(*cx, buffer.handle(), &mut is_shared));
                     debug_assert!(!is_shared);
                     GetArrayBufferByteLength(*view_buffer.handle())
@@ -442,7 +442,7 @@ where
     pub(crate) fn acquire_data(&self, cx: JSContext) -> Result<Vec<T::Element>, ()> {
         assert!(self.is_initialized());
 
-        typedarray!(in(*cx) let array: TypedArray = match &self.buffer_source {
+        typedarray!(in(cx) let array: TypedArray = match &self.buffer_source {
             BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer)
             => {
                 buffer.get()
@@ -474,7 +474,7 @@ where
         length: usize,
     ) -> Result<(), ()> {
         assert!(self.is_initialized());
-        typedarray!(in(*cx) let array: TypedArray = match &self.buffer_source {
+        typedarray!(in(cx) let array: TypedArray = match &self.buffer_source {
             BufferSource::ArrayBufferView(buffer) |  BufferSource::ArrayBuffer(buffer)
             => {
                 buffer.get()
@@ -500,7 +500,7 @@ where
         length: usize,
     ) -> Result<(), ()> {
         assert!(self.is_initialized());
-        typedarray!(in(*cx) let mut array: TypedArray = match &self.buffer_source {
+        typedarray!(in(cx) let mut array: TypedArray = match &self.buffer_source {
             BufferSource::ArrayBufferView(buffer) | BufferSource::ArrayBuffer(buffer)
             => {
                 buffer.get()
@@ -525,7 +525,7 @@ where
         data: &[T::Element],
         can_gc: CanGc,
     ) -> Result<(), ()> {
-        rooted!(in (*cx) let mut array = ptr::null_mut::<JSObject>());
+        rooted!(in (cx) let mut array = ptr::null_mut::<JSObject>());
         let _ = create_buffer_source::<T>(cx, data, array.handle_mut(), can_gc)?;
 
         match &self.buffer_source {
@@ -668,7 +668,7 @@ where
         // This will throw an exception if O has an [[ArrayBufferDetachKey]] that is not undefined,
         // such as a WebAssembly.Memory’s buffer. [WASM-JS-API-1]
         if !self.detach_buffer(cx) {
-            rooted!(in(*cx) let mut rval = UndefinedValue());
+            rooted!(in(cx) let mut rval = UndefinedValue());
             unsafe {
                 assert!(JS_GetPendingException(*cx, rval.handle_mut().into()));
                 JS_ClearPendingException(*cx)
@@ -984,7 +984,7 @@ impl DataBlock {
         // until `free_func` is called. `range.start..range.end` is inside
         // the valid range of the slice.
         let data_ptr = unsafe { (**raw).as_ptr().add(range.start) };
-        rooted!(in(*cx) let object = unsafe {
+        rooted!(in(cx) let object = unsafe {
             NewExternalArrayBuffer(
                 *cx,
                 range_len,

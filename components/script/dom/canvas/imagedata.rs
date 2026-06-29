@@ -68,7 +68,7 @@ impl ImageData {
             d.resize(len as usize, 0);
 
             let cx = GlobalScope::get_cx();
-            rooted!(in(*cx) let mut js_object = std::ptr::null_mut::<JSObject>());
+            rooted!(in(cx) let mut js_object = std::ptr::null_mut::<JSObject>());
             let _buffer_source =
                 create_buffer_source::<ClampedU8>(cx, &d[..], js_object.handle_mut(), can_gc)
                     .map_err(|_| Error::JSFailed)?;

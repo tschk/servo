@@ -728,7 +728,7 @@ impl HTMLInputElement {
         // Rust's regex is not compatible, we need to use mozjs RegExp.
         let cx = GlobalScope::get_cx();
         let _ac = enter_realm(self);
-        rooted!(in(*cx) let mut pattern = ptr::null_mut::<JSObject>());
+        rooted!(in(cx) let mut pattern = ptr::null_mut::<JSObject>());
 
         if compile_pattern(cx, &pattern_str.str(), pattern.handle_mut(), can_gc) {
             if self.Multiple() && self.does_multiple_apply() {
@@ -2574,7 +2574,7 @@ fn compile_pattern(
 fn check_js_regex_syntax(cx: SafeJSContext, pattern: &str, _can_gc: CanGc) -> bool {
     let pattern: Vec<u16> = pattern.encode_utf16().collect();
     unsafe {
-        rooted!(in(*cx) let mut exception = UndefinedValue());
+        rooted!(in(cx) let mut exception = UndefinedValue());
 
         let valid = CheckRegExpSyntax(
             *cx,
@@ -2635,7 +2635,7 @@ fn matches_js_regex(
         assert!(ObjectIsRegExp(*cx, regex_obj, &mut is_regex));
         assert!(is_regex);
 
-        rooted!(in(*cx) let mut rval = UndefinedValue());
+        rooted!(in(cx) let mut rval = UndefinedValue());
         let mut index = 0;
 
         let ok = ExecuteRegExpNoStatics(

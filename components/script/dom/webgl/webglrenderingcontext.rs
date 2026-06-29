@@ -2295,7 +2295,7 @@ impl WebGLRenderingContextMethods<crate::DomTypeHolder> for WebGLRenderingContex
             constants::COMPRESSED_TEXTURE_FORMATS => unsafe {
                 let format_ids = self.extension_manager.get_tex_compression_ids();
 
-                rooted!(in(*cx) let mut rval = ptr::null_mut::<JSObject>());
+                rooted!(in(cx) let mut rval = ptr::null_mut::<JSObject>());
                 Uint32Array::create(*cx, CreateWith::Slice(&format_ids), rval.handle_mut())
                     .unwrap();
                 return retval.set(ObjectValue(rval.get()));
@@ -2403,7 +2403,7 @@ impl WebGLRenderingContextMethods<crate::DomTypeHolder> for WebGLRenderingContex
             Parameter::Int2(param) => unsafe {
                 let (sender, receiver) = webgl_channel().unwrap();
                 self.send_command(WebGLCommand::GetParameterInt2(param, sender));
-                rooted!(in(*cx) let mut rval = ptr::null_mut::<JSObject>());
+                rooted!(in(cx) let mut rval = ptr::null_mut::<JSObject>());
                 Int32Array::create(
                     *cx,
                     CreateWith::Slice(&receiver.recv().unwrap()),
@@ -2415,7 +2415,7 @@ impl WebGLRenderingContextMethods<crate::DomTypeHolder> for WebGLRenderingContex
             Parameter::Int4(param) => unsafe {
                 let (sender, receiver) = webgl_channel().unwrap();
                 self.send_command(WebGLCommand::GetParameterInt4(param, sender));
-                rooted!(in(*cx) let mut rval = ptr::null_mut::<JSObject>());
+                rooted!(in(cx) let mut rval = ptr::null_mut::<JSObject>());
                 Int32Array::create(
                     *cx,
                     CreateWith::Slice(&receiver.recv().unwrap()),
@@ -2432,7 +2432,7 @@ impl WebGLRenderingContextMethods<crate::DomTypeHolder> for WebGLRenderingContex
             Parameter::Float2(param) => unsafe {
                 let (sender, receiver) = webgl_channel().unwrap();
                 self.send_command(WebGLCommand::GetParameterFloat2(param, sender));
-                rooted!(in(*cx) let mut rval = ptr::null_mut::<JSObject>());
+                rooted!(in(cx) let mut rval = ptr::null_mut::<JSObject>());
                 Float32Array::create(
                     *cx,
                     CreateWith::Slice(&receiver.recv().unwrap()),
@@ -2444,7 +2444,7 @@ impl WebGLRenderingContextMethods<crate::DomTypeHolder> for WebGLRenderingContex
             Parameter::Float4(param) => unsafe {
                 let (sender, receiver) = webgl_channel().unwrap();
                 self.send_command(WebGLCommand::GetParameterFloat4(param, sender));
-                rooted!(in(*cx) let mut rval = ptr::null_mut::<JSObject>());
+                rooted!(in(cx) let mut rval = ptr::null_mut::<JSObject>());
                 Float32Array::create(
                     *cx,
                     CreateWith::Slice(&receiver.recv().unwrap()),
@@ -3673,7 +3673,7 @@ impl WebGLRenderingContextMethods<crate::DomTypeHolder> for WebGLRenderingContex
                     VertexAttrib::Float(x, y, z, w) => {
                         let value = [x, y, z, w];
                         unsafe {
-                            rooted!(in(*cx) let mut result = ptr::null_mut::<JSObject>());
+                            rooted!(in(cx) let mut result = ptr::null_mut::<JSObject>());
                             Float32Array::create(
                                 *cx,
                                 CreateWith::Slice(&value),
@@ -3686,7 +3686,7 @@ impl WebGLRenderingContextMethods<crate::DomTypeHolder> for WebGLRenderingContex
                     VertexAttrib::Int(x, y, z, w) => {
                         let value = [x, y, z, w];
                         unsafe {
-                            rooted!(in(*cx) let mut result = ptr::null_mut::<JSObject>());
+                            rooted!(in(cx) let mut result = ptr::null_mut::<JSObject>());
                             Int32Array::create(*cx, CreateWith::Slice(&value), result.handle_mut())
                                 .unwrap();
                             return retval.set(ObjectValue(result.get()));
@@ -3695,7 +3695,7 @@ impl WebGLRenderingContextMethods<crate::DomTypeHolder> for WebGLRenderingContex
                     VertexAttrib::Uint(x, y, z, w) => {
                         let value = [x, y, z, w];
                         unsafe {
-                            rooted!(in(*cx) let mut result = ptr::null_mut::<JSObject>());
+                            rooted!(in(cx) let mut result = ptr::null_mut::<JSObject>());
                             Uint32Array::create(
                                 *cx,
                                 CreateWith::Slice(&value),

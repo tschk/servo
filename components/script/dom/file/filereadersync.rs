@@ -113,7 +113,7 @@ impl FileReaderSyncMethods<crate::DomTypeHolder> for FileReaderSync {
         let blob_contents = FileReaderSync::get_blob_bytes(blob)?;
 
         // step 2
-        rooted!(in(*cx) let mut array_buffer = ptr::null_mut::<JSObject>());
+        rooted!(in(cx) let mut array_buffer = ptr::null_mut::<JSObject>());
 
         create_buffer_source::<ArrayBufferU8>(cx, &blob_contents, array_buffer.handle_mut(), can_gc)
             .map_err(|_| Error::JSFailed)

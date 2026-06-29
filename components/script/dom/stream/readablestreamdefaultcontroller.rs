@@ -155,7 +155,7 @@ impl EnqueuedValue {
     fn to_jsval(&self, cx: SafeJSContext, rval: MutableHandleValue, can_gc: CanGc) {
         match self {
             EnqueuedValue::Native(chunk) => {
-                rooted!(in(*cx) let mut array_buffer_ptr = ptr::null_mut::<JSObject>());
+                rooted!(in(cx) let mut array_buffer_ptr = ptr::null_mut::<JSObject>());
                 create_buffer_source::<Uint8>(cx, chunk, array_buffer_ptr.handle_mut(), can_gc)
                     .expect("failed to create buffer source for native chunk.");
                 array_buffer_ptr.safe_to_jsval(cx, rval, can_gc);

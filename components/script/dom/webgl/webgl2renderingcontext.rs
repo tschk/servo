@@ -4643,7 +4643,7 @@ impl WebGL2RenderingContextMethods<crate::DomTypeHolder> for WebGL2RenderingCont
             },
             constants::UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES => unsafe {
                 let values = values.iter().map(|&v| v as u32).collect::<Vec<_>>();
-                rooted!(in(*cx) let mut result = ptr::null_mut::<JSObject>());
+                rooted!(in(cx) let mut result = ptr::null_mut::<JSObject>());
                 Uint32Array::create(*cx, CreateWith::Slice(&values), result.handle_mut()).unwrap();
                 retval.set(ObjectValue(result.get()))
             },
@@ -4874,7 +4874,7 @@ impl WebGL2RenderingContextMethods<crate::DomTypeHolder> for WebGL2RenderingCont
                         sender,
                     ));
 
-                rooted!(in(*cx) let mut rval = ptr::null_mut::<JSObject>());
+                rooted!(in(cx) let mut rval = ptr::null_mut::<JSObject>());
                 Int32Array::create(
                     *cx,
                     CreateWith::Slice(&receiver.recv().unwrap()),

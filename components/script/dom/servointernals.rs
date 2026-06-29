@@ -40,7 +40,7 @@ fn pref_to_jsval(pref: &PrefValue, cx: JSContext, rval: MutableHandleValue, can_
         PrefValue::Array(arr) => {
             rooted_vec!(let mut js_arr);
             for item in arr {
-                rooted!(in(*cx) let mut js_val = UndefinedValue());
+                rooted!(in(cx) let mut js_val = UndefinedValue());
                 pref_to_jsval(item, cx, js_val.handle_mut(), can_gc);
                 js_arr.push(Heap::boxed(js_val.get()));
             }

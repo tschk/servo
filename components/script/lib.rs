@@ -87,3 +87,6 @@ pub(crate) use crate::dom::bindings::codegen::DomTypeHolder::DomTypeHolder;
 // it is useful that they are accessible at the root of the crate.
 pub(crate) use crate::dom::bindings::inheritance::HasParent;
 pub(crate) use crate::dom::bindings::trace::{CustomTraceable, JSTraceable};
+pub(crate) use script_bindings::reflector::{
+    AssociatedMemory, DomObject, MutDomObject, Reflector,
+};

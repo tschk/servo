@@ -102,7 +102,7 @@ impl WritableStreamDefaultWriter {
 
         // Otherwise, if state is "erroring",
         if stream.is_erroring() {
-            rooted!(in(*cx) let mut error = UndefinedValue());
+            rooted!(in(cx) let mut error = UndefinedValue());
             stream.get_stored_error(error.handle_mut());
 
             // Set writer.[[readyPromise]] to a promise rejected with stream.[[storedError]].
@@ -134,7 +134,7 @@ impl WritableStreamDefaultWriter {
         assert!(stream.is_errored());
 
         // Let storedError be stream.[[storedError]].
-        rooted!(in(*cx) let mut error = UndefinedValue());
+        rooted!(in(cx) let mut error = UndefinedValue());
         stream.get_stored_error(error.handle_mut());
 
         // Set writer.[[readyPromise]] to a promise rejected with stream.[[storedError]].
@@ -362,7 +362,7 @@ impl WritableStreamDefaultWriter {
         let released_error = Error::Type(c"Writer has been released".to_owned());
 
         // Root the js val of the error.
-        rooted!(in(*cx) let mut error = UndefinedValue());
+        rooted!(in(cx) let mut error = UndefinedValue());
         released_error.to_jsval(cx, global, error.handle_mut(), can_gc);
 
         // Perform ! WritableStreamDefaultWriterEnsureReadyPromiseRejected(writer, releasedError).

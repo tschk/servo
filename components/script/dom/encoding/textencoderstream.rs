@@ -74,7 +74,7 @@ fn jsval_to_primitive(
     assert!(chunk.is_object());
 
     // Step 10. Let primValue be ? ToPrimitive(argument, string).
-    rooted!(in(*cx) let obj = chunk.to_object());
+    rooted!(in(cx) let obj = chunk.to_object());
     let is_success =
         unsafe { ToPrimitive(*cx, obj.handle().into(), JSType::JSTYPE_STRING, rval.into()) };
     log::debug!("ToPrimitive is_success={:?}", is_success);

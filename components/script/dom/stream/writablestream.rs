@@ -519,7 +519,7 @@ impl WritableStream {
             self.stored_error.set(UndefinedValue());
 
             // If stream.[[pendingAbortRequest]] is not undefined,
-            rooted!(in(*cx) let pending_abort_request = self.pending_abort_request.borrow_mut().take());
+            rooted!(in(cx) let pending_abort_request = self.pending_abort_request.borrow_mut().take());
             if let Some(pending_abort_request) = &*pending_abort_request {
                 // Resolve stream.[[pendingAbortRequest]]'s promise with undefined.
                 pending_abort_request.promise.resolve_native(&(), can_gc);

@@ -4347,7 +4347,7 @@ impl ElementMethods<crate::DomTypeHolder> for Element {
 
         // > The assignedSlot getter steps are to return the result of
         // > find a slot given this and with the open flag set.
-        rooted!(in(*cx) let slottable = Slottable(Dom::from_ref(self.upcast::<Node>())));
+        rooted!(in(cx) let slottable = Slottable(Dom::from_ref(self.upcast::<Node>())));
         slottable.find_a_slot(true)
     }
 

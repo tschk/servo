@@ -230,7 +230,7 @@ impl TestBindingMethods<crate::DomTypeHolder> for TestBinding {
     fn ArrayAttribute(&self, cx: SafeJSContext) -> RootedTraceableBox<HeapUint8ClampedArray> {
         let data: [u8; 16] = [0; 16];
 
-        rooted!(in (*cx) let mut array = ptr::null_mut::<JSObject>());
+        rooted!(in (cx) let mut array = ptr::null_mut::<JSObject>());
         create_buffer_source(cx, &data, array.handle_mut(), CanGc::deprecated_note())
             .expect("Creating ClampedU8 array should never fail")
     }
@@ -239,7 +239,7 @@ impl TestBindingMethods<crate::DomTypeHolder> for TestBinding {
     #[expect(unsafe_code)]
     fn ObjectAttribute(&self, cx: SafeJSContext) -> NonNull<JSObject> {
         unsafe {
-            rooted!(in(*cx) let obj = JS_NewPlainObject(*cx));
+            rooted!(in(cx) let obj = JS_NewPlainObject(*cx));
             NonNull::new(obj.get()).expect("got a null pointer")
         }
     }

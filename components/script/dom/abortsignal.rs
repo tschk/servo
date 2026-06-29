@@ -360,7 +360,7 @@ impl AbortSignalMethods<crate::DomTypeHolder> for AbortSignal {
         if !abort_reason.is_undefined() {
             signal.abort_reason.set(abort_reason);
         } else {
-            rooted!(in(*cx) let mut rooted_error = UndefinedValue());
+            rooted!(in(cx) let mut rooted_error = UndefinedValue());
             Error::Abort(None).to_jsval(cx, global, rooted_error.handle_mut(), can_gc);
             signal.abort_reason.set(rooted_error.get())
         }

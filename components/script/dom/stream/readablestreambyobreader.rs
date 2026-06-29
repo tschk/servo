@@ -256,7 +256,7 @@ impl ReadableStreamBYOBReader {
             .expect("Generic release failed");
         // Let e be a new TypeError exception.
         let cx = GlobalScope::get_cx();
-        rooted!(in(*cx) let mut error = UndefinedValue());
+        rooted!(in(cx) let mut error = UndefinedValue());
         Error::Type(c"Reader is released".to_owned()).to_jsval(
             cx,
             &self.global(),

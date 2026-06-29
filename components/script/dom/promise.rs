@@ -107,7 +107,7 @@ impl Promise {
 
     pub(crate) fn new_in_current_realm(_comp: InRealm, can_gc: CanGc) -> Rc<Promise> {
         let cx = GlobalScope::get_cx();
-        rooted!(in(*cx) let mut obj = ptr::null_mut::<JSObject>());
+        rooted!(in(cx) let mut obj = ptr::null_mut::<JSObject>());
         Promise::create_js_promise(cx, obj.handle_mut(), can_gc);
         Promise::new_with_js_promise(obj.handle(), cx)
     }
@@ -162,7 +162,7 @@ impl Promise {
                 ptr::null(),
             );
             assert!(!do_nothing_func.is_null());
-            rooted!(in(*cx) let do_nothing_obj = JS_GetFunctionObject(do_nothing_func));
+            rooted!(in(cx) let do_nothing_obj = JS_GetFunctionObject(do_nothing_func));
             assert!(!do_nothing_obj.is_null());
             obj.set(NewPromiseObject(*cx, do_nothing_obj.handle()));
             assert!(!obj.is_null());
@@ -183,10 +183,10 @@ impl Promise {
         can_gc: CanGc,
     ) -> Rc<Promise> {
         let _ac = JSAutoRealm::new(*cx, global.reflector().get_jsobject().get());
-        rooted!(in(*cx) let mut rval = UndefinedValue());
+        rooted!(in(cx) let mut rval = UndefinedValue());
         value.safe_to_jsval(cx, rval.handle_mut(), can_gc);
         unsafe {
-            rooted!(in(*cx) let p = CallOriginalPromiseResolve(*cx, rval.handle()));
+            rooted!(in(cx) let p = CallOriginalPromiseResolve(*cx, rval.handle()));
             assert!(!p.handle().is_null());
             Promise::new_with_js_promise(p.handle(), cx)
         }
@@ -200,10 +200,10 @@ impl Promise {
         can_gc: CanGc,
     ) -> Rc<Promise> {
         let _ac = JSAutoRealm::new(*cx, global.reflector().get_jsobject().get());
-        rooted!(in(*cx) let mut rval = UndefinedValue());
+        rooted!(in(cx) let mut rval = UndefinedValue());
         value.safe_to_jsval(cx, rval.handle_mut(), can_gc);
         unsafe {
-            rooted!(in(*cx) let p = CallOriginalPromiseReject(*cx, rval.handle()));
+            rooted!(in(cx) let p = CallOriginalPromiseReject(*cx, rval.handle()));
             assert!(!p.handle().is_null());
             Promise::new_with_js_promise(p.handle(), cx)
         }
@@ -215,7 +215,7 @@ impl Promise {
     {
         let cx = GlobalScope::get_cx();
         let _ac = enter_realm(self);
-        rooted!(in(*cx) let mut v = UndefinedValue());
+        rooted!(in(cx) let mut v = UndefinedValue());
         val.safe_to_jsval(cx, v.handle_mut(), can_gc);
         self.resolve(cx, v.handle(), can_gc);
     }
@@ -246,7 +246,7 @@ impl Promise {
     {
         let cx = GlobalScope::get_cx();
         let _ac = enter_realm(self);
-        rooted!(in(*cx) let mut v = UndefinedValue());
+        rooted!(in(cx) let mut v = UndefinedValue());
         val.safe_to_jsval(cx, v.handle_mut(), can_gc);
         self.reject(cx, v.handle(), can_gc);
     }
@@ -265,7 +265,7 @@ impl Promise {
     pub(crate) fn reject_error(&self, error: Error, can_gc: CanGc) {
         let cx = GlobalScope::get_cx();
         let _ac = enter_realm(self);
-        rooted!(in(*cx) let mut v = UndefinedValue());
+        rooted!(in(cx) let mut v = UndefinedValue());
         error.to_jsval(cx, &self.global(), v.handle_mut(), can_gc);
         self.reject(cx, v.handle(), can_gc);
     }

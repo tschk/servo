@@ -87,7 +87,7 @@ impl XRInputSource {
 
         let _ac = enter_realm(window);
         let cx = GlobalScope::get_cx();
-        rooted!(in(*cx) let mut profiles = UndefinedValue());
+        rooted!(in(cx) let mut profiles = UndefinedValue());
         source
             .info
             .profiles

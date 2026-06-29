@@ -297,7 +297,7 @@ impl HTMLSlotElement {
                         NodeTypeId::CharacterData(CharacterDataTypeId::Text(_))
                 );
                 if is_slottable {
-                    rooted!(in(*cx) let slottable = Slottable(Dom::from_ref(&*child)));
+                    rooted!(in(cx) let slottable = Slottable(Dom::from_ref(&*child)));
                     // Step 6.1 Let foundSlot be the result of finding a slot given slottable.
                     let found_slot = slottable.find_a_slot(false);
 

@@ -47,7 +47,7 @@ impl DebuggerAddDebuggeeEvent {
         // Convert the debuggee global’s reflector to a Value, wrapping it from its originating realm (debuggee realm)
         // into the active realm (debugger realm) so that it can be passed across compartments.
         let cx = GlobalScope::get_cx();
-        rooted!(in(*cx) let mut wrapped_global: Value);
+        rooted!(in(cx) let mut wrapped_global: Value);
         global
             .reflector()
             .safe_to_jsval(cx, wrapped_global.handle_mut(), can_gc);

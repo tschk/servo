@@ -829,14 +829,14 @@ impl DOMMatrixReadOnlyMethods<crate::DomTypeHolder> for DOMMatrixReadOnly {
             .iter()
             .map(|&x| x as f32)
             .collect();
-        rooted!(in (*cx) let mut array = ptr::null_mut::<JSObject>());
+        rooted!(in (cx) let mut array = ptr::null_mut::<JSObject>());
         create_buffer_source(cx, &vec, array.handle_mut(), can_gc)
             .expect("Converting matrix to float32 array should never fail")
     }
 
     /// <https://drafts.fxtf.org/geometry-1/#dom-dommatrixreadonly-tofloat64array>
     fn ToFloat64Array(&self, cx: JSContext, can_gc: CanGc) -> RootedTraceableBox<HeapFloat64Array> {
-        rooted!(in (*cx) let mut array = ptr::null_mut::<JSObject>());
+        rooted!(in (cx) let mut array = ptr::null_mut::<JSObject>());
         create_buffer_source(
             cx,
             &self.matrix.borrow().to_array(),
@@ -877,7 +877,7 @@ impl DOMMatrixReadOnlyMethods<crate::DomTypeHolder> for DOMMatrixReadOnly {
             let value = jsval::DoubleValue(f);
 
             unsafe {
-                rooted!(in(*cx) let mut rooted_value = value);
+                rooted!(in(cx) let mut rooted_value = value);
                 let serialization = std::ptr::NonNull::new(ToString(*cx, rooted_value.handle()))
                     .expect("Pointer cannot be null");
                 jsstr_to_string(*cx, serialization)

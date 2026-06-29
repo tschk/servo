@@ -182,7 +182,7 @@ impl XRViewerPose {
         );
 
         let cx = GlobalScope::get_cx();
-        rooted!(in(*cx) let mut jsval = UndefinedValue());
+        rooted!(in(cx) let mut jsval = UndefinedValue());
         views.safe_to_jsval(cx, jsval.handle_mut(), can_gc);
         pose.views.set(jsval.get());
 

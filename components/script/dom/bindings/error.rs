@@ -67,7 +67,7 @@ pub(crate) fn throw_dom_exception(
 ) {
     #[cfg(feature = "js_backtrace")]
     unsafe {
-        capture_stack!(in(*cx) let stack);
+        capture_stack!(in(cx) let stack);
         let js_stack = stack.and_then(|stack| stack.as_string(None, JSStackFormat::Default));
         let rust_stack = Backtrace::new();
         LAST_EXCEPTION_BACKTRACE.with(|backtrace| {
@@ -78,7 +78,7 @@ pub(crate) fn throw_dom_exception(
     match create_dom_exception(global, result, can_gc) {
         Ok(exception) => unsafe {
             assert!(!JS_IsExceptionPending(*cx));
-            rooted!(in(*cx) let mut thrown = UndefinedValue());
+            rooted!(in(cx) let mut thrown = UndefinedValue());
             exception.safe_to_jsval(cx, thrown.handle_mut(), can_gc);
             JS_SetPendingException(*cx, thrown.handle(), ExceptionStackBehavior::Capture);
         },
@@ -323,7 +323,7 @@ impl ErrorInfo {
     /// <https://html.spec.whatwg.org/multipage/#extract-error>
     pub(crate) fn from_value(value: HandleValue, cx: SafeJSContext, can_gc: CanGc) -> ErrorInfo {
         if value.is_object() {
-            rooted!(in(*cx) let object = value.to_object());
+            rooted!(in(cx) let object = value.to_object());
             if let Some(info) = ErrorInfo::from_object(object.handle(), cx) {
                 return info;
             }

@@ -2982,7 +2982,7 @@ pub(crate) struct SubtleRsaHashedKeyAlgorithm {
 
 impl SafeToJSValConvertible for SubtleRsaHashedKeyAlgorithm {
     fn safe_to_jsval(&self, cx: JSContext, rval: MutableHandleValue, can_gc: CanGc) {
-        rooted!(in(*cx) let mut js_object = ptr::null_mut::<JSObject>());
+        rooted!(in(cx) let mut js_object = ptr::null_mut::<JSObject>());
         let public_exponent =
             create_buffer_source(cx, &self.public_exponent, js_object.handle_mut(), can_gc)
                 .expect("Fail to convert publicExponent to Uint8Array");
@@ -3934,7 +3934,7 @@ impl SafeToJSValConvertible for SubtleEncapsulatedKey {
     fn safe_to_jsval(&self, cx: JSContext, rval: MutableHandleValue, can_gc: CanGc) {
         let shared_key = self.shared_key.as_ref().map(|shared_key| shared_key.root());
         let ciphertext = self.ciphertext.as_ref().map(|data| {
-            rooted!(in(*cx) let mut ciphertext_ptr = ptr::null_mut::<JSObject>());
+            rooted!(in(cx) let mut ciphertext_ptr = ptr::null_mut::<JSObject>());
             create_buffer_source::<ArrayBufferU8>(cx, data, ciphertext_ptr.handle_mut(), can_gc)
                 .expect("Failed to convert ciphertext to ArrayBufferU8")
         });
@@ -3958,12 +3958,12 @@ struct SubtleEncapsulatedBits {
 impl SafeToJSValConvertible for SubtleEncapsulatedBits {
     fn safe_to_jsval(&self, cx: JSContext, rval: MutableHandleValue, can_gc: CanGc) {
         let shared_key = self.shared_key.as_ref().map(|data| {
-            rooted!(in(*cx) let mut shared_key_ptr = ptr::null_mut::<JSObject>());
+            rooted!(in(cx) let mut shared_key_ptr = ptr::null_mut::<JSObject>());
             create_buffer_source::<ArrayBufferU8>(cx, data, shared_key_ptr.handle_mut(), can_gc)
                 .expect("Failed to convert shared key to ArrayBufferU8")
         });
         let ciphertext = self.ciphertext.as_ref().map(|data| {
-            rooted!(in(*cx) let mut ciphertext_ptr = ptr::null_mut::<JSObject>());
+            rooted!(in(cx) let mut ciphertext_ptr = ptr::null_mut::<JSObject>());
             create_buffer_source::<ArrayBufferU8>(cx, data, ciphertext_ptr.handle_mut(), can_gc)
                 .expect("Failed to convert ciphertext to ArrayBufferU8")
         });

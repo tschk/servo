@@ -20,7 +20,7 @@ use crate::dom::bindings::codegen::Bindings::ClipboardBinding::{
     ClipboardItemMethods, ClipboardItemOptions, PresentationStyle,
 };
 use crate::dom::bindings::conversions::{
-    ConversionResult, SafeFromJSValConvertible, StringificationBehavior,
+    ConversionResult, FromJSValConvertible, StringificationBehavior,
 };
 use crate::dom::bindings::error::{Error, Fallible};
 use crate::dom::bindings::frozenarray::CachedFrozenArray;
@@ -31,7 +31,6 @@ use crate::dom::blob::Blob;
 use crate::dom::promise::Promise;
 use crate::dom::promisenativehandler::{Callback, PromiseNativeHandler};
 use crate::dom::window::Window;
-use crate::script_runtime::CanGc;
 
 /// The fulfillment handler for the reacting to representationDataPromise part of
 /// <https://w3c.github.io/clipboard-apis/#dom-clipboarditem-gettype>.
@@ -48,15 +47,11 @@ impl Callback for RepresentationDataPromiseFulfillmentHandler {
         // 1. If v is a DOMString, then follow the below steps:
         if v.get().is_string() {
             // 1.1 Let dataAsBytes be the result of UTF-8 encoding v.
-            let data_as_bytes = match DOMString::safe_from_jsval(
-                cx.into(),
-                v,
-                StringificationBehavior::Default,
-                CanGc::from_cx(cx),
-            ) {
-                Ok(ConversionResult::Success(s)) => s.as_bytes().to_owned(),
-                _ => return,
-            };
+            let data_as_bytes =
+                match DOMString::safe_from_jsval(cx, v, StringificationBehavior::Default) {
+                    Ok(ConversionResult::Success(s)) => s.as_bytes().to_owned(),
+                    _ => return,
+                };
 
             // 1.2 Let blobData be a Blob created using dataAsBytes with its type set to mimeType, serialized.
             let blob_data = Blob::new(
@@ -66,14 +61,14 @@ impl Callback for RepresentationDataPromiseFulfillmentHandler {
             );
 
             // 1.3 Resolve p with blobData.
-            self.promise.resolve_native_with_cx(cx, &blob_data);
+            self.promise.resolve_native(cx, &blob_data);
         }
         // 2. If v is a Blob, then follow the below steps:
-        else if DomRoot::<Blob>::safe_from_jsval(cx.into(), v, (), CanGc::from_cx(cx))
+        else if DomRoot::<Blob>::safe_from_jsval(cx, v, ())
             .is_ok_and(|result| result.get_success_value().is_some())
         {
             // 2.1 Resolve p with v.
-            self.promise.resolve(cx.into(), v, CanGc::from_cx(cx));
+            self.promise.resolve(cx, v);
         }
     }
 }
@@ -90,7 +85,7 @@ impl Callback for RepresentationDataPromiseRejectionHandler {
     /// Substeps of 8.1.2.2 If representationDataPromise was rejected, then:
     fn callback(&self, cx: &mut CurrentRealm, _v: SafeHandleValue) {
         // 1. Reject p with "NotFoundError" DOMException in realm.
-        self.promise.reject_error_with_cx(cx, Error::NotFound(None));
+        self.promise.reject_error(cx, Error::NotFound(None));
     }
 }
 
@@ -225,6 +220,7 @@ impl ClipboardItemMethods<crate::DomTypeHolder> for ClipboardItem {
     /// <https://w3c.github.io/clipboard-apis/#dom-clipboarditem-types>
     fn Types(&self, cx: &mut JSContext, retval: MutableHandleValue) {
         self.frozen_types.get_or_init(
+            cx,
             || {
                 // Step 5 Let types be a list of DOMString.
                 let mut types = Vec::new();
@@ -248,9 +244,7 @@ impl ClipboardItemMethods<crate::DomTypeHolder> for ClipboardItem {
                     });
                 types
             },
-            cx.into(),
             retval,
-            CanGc::from_cx(cx),
         );
     }
 
@@ -297,10 +291,10 @@ impl ClipboardItemMethods<crate::DomTypeHolder> for ClipboardItem {
                     Box::new(RepresentationDataPromiseRejectionHandler { promise: p.clone() });
 
                 let handler = PromiseNativeHandler::new(
+                    realm,
                     &global,
                     Some(fulfillment_handler),
                     Some(rejection_handler),
-                    CanGc::from_cx(realm),
                 );
                 representation_data_promise.append_native_handler(realm, &handler);
 
@@ -310,7 +304,7 @@ impl ClipboardItemMethods<crate::DomTypeHolder> for ClipboardItem {
         }
 
         // Step 9 Reject p with "NotFoundError" DOMException in realm.
-        p.reject_error(Error::NotFound(None), CanGc::from_cx(realm));
+        p.reject_error(realm, Error::NotFound(None));
 
         // Step 10 Return p.
         Ok(p)

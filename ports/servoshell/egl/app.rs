@@ -15,8 +15,8 @@ use servo::{
     KeyboardEvent, LoadStatus, MediaSessionActionType, MediaSessionEvent, MouseButton,
     MouseButtonAction, MouseButtonEvent, MouseMoveEvent, Opts, Preferences, RefreshDriver,
     RenderingContext, ScreenGeometry, Scroll, Servo, ServoBuilder, SimpleDialog, TouchEvent,
-    TouchEventType, TouchId, UserContentManager, WebView, WebViewId, WindowRenderingContext,
-    convert_rect_to_css_pixel,
+    TouchEventType, TouchId, TouchPointerType, UserContentManager, WebView, WebViewId,
+    WindowRenderingContext, convert_rect_to_css_pixel,
 };
 use url::Url;
 
@@ -77,8 +77,6 @@ impl PlatformWindow for EmbeddedPlatformWindow {
     fn get_fullscreen(&self) -> bool {
         false
     }
-
-    fn rebuild_user_interface(&self, _: &RunningAppState, _: &ServoShellWindow) {}
 
     #[cfg_attr(
         not(all(feature = "tracing", feature = "tracing-hitrace")),
@@ -180,7 +178,7 @@ impl PlatformWindow for EmbeddedPlatformWindow {
         )
     }
 
-    fn show_embedder_control(&self, _: WebViewId, embedder_control: EmbedderControl) {
+    fn show_embedder_control(&self, webview_id: WebViewId, embedder_control: EmbedderControl) {
         let control_id = embedder_control.id();
         match embedder_control {
             EmbedderControl::InputMethod(input_method_control)
@@ -188,6 +186,9 @@ impl PlatformWindow for EmbeddedPlatformWindow {
             {
                 self.visible_input_methods.borrow_mut().push(control_id);
                 self.host.on_ime_show(input_method_control);
+            },
+            EmbedderControl::SelectElement(prompt) => {
+                self.host.on_show_select_element(webview_id, prompt);
             },
             EmbedderControl::SimpleDialog(SimpleDialog::Alert(alert_dialog)) => {
                 self.host.show_alert(alert_dialog.message().into());
@@ -403,7 +404,10 @@ impl App {
 
     /// The active webview will be immediately valid via `active_or_newest_webview()`
     pub(crate) fn activate_webview(&self, id: WebViewId) {
-        self.state.window_for_webview_id(id).activate_webview(id);
+        let Some(webview) = self.state.webview_by_id(id) else {
+            return;
+        };
+        self.state.window_for_webview(&webview).activate_webview(id);
     }
 
     /// This is the Servo heartbeat. This needs to be called
@@ -484,6 +488,7 @@ impl App {
                 TouchEventType::Down,
                 TouchId(pointer_id),
                 DevicePoint::new(x, y).into(),
+                TouchPointerType::Touch,
             )));
             self.spin_event_loop();
         }
@@ -496,6 +501,7 @@ impl App {
                 TouchEventType::Move,
                 TouchId(pointer_id),
                 DevicePoint::new(x, y).into(),
+                TouchPointerType::Touch,
             )));
             self.spin_event_loop();
         }
@@ -508,6 +514,7 @@ impl App {
                 TouchEventType::Up,
                 TouchId(pointer_id),
                 DevicePoint::new(x, y).into(),
+                TouchPointerType::Touch,
             )));
             self.spin_event_loop();
         }
@@ -520,6 +527,7 @@ impl App {
                 TouchEventType::Cancel,
                 TouchId(pointer_id),
                 DevicePoint::new(x, y).into(),
+                TouchPointerType::Touch,
             )));
             self.spin_event_loop();
         }

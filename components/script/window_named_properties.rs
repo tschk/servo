@@ -22,9 +22,9 @@ use js::rust::{
     Handle as RustHandle, HandleObject as RustHandleObject, IntoHandle,
     MutableHandle as RustMutableHandle, MutableHandleObject as RustMutableHandleObject,
 };
+use script_bindings::proxyhandler::set_property_descriptor;
 
 use crate::dom::bindings::codegen::Bindings::WindowBinding::WindowMethods;
-use crate::dom::bindings::proxyhandler::set_property_descriptor;
 use crate::dom::bindings::root::Root;
 use crate::dom::bindings::utils::has_property_on_prototype;
 use crate::dom::globalscope::GlobalScope;
@@ -106,14 +106,12 @@ unsafe extern "C" fn get_own_property_descriptor(
     }
 
     let mut found = false;
-    let lookup_succeeded = unsafe {
-        has_property_on_prototype(
-            cx.raw_cx(),
-            RustHandle::from_raw(proxy),
-            RustHandle::from_raw(id),
-            &mut found,
-        )
-    };
+    let lookup_succeeded = has_property_on_prototype(
+        &mut cx,
+        unsafe { RustHandle::from_raw(proxy) },
+        unsafe { RustHandle::from_raw(id) },
+        &mut found,
+    );
     if !lookup_succeeded {
         return false;
     }
@@ -122,7 +120,7 @@ unsafe extern "C" fn get_own_property_descriptor(
     }
 
     let s = if id.is_string() {
-        unsafe { jsstr_to_string(cx.raw_cx_no_gc(), NonNull::new(id.to_string()).unwrap()) }
+        unsafe { jsstr_to_string(&cx, NonNull::new(id.to_string()).unwrap()) }
     } else if id.is_int() {
         // If the property key is an integer index, convert it to a String too.
         // For indexed access on the window object, which may shadow this, see

@@ -169,6 +169,15 @@
       {}
      ]
     ],
+    "webgl": {
+     "weak-reference-crash.html": [
+      "e557c86a1ad014bd96b8370ab5306dd2342d0cdb",
+      [
+       null,
+       {}
+      ]
+     ]
+    },
     "window-resizeTo-not-permitted-crash.html": [
      "7b6a67ff81436a91048bdb627f303f7fab2762f7",
      [
@@ -362,6 +371,19 @@
       [
        [
         "/_mozilla/appearance/text-advance-less-than-ink-clipping-ref.html",
+        "=="
+       ]
+      ],
+      {}
+     ]
+    ],
+    "text-decoration-continuity.html": [
+     "6178982a1b35c2d6e745ca02dcf73d58fd862a5c",
+     [
+      null,
+      [
+       [
+        "/_mozilla/appearance/text-decoration-continuity-ref.html",
         "=="
        ]
       ],
@@ -8438,6 +8460,10 @@
      "af9ec609b175040a66756fb6ce00d81a2e5707ec",
      []
     ],
+    "text-decoration-continuity-ref.html": [
+     "4aa04e8e28e7170955ac5b2844db3e5f73d865d2",
+     []
+    ],
     "textarea-caret-following-linebreak-blank-line-ref.html": [
      "5e70ba743b12012fe3b1116414107cf50ef6a8ab",
      []
@@ -12980,7 +13006,7 @@
      ]
     ],
     "css-property-listing.html": [
-     "40a75f2e47db2948b6cc0f66b5aa5f54ed73a72d",
+     "fbf14639715e1537edb464f8a148369ee37e4a58",
      [
       null,
       {}
@@ -13144,6 +13170,13 @@
    "incremental-layout": {
     "basic-fragment-tree-layout.html": [
      "8ca5549a672cbc8356307a0c50a33ac0b0542693",
+     [
+      null,
+      {}
+     ]
+    ],
+    "box-tree-layout-under-layout-root.html": [
+     "e834b71e65d1630ebbb3b89ec685064407525520",
      [
       null,
       {}
@@ -14419,7 +14452,7 @@
      ]
     ],
     "interfaces.https.html": [
-     "cdfa3234b0ffe917c616d890a95a69322224a8c5",
+     "d162d1ce0cf0a893f9ba6fd230ee7b518dfcf6f8",
      [
       null,
       {}
@@ -14656,7 +14689,7 @@
      ]
     ],
     "ns.any.js": [
-     "05087872b02abdeeb48c21ee9ec037b3a1483c03",
+     "8fa275c14fdfc9e162285477aaa9f97849e7a363",
      [
       "mozilla/ns.any.html",
       {

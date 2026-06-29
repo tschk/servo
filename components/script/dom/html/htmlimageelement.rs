@@ -74,16 +74,15 @@ use crate::dom::html::htmlsourceelement::HTMLSourceElement;
 use crate::dom::iterators::ShadowIncluding;
 use crate::dom::medialist::MediaList;
 use crate::dom::mouseevent::MouseEvent;
+use crate::dom::node::virtualmethods::VirtualMethods;
 use crate::dom::node::{BindContext, MoveContext, Node, NodeDamage, NodeTraits, UnbindContext};
 use crate::dom::performance::performanceresourcetiming::InitiatorType;
 use crate::dom::promise::Promise;
-use crate::dom::virtualmethods::VirtualMethods;
 use crate::dom::window::Window;
 use crate::fetch::{RequestWithGlobalScope, create_a_potential_cors_request};
 use crate::microtask::{Microtask, MicrotaskRunnable};
 use crate::network_listener::{self, FetchResponseListener, ResourceTimingListener};
 use crate::realms::enter_auto_realm;
-use crate::script_runtime::CanGc;
 use crate::script_thread::ScriptThread;
 
 /// Supported image MIME types as defined by
@@ -325,13 +324,18 @@ impl FetchResponseListener for ImageContext {
         network_listener::submit_timing(cx, &self, &response, &timing);
     }
 
-    fn process_csp_violations(&mut self, _request_id: RequestId, violations: Vec<Violation>) {
+    fn process_csp_violations(
+        &mut self,
+        cx: &mut js::context::JSContext,
+        _request_id: RequestId,
+        violations: Vec<Violation>,
+    ) {
         let global = &self.resource_timing_global();
         let elem = self.element.root();
         let source_position = elem
             .upcast::<Element>()
             .compute_source_position(elem.line_number as u32);
-        global.report_csp_violations(violations, None, Some(source_position));
+        global.report_csp_violations(cx, violations, None, Some(source_position));
     }
 }
 
@@ -1341,20 +1345,20 @@ impl HTMLImageElement {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-img-decode>
-    fn react_to_decode_image_sync_steps(&self, promise: Rc<Promise>, can_gc: CanGc) {
+    fn react_to_decode_image_sync_steps(&self, cx: &mut JSContext, promise: Rc<Promise>) {
         // Step 2.2. If any of the following are true: this's node document is not fully active; or
         // this's current request's state is broken, then reject promise with an "EncodingError"
         // DOMException.
         if !self.owner_document().is_fully_active() ||
             matches!(self.current_request.borrow().state, State::Broken)
         {
-            promise.reject_error(Error::Encoding(None), can_gc);
+            promise.reject_error(cx, Error::Encoding(None));
         } else if matches!(
             self.current_request.borrow().state,
             State::CompletelyAvailable
         ) {
             // this doesn't follow the spec, but it's been discussed in <https://github.com/whatwg/html/issues/4217>
-            promise.resolve_native(&(), can_gc);
+            promise.resolve_native(cx, &());
         } else if matches!(self.current_request.borrow().state, State::Unavailable) &&
             self.current_request.borrow().source_url.is_none()
         {
@@ -1362,7 +1366,7 @@ impl HTMLImageElement {
             // request's state is unavailable and current URL is empty string (<img> without "src"
             // and "srcset" attributes) then reject promise with an "EncodingError" DOMException.
             // <https://github.com/whatwg/html/issues/11769>
-            promise.reject_error(Error::Encoding(None), can_gc);
+            promise.reject_error(cx, Error::Encoding(None));
         } else {
             self.image_decode_promises.borrow_mut().push(promise);
         }
@@ -1390,7 +1394,7 @@ impl HTMLImageElement {
             .dom_manipulation_task_source()
             .queue(task!(fulfill_image_decode_promises: move |cx| {
                 for trusted_promise in trusted_image_decode_promises {
-                    trusted_promise.root().resolve_native_with_cx(cx, &());
+                    trusted_promise.root().resolve_native(cx, &());
                 }
             }));
     }
@@ -1417,7 +1421,7 @@ impl HTMLImageElement {
             .dom_manipulation_task_source()
             .queue(task!(reject_image_decode_promises: move |cx| {
                 for trusted_promise in trusted_image_decode_promises {
-                    trusted_promise.root().reject_error_with_cx(cx, Error::Encoding(None));
+                    trusted_promise.root().reject_error(cx, Error::Encoding(None));
                 }
             }));
     }
@@ -1657,7 +1661,7 @@ impl MicrotaskRunnable for ImageElementMicrotask {
                 ref elem,
                 ref promise,
             } => {
-                elem.react_to_decode_image_sync_steps(promise.clone(), CanGc::from_cx(cx));
+                elem.react_to_decode_image_sync_steps(cx, promise.clone());
             },
         }
     }
@@ -1926,7 +1930,7 @@ impl HTMLImageElementMethods<crate::DomTypeHolder> for HTMLImageElement {
     /// <https://html.spec.whatwg.org/multipage/#dom-img-decode>
     fn Decode(&self, cx: &mut JSContext) -> Rc<Promise> {
         // Step 1. Let promise be a new promise.
-        let promise = Promise::new2(cx, &self.global());
+        let promise = Promise::new(cx, &self.global());
 
         // Step 2. Queue a microtask to perform the following steps:
         let task = ImageElementMicrotask::Decode {

@@ -29,9 +29,7 @@ use harfbuzz_sys::{
 use num_traits::Zero;
 use read_fonts::types::Tag;
 
-use super::{
-    GlyphShapingResult, ShapedGlyph, compute_used_font_features, unicode_script_to_iso15924_tag,
-};
+use super::{GlyphShapingResult, ShapedGlyph, unicode_script_to_iso15924_tag};
 use crate::platform::font::FontTable;
 use crate::{
     BASE, Font, FontBaseline, FontTableMethods, GlyphId, ShapedText, ShapingFlags, ShapingOptions,
@@ -247,6 +245,7 @@ impl Shaper {
         &self,
         text: &str,
         options: &ShapingOptions,
+        font_features: &[(Tag, u32)],
     ) -> HarfbuzzGlyphShapingResult {
         unsafe {
             let hb_buffer: *mut hb_buffer_t = hb_buffer_create();
@@ -279,10 +278,11 @@ impl Shaper {
             );
             hb_buffer_set_language(hb_buffer, hb_language);
 
-            let mut features: Vec<_> = compute_used_font_features(options)
+            let mut features: Vec<_> = font_features
+                .iter()
                 .map(|(tag, value)| hb_feature_t {
                     tag: u32::from_be_bytes(tag.to_be_bytes()),
-                    value,
+                    value: *value,
                     start: 0,
                     end: hb_buffer_get_length(hb_buffer),
                 })
@@ -298,8 +298,17 @@ impl Shaper {
         }
     }
 
-    pub(crate) fn shape_text(&self, text: &str, options: &ShapingOptions) -> ShapedText {
-        ShapedText::with_shaped_glyph_data(text, options, &self.shaped_glyph_data(text, options))
+    pub(crate) fn shape_text(
+        &self,
+        text: &str,
+        options: &ShapingOptions,
+        font_features: &[(Tag, u32)],
+    ) -> ShapedText {
+        ShapedText::with_shaped_glyph_data(
+            text,
+            options,
+            &self.shaped_glyph_data(text, options, font_features),
+        )
     }
 
     pub(crate) fn baseline(&self) -> Option<FontBaseline> {

@@ -52,13 +52,13 @@ use crate::dom::element::{
 };
 use crate::dom::html::htmlelement::HTMLElement;
 use crate::dom::medialist::MediaList;
+use crate::dom::node::virtualmethods::VirtualMethods;
 use crate::dom::node::{BindContext, Node, NodeTraits, UnbindContext};
 use crate::dom::performance::performanceresourcetiming::InitiatorType;
 use crate::dom::processingoptions::{
     LinkFetchContext, LinkFetchContextType, LinkProcessingOptions,
 };
 use crate::dom::types::{EventTarget, GlobalScope};
-use crate::dom::virtualmethods::VirtualMethods;
 use crate::links::LinkRelations;
 use crate::network_listener::{FetchResponseListener, ResourceTimingListener, submit_timing};
 use crate::script_module::{ScriptFetchOptions, fetch_a_modulepreload_module};
@@ -177,7 +177,11 @@ impl HTMLLinkElement {
     // FIXME(emilio): These methods are duplicated with
     // HTMLStyleElement::set_stylesheet.
     #[cfg_attr(crown, expect(crown::unrooted_must_root))]
-    pub(crate) fn set_stylesheet(&self, new_stylesheet: Arc<Stylesheet>) {
+    pub(crate) fn set_stylesheet(
+        &self,
+        cx: &mut js::context::JSContext,
+        new_stylesheet: Arc<Stylesheet>,
+    ) {
         let owner = self.stylesheet_list_owner();
         if let Some(old_stylesheet) = self.stylesheet.borrow_mut().replace(new_stylesheet.clone()) {
             owner.remove_stylesheet(
@@ -185,7 +189,7 @@ impl HTMLLinkElement {
                 &old_stylesheet,
             );
         }
-        owner.add_owned_stylesheet(self.upcast(), new_stylesheet);
+        owner.add_owned_stylesheet(cx, self.upcast(), new_stylesheet);
     }
 
     pub(crate) fn get_stylesheet(&self) -> Option<Arc<Stylesheet>> {
@@ -1237,8 +1241,9 @@ impl HTMLLinkElementMethods<crate::DomTypeHolder> for HTMLLinkElement {
     make_setter!(SetReferrerPolicy, "referrerpolicy");
 
     /// <https://drafts.csswg.org/cssom/#dom-linkstyle-sheet>
-    fn GetSheet(&self, can_gc: CanGc) -> Option<DomRoot<DOMStyleSheet>> {
-        self.get_cssom_stylesheet(can_gc).map(DomRoot::upcast)
+    fn GetSheet(&self, cx: &mut JSContext) -> Option<DomRoot<DOMStyleSheet>> {
+        self.get_cssom_stylesheet(CanGc::from_cx(cx))
+            .map(DomRoot::upcast)
     }
 }
 
@@ -1293,9 +1298,14 @@ impl FetchResponseListener for FaviconFetchContext {
         submit_timing(cx, &self, &response, &timing);
     }
 
-    fn process_csp_violations(&mut self, _request_id: RequestId, violations: Vec<Violation>) {
+    fn process_csp_violations(
+        &mut self,
+        cx: &mut js::context::JSContext,
+        _request_id: RequestId,
+        violations: Vec<Violation>,
+    ) {
         let global = &self.resource_timing_global();
-        global.report_csp_violations(violations, None, None);
+        global.report_csp_violations(cx, violations, None, None);
     }
 }
 

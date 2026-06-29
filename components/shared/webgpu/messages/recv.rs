@@ -21,7 +21,7 @@ use wgpu_core::binding_model::{
     BindGroupDescriptor, BindGroupLayoutDescriptor, PipelineLayoutDescriptor,
 };
 use wgpu_core::command::{
-    RenderBundleDescriptor, RenderBundleEncoder, RenderPassColorAttachment,
+    PassTimestampWrites, RenderBundleDescriptor, RenderBundleEncoder, RenderPassColorAttachment,
     RenderPassDepthStencilAttachment, TexelCopyBufferInfo, TexelCopyTextureInfo,
 };
 use wgpu_core::device::HostMap;
@@ -40,7 +40,7 @@ pub use wgpu_core::id::{
 use wgpu_core::instance::RequestAdapterOptions;
 use wgpu_core::pipeline::{ComputePipelineDescriptor, RenderPipelineDescriptor};
 use wgpu_core::resource::{
-    BufferAccessError, BufferDescriptor, SamplerDescriptor, TextureDescriptor,
+    BufferAccessError, BufferDescriptor, QuerySetDescriptor, SamplerDescriptor, TextureDescriptor,
     TextureViewDescriptor,
 };
 use wgpu_types::{
@@ -112,6 +112,28 @@ pub enum WebGPURequest {
         source: TexelCopyTextureInfo,
         destination: TexelCopyTextureInfo,
         copy_size: Extent3d,
+    },
+    CopyExternalImageToTexture {
+        device_id: DeviceId,
+        queue_id: QueueId,
+        usable_source: Option<SharedSnapshot>,
+        destination: TexelCopyTextureInfo,
+        dest_tex_descriptor: TextureDescriptor<'static>,
+        copy_size: Extent3d,
+    },
+    CommandEncoderPushDebugGroup {
+        device_id: DeviceId,
+        command_encoder_id: CommandEncoderId,
+        label: String,
+    },
+    CommandEncoderPopDebugGroup {
+        device_id: DeviceId,
+        command_encoder_id: CommandEncoderId,
+    },
+    CommandEncoderInsertDebugMarker {
+        device_id: DeviceId,
+        command_encoder_id: CommandEncoderId,
+        label: String,
     },
     CreateBindGroup {
         device_id: DeviceId,
@@ -249,6 +271,7 @@ pub enum WebGPURequest {
         command_encoder_id: CommandEncoderId,
         compute_pass_id: ComputePassId,
         label: Label<'static>,
+        timestamp_writes: Option<PassTimestampWrites>,
         device_id: DeviceId,
     },
     ComputePassSetPipeline {
@@ -276,6 +299,20 @@ pub enum WebGPURequest {
         offset: u64,
         device_id: DeviceId,
     },
+    ComputePassPushDebugGroup {
+        compute_pass_id: ComputePassId,
+        label: String,
+        device_id: DeviceId,
+    },
+    ComputePassPopDebugGroup {
+        compute_pass_id: ComputePassId,
+        device_id: DeviceId,
+    },
+    ComputePassInsertDebugMarker {
+        compute_pass_id: ComputePassId,
+        label: String,
+        device_id: DeviceId,
+    },
     EndComputePass {
         compute_pass_id: ComputePassId,
         device_id: DeviceId,
@@ -287,6 +324,7 @@ pub enum WebGPURequest {
         label: Label<'static>,
         color_attachments: Vec<Option<RenderPassColorAttachment>>,
         depth_stencil_attachment: Option<RenderPassDepthStencilAttachment<TextureViewId>>,
+        timestamp_writes: Option<PassTimestampWrites>,
         device_id: DeviceId,
     },
     RenderPassCommand {
@@ -350,5 +388,19 @@ pub enum WebGPURequest {
         pipeline_id: RenderPipelineId,
         index: u32,
         id: BindGroupLayoutId,
+    },
+    CreateQuerySet {
+        device_id: DeviceId,
+        query_set_id: QuerySetId,
+        descriptor: QuerySetDescriptor<'static>,
+    },
+    ResolveQuerySet {
+        device_id: DeviceId,
+        command_encoder_id: CommandEncoderId,
+        query_set_id: QuerySetId,
+        start_query: u32,
+        query_count: u32,
+        destination: BufferId,
+        destination_offset: u64,
     },
 }

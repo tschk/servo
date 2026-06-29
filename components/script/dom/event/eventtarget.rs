@@ -23,7 +23,7 @@ use libc::c_char;
 use rustc_hash::{FxBuildHasher, FxHashSet};
 use script_bindings::cell::DomRefCell;
 use script_bindings::cformat;
-use script_bindings::reflector::{DomObject, Reflector, reflect_dom_object_with_proto};
+use script_bindings::reflector::{DomObject, Reflector, reflect_dom_object_with_proto_and_cx};
 use servo_constellation_traits::ConstellationInterest;
 use servo_url::ServoUrl;
 use style::str::HTML_SPACE_CHARACTERS;
@@ -67,13 +67,13 @@ use crate::dom::html::htmlformelement::FormControlElementHelpers;
 use crate::dom::indexeddb::idbdatabase::IDBDatabase;
 use crate::dom::indexeddb::idbrequest::IDBRequest;
 use crate::dom::indexeddb::idbtransaction::IDBTransaction;
+use crate::dom::node::virtualmethods::VirtualMethods;
 use crate::dom::node::{Node, NodeTraits};
 use crate::dom::shadowroot::ShadowRoot;
-use crate::dom::virtualmethods::VirtualMethods;
 use crate::dom::window::Window;
 use crate::dom::workerglobalscope::WorkerGlobalScope;
-use crate::realms::{enter_auto_realm, enter_realm};
-use crate::script_runtime::CanGc;
+use crate::realms::enter_auto_realm;
+use crate::script_runtime::IntroductionType;
 
 /// <https://html.spec.whatwg.org/multipage/#event-handler-content-attributes>
 /// Generated from WebIDL definitions of EventHandler attributes on interfaces
@@ -421,15 +421,15 @@ impl EventTarget {
     }
 
     fn new(
+        cx: &mut JSContext,
         global: &GlobalScope,
         proto: Option<HandleObject>,
-        can_gc: CanGc,
     ) -> DomRoot<EventTarget> {
-        reflect_dom_object_with_proto(
+        reflect_dom_object_with_proto_and_cx(
             Box::new(EventTarget::new_inherited()),
             global,
             proto,
-            can_gc,
+            cx,
         )
     }
 
@@ -576,6 +576,13 @@ impl EventTarget {
         listener.borrow().passive
     }
 
+    /// Determines if there are any non-passive listeners for a given event type.
+    pub(crate) fn has_non_passive_listener(&self, type_: &Atom) -> bool {
+        self.get_listeners_for(type_)
+            .iter()
+            .any(|listener| !self.is_passive(listener))
+    }
+
     fn get_inline_event_listener(
         &self,
         cx: &mut JSContext,
@@ -591,6 +598,7 @@ impl EventTarget {
     /// <https://html.spec.whatwg.org/multipage/#event-handler-attributes:event-handler-content-attributes-3>
     pub(crate) fn set_event_handler_uncompiled(
         &self,
+        cx: &mut JSContext,
         url: ServoUrl,
         line: usize,
         ty: &str,
@@ -602,6 +610,7 @@ impl EventTarget {
             if global
                 .get_csp_list()
                 .should_elements_inline_type_behavior_be_blocked(
+                    cx,
                     global,
                     element.upcast(),
                     InlineCheckType::ScriptAttribute,
@@ -663,7 +672,8 @@ impl EventTarget {
 
         // Step 3.8 TODO: settings objects not implemented
         let window = document.window();
-        let _ac = enter_realm(window);
+        let mut realm = enter_auto_realm(cx, window);
+        let cx = &mut realm.current_realm();
 
         // Step 3.9
 
@@ -682,8 +692,8 @@ impl EventTarget {
         let args = if is_error { ERROR_ARG_NAMES } else { ARG_NAMES };
 
         let url = cformat!("{}", handler.url);
-        let options =
-            unsafe { CompileOptionsWrapper::new_raw(cx.raw_cx(), url, handler.line as u32) };
+        let mut options = CompileOptionsWrapper::new(cx, url, handler.line as u32);
+        options.set_introduction_type(IntroductionType::EVENT_HANDLER);
 
         // Step 3.9, subsection Scope steps 1-6
         let scopechain =
@@ -725,15 +735,15 @@ impl EventTarget {
         // Step 1.14
         if is_error {
             Some(CommonEventHandler::ErrorEventHandler(unsafe {
-                OnErrorEventHandlerNonNull::new(cx.into(), funobj)
+                OnErrorEventHandlerNonNull::new(cx, funobj)
             }))
         } else if ty == &atom!("beforeunload") {
             Some(CommonEventHandler::BeforeUnloadEventHandler(unsafe {
-                OnBeforeUnloadEventHandlerNonNull::new(cx.into(), funobj)
+                OnBeforeUnloadEventHandlerNonNull::new(cx, funobj)
             }))
         } else {
             Some(CommonEventHandler::EventHandler(unsafe {
-                EventHandlerNonNull::new(cx.into(), funobj)
+                EventHandlerNonNull::new(cx, funobj)
             }))
         }
     }
@@ -747,7 +757,7 @@ impl EventTarget {
     ) {
         let event_listener = listener.map(|listener| {
             InlineEventListener::Compiled(CommonEventHandler::EventHandler(unsafe {
-                EventHandlerNonNull::new(cx.into(), listener.callback())
+                EventHandlerNonNull::new(cx, listener.callback())
             }))
         });
         self.set_inline_event_listener(Atom::from(ty), event_listener);
@@ -762,7 +772,7 @@ impl EventTarget {
     ) {
         let event_listener = listener.map(|listener| {
             InlineEventListener::Compiled(CommonEventHandler::ErrorEventHandler(unsafe {
-                OnErrorEventHandlerNonNull::new(cx.into(), listener.callback())
+                OnErrorEventHandlerNonNull::new(cx, listener.callback())
             }))
         });
         self.set_inline_event_listener(Atom::from(ty), event_listener);
@@ -777,7 +787,7 @@ impl EventTarget {
     ) {
         let event_listener = listener.map(|listener| {
             InlineEventListener::Compiled(CommonEventHandler::BeforeUnloadEventHandler(unsafe {
-                OnBeforeUnloadEventHandlerNonNull::new(cx.into(), listener.callback())
+                OnBeforeUnloadEventHandlerNonNull::new(cx, listener.callback())
             }))
         });
         self.set_inline_event_listener(Atom::from(ty), event_listener);
@@ -792,7 +802,7 @@ impl EventTarget {
         let listener = self.get_inline_event_listener(cx, &Atom::from(ty));
         unsafe {
             listener.map(|listener| {
-                CallbackContainer::new(cx.into(), listener.parent().callback_holder().get())
+                CallbackContainer::new(cx, listener.parent().callback_holder().get())
             })
         }
     }
@@ -862,13 +872,7 @@ impl EventTarget {
         cancelable: EventCancelable,
         composed: EventComposed,
     ) -> bool {
-        let event = Event::new(
-            &self.global(),
-            name,
-            bubbles,
-            cancelable,
-            CanGc::from_cx(cx),
-        );
+        let event = Event::new(cx, &self.global(), name, bubbles, cancelable);
         event.set_composed(composed.into());
         event.fire(cx, self)
     }
@@ -1006,7 +1010,7 @@ impl EventTarget {
         }
 
         // The get the parent algorithm for an IDBDatabase returns null.
-        if self.downcast::<IDBDatabase>().is_some() {
+        if self.is::<IDBDatabase>() {
             return None;
         }
 
@@ -1074,11 +1078,11 @@ impl EventTarget {
 impl EventTargetMethods<crate::DomTypeHolder> for EventTarget {
     /// <https://dom.spec.whatwg.org/#dom-eventtarget-eventtarget>
     fn Constructor(
+        cx: &mut JSContext,
         global: &GlobalScope,
         proto: Option<HandleObject>,
-        can_gc: CanGc,
     ) -> Fallible<DomRoot<EventTarget>> {
-        Ok(EventTarget::new(global, proto, can_gc))
+        Ok(EventTarget::new(cx, global, proto))
     }
 
     /// <https://dom.spec.whatwg.org/#dom-eventtarget-addeventlistener>

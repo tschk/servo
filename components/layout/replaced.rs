@@ -23,8 +23,8 @@ use style::logical_geometry::{Direction, WritingMode};
 use style::properties::{ComputedValues, StyleBuilder};
 use style::rule_cache::RuleCacheConditions;
 use style::rule_tree::RuleCascadeFlags;
-use style::servo::url::ComputedUrl;
 use style::stylesheets::container_rule::ContainerSizeQuery;
+use style::url::ComputedUrl;
 use style::values::CSSFloat;
 use style::values::computed::image::Image as ComputedImage;
 use style::values::computed::{Content, Context, ToComputedValue};
@@ -544,6 +544,7 @@ impl ReplacedContents {
                         viewport_details: ViewportDetails {
                             size,
                             hidpi_scale_factor: Scale::new(hidpi_scale_factor.0),
+                            device_size: layout_context.device_size.cast_unit(),
                         },
                     },
                 );

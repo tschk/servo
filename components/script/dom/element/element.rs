@@ -21,8 +21,9 @@ use html5ever::serialize::TraversalScope;
 use html5ever::serialize::TraversalScope::{ChildrenOnly, IncludeNode};
 use html5ever::{LocalName, Namespace, Prefix, QualName, local_name, namespace_prefix, ns};
 use js::context::JSContext;
-use js::jsapi::Heap;
+use js::jsapi::{Heap, JSObject};
 use js::jsval::JSVal;
+use js::realm::CurrentRealm;
 use js::rust::HandleObject;
 use layout_api::{LayoutDamage, QueryMsg, ScrollContainerQueryFlags, StyleData, with_layout_state};
 use net_traits::ReferrerPolicy;
@@ -53,7 +54,7 @@ use style::values::computed::Overflow;
 use style::values::generics::NonNegative;
 use style::values::generics::position::PreferredRatio;
 use style::values::generics::ratio::Ratio;
-use style::values::{AtomIdent, CSSFloat, GenericAtomIdent, computed, specified};
+use style::values::{AtomIdent, AtomString, CSSFloat, GenericAtomIdent, computed, specified};
 use style::{ArcSlice, CaseSensitivityExt, dom_apis, thread_state};
 use style_traits::CSSPixel;
 use stylo_atoms::Atom;
@@ -64,7 +65,10 @@ use xml5ever::serialize::TraversalScope::{
 
 use crate::conversions::Convert;
 use crate::dom::activation::Activatable;
+use crate::dom::animation::Animation;
+use crate::dom::animations::keyframeeffect::KeyframeEffect;
 use crate::dom::attr::{Attr, is_relevant_attribute};
+use crate::dom::bindings::codegen::Bindings::AnimationBinding::AnimationMethods;
 use crate::dom::bindings::codegen::Bindings::AttrBinding::AttrMethods;
 use crate::dom::bindings::codegen::Bindings::DocumentBinding::DocumentMethods;
 use crate::dom::bindings::codegen::Bindings::ElementBinding::{
@@ -74,6 +78,7 @@ use crate::dom::bindings::codegen::Bindings::EventHandlerBinding::EventHandlerNo
 use crate::dom::bindings::codegen::Bindings::FunctionBinding::Function;
 use crate::dom::bindings::codegen::Bindings::HTMLElementBinding::HTMLElementMethods;
 use crate::dom::bindings::codegen::Bindings::HTMLTemplateElementBinding::HTMLTemplateElementMethods;
+use crate::dom::bindings::codegen::Bindings::KeyframeEffectBinding::KeyframeEffectMethods;
 use crate::dom::bindings::codegen::Bindings::NodeBinding::NodeMethods;
 use crate::dom::bindings::codegen::Bindings::SanitizerBinding::{
     SetHTMLOptions, SetHTMLUnsafeOptions,
@@ -88,6 +93,7 @@ use crate::dom::bindings::codegen::UnionTypes::{
     BooleanOrScrollIntoViewOptions, NodeOrString, TrustedHTMLOrNullIsEmptyString,
     TrustedHTMLOrString,
     TrustedHTMLOrTrustedScriptOrTrustedScriptURLOrString as TrustedTypeOrString,
+    UnrestrictedDoubleOrKeyframeAnimationOptions, UnrestrictedDoubleOrKeyframeEffectOptions,
 };
 use crate::dom::bindings::conversions::DerivedFrom;
 use crate::dom::bindings::domname::{
@@ -98,7 +104,6 @@ use crate::dom::bindings::inheritance::{Castable, ElementTypeId, HTMLElementType
 use crate::dom::bindings::num::Finite;
 use crate::dom::bindings::root::{Dom, DomRoot, LayoutDom, MutNullableDom, ToLayout};
 use crate::dom::bindings::str::DOMString;
-use crate::dom::create::create_element;
 use crate::dom::csp::{CspReporting, InlineCheckType, SourcePosition};
 use crate::dom::customelementregistry::{
     CallbackReaction, CustomElementDefinition, CustomElementReaction, CustomElementRegistry,
@@ -112,6 +117,7 @@ use crate::dom::domtokenlist::DOMTokenList;
 use crate::dom::element::attributes::storage::{
     AttrRef, AttrValueRef, AttributeEntry, AttributeStorage, ContentAttributeData,
 };
+use crate::dom::element::create::create_element;
 use crate::dom::elementinternals::ElementInternals;
 use crate::dom::eventtarget::EventTarget;
 use crate::dom::globalscope::GlobalScope;
@@ -150,6 +156,7 @@ use crate::dom::intersectionobserver::{IntersectionObserver, IntersectionObserve
 use crate::dom::iterators::ShadowIncluding;
 use crate::dom::mutationobserver::{Mutation, MutationObserver};
 use crate::dom::namednodemap::NamedNodeMap;
+use crate::dom::node::virtualmethods::{VirtualMethods, vtable_for};
 use crate::dom::node::{
     BindContext, ChildrenMutation, CloneChildrenFlag, IsShadowTree, Node, NodeDamage, NodeFlags,
     NodeTraits, UnbindContext,
@@ -168,7 +175,6 @@ use crate::dom::trustedtypes::trustedhtml::TrustedHTML;
 use crate::dom::trustedtypes::trustedtypepolicyfactory::TrustedTypePolicyFactory;
 use crate::dom::validation::Validatable;
 use crate::dom::validitystate::ValidationFlags;
-use crate::dom::virtualmethods::{VirtualMethods, vtable_for};
 use crate::layout_dom::ServoDangerousStyleElement;
 use crate::realms::enter_auto_realm;
 use crate::script_runtime::CanGc;
@@ -358,7 +364,7 @@ impl Element {
         self.rare_data.borrow_mut()
     }
 
-    fn ensure_rare_data(&self) -> RefMut<'_, Box<ElementRareData>> {
+    pub(crate) fn ensure_rare_data(&self) -> RefMut<'_, Box<ElementRareData>> {
         let mut rare_data = self.rare_data.borrow_mut();
         if rare_data.is_none() {
             *rare_data = Some(Default::default());
@@ -384,7 +390,7 @@ impl Element {
                 doc.note_node_with_dirty_descendants(self.upcast());
                 restyle
                     .damage
-                    .insert(LayoutDamage::descendant_has_box_damage());
+                    .insert(RestyleDamage::from(LayoutDamage::DescendantHasBoxDamage));
             },
             NodeDamage::Other => {
                 doc.note_node_with_dirty_descendants(self.upcast());
@@ -571,6 +577,13 @@ impl Element {
         // The CSS computed value has made sure that either both axes are scrollable or none are scrollable.
         self.upcast::<Node>()
             .effective_overflow()
+            .is_some_and(|overflow| overflow.establishes_scroll_container())
+    }
+
+    /// Like [`Self::establishes_scroll_container`], but without forcing a reflow.
+    pub(crate) fn establishes_scroll_container_without_reflow(&self) -> bool {
+        self.upcast::<Node>()
+            .effective_overflow_without_reflow()
             .is_some_and(|overflow| overflow.establishes_scroll_container())
     }
 
@@ -968,7 +981,7 @@ impl Element {
     ) -> DomRoot<Range> {
         self.ensure_rare_data()
             .contenteditable_selection_range
-            .or_init(|| Range::new_with_doc(document, None, CanGc::from_cx(cx)))
+            .or_init(|| Range::new_with_doc(cx, document, None))
     }
 
     /// <https://drafts.csswg.org/cssom-view/#scrolling-events>
@@ -1012,6 +1025,23 @@ impl Element {
                 .display
                 .is_none()
         })
+    }
+
+    pub(crate) fn check_style_on_self_or_eager_pseudos(
+        &self,
+        check_styles_fn: impl Fn(&ComputedValues) -> bool,
+    ) -> bool {
+        let style_data = self.style_data.borrow();
+        let Some(data) = style_data.as_ref().map(|data| data.element_data.borrow()) else {
+            return false;
+        };
+
+        if check_styles_fn(data.styles.primary()) {
+            return true;
+        }
+
+        let mut pseudo_styles = data.styles.pseudos.as_array().iter();
+        pseudo_styles.any(|style| style.as_deref().is_some_and(&check_styles_fn))
     }
 }
 
@@ -1260,8 +1290,7 @@ impl<'dom> LayoutDom<'dom, Element> {
             });
 
         if let Some(size) = size {
-            let value =
-                specified::NoCalcLength::ServoCharacterWidth(specified::CharacterWidth(size));
+            let value = specified::NoCalcLength::from_servo_character_width(size);
             push(PropertyDeclaration::Width(
                 specified::Size::LengthPercentage(NonNegative(
                     specified::LengthPercentage::Length(value),
@@ -1293,14 +1322,16 @@ impl<'dom> LayoutDom<'dom, Element> {
             LengthOrPercentageOrAuto::Auto => {},
             LengthOrPercentageOrAuto::Percentage(percentage) => {
                 let width_value = specified::Size::LengthPercentage(NonNegative(
-                    specified::LengthPercentage::Percentage(computed::Percentage(percentage)),
+                    specified::LengthPercentage::Percentage(specified::NoCalcPercentage::new(
+                        percentage,
+                    )),
                 ));
                 push(PropertyDeclaration::Width(width_value));
             },
             LengthOrPercentageOrAuto::Length(length) => {
                 let width_value = specified::Size::LengthPercentage(NonNegative(
-                    specified::LengthPercentage::Length(specified::NoCalcLength::Absolute(
-                        specified::AbsoluteLength::Px(length.to_f32_px()),
+                    specified::LengthPercentage::Length(specified::NoCalcLength::from_px(
+                        length.to_f32_px(),
                     )),
                 ));
                 push(PropertyDeclaration::Width(width_value));
@@ -1329,14 +1360,16 @@ impl<'dom> LayoutDom<'dom, Element> {
             LengthOrPercentageOrAuto::Auto => {},
             LengthOrPercentageOrAuto::Percentage(percentage) => {
                 let height_value = specified::Size::LengthPercentage(NonNegative(
-                    specified::LengthPercentage::Percentage(computed::Percentage(percentage)),
+                    specified::LengthPercentage::Percentage(specified::NoCalcPercentage::new(
+                        percentage,
+                    )),
                 ));
                 push(PropertyDeclaration::Height(height_value));
             },
             LengthOrPercentageOrAuto::Length(length) => {
                 let height_value = specified::Size::LengthPercentage(NonNegative(
-                    specified::LengthPercentage::Length(specified::NoCalcLength::Absolute(
-                        specified::AbsoluteLength::Px(length.to_f32_px()),
+                    specified::LengthPercentage::Length(specified::NoCalcLength::from_px(
+                        length.to_f32_px(),
                     )),
                 ));
                 push(PropertyDeclaration::Height(height_value));
@@ -1359,8 +1392,7 @@ impl<'dom> LayoutDom<'dom, Element> {
 
         // Aspect ratio when providing both width and height.
         // https://html.spec.whatwg.org/multipage/#attributes-for-embedded-content-and-images
-        if (self.downcast::<HTMLImageElement>().is_some() ||
-            self.downcast::<HTMLVideoElement>().is_some()) &&
+        if (self.is::<HTMLImageElement>() || self.is::<HTMLVideoElement>()) &&
             let LengthOrPercentageOrAuto::Length(width) = width &&
             let LengthOrPercentageOrAuto::Length(height) = height
         {
@@ -1370,7 +1402,7 @@ impl<'dom> LayoutDom<'dom, Element> {
                 auto: true,
                 ratio: PreferredRatio::Ratio(Ratio(width_value, height_value)),
             };
-            push(PropertyDeclaration::AspectRatio(aspect_ratio));
+            push(PropertyDeclaration::AspectRatio(Box::new(aspect_ratio)));
         }
 
         let cols = self
@@ -1384,8 +1416,7 @@ impl<'dom> LayoutDom<'dom, Element> {
                 // scrollbar size into consideration (but we don't have a scrollbar yet!)
                 //
                 // https://html.spec.whatwg.org/multipage/#textarea-effective-width
-                let value =
-                    specified::NoCalcLength::ServoCharacterWidth(specified::CharacterWidth(cols));
+                let value = specified::NoCalcLength::from_servo_character_width(cols);
                 push(PropertyDeclaration::Width(
                     specified::Size::LengthPercentage(NonNegative(
                         specified::LengthPercentage::Length(value),
@@ -1403,9 +1434,7 @@ impl<'dom> LayoutDom<'dom, Element> {
                 // TODO(mttr) This should take scrollbar size into consideration.
                 //
                 // https://html.spec.whatwg.org/multipage/#textarea-effective-height
-                let value = specified::NoCalcLength::FontRelative(
-                    specified::FontRelativeLength::Em(rows as CSSFloat),
-                );
+                let value = specified::NoCalcLength::from_em(rows as CSSFloat);
                 push(PropertyDeclaration::Height(
                     specified::Size::LengthPercentage(NonNegative(
                         specified::LengthPercentage::Length(value),
@@ -1417,12 +1446,12 @@ impl<'dom> LayoutDom<'dom, Element> {
         if let Some(table) = self.downcast::<HTMLTableElement>() {
             if let Some(cellspacing) = table.get_cellspacing() {
                 let width_value = specified::Length::from_px(cellspacing as f32);
-                push(PropertyDeclaration::BorderSpacing(Box::new(
+                push(PropertyDeclaration::BorderSpacing(
                     border_spacing::SpecifiedValue::new(
                         width_value.clone().into(),
                         width_value.into(),
                     ),
-                )));
+                ));
             }
             if let Some(border) = table.get_border() {
                 let width_value = specified::BorderSideWidth::from_px(border as f32);
@@ -1541,14 +1570,14 @@ impl<'dom> LayoutDom<'dom, Element> {
         None
     }
 
-    pub(crate) fn get_lang_for_layout(self) -> String {
+    pub(crate) fn get_lang_for_layout(self) -> AtomString {
         let mut current_node = Some(self.upcast::<Node>());
         while let Some(node) = current_node {
             current_node = node.composed_parent_node_ref();
             match node.downcast::<Element>() {
                 Some(elem) => {
                     if let Some(attr) = elem.get_lang_attr_val_for_layout() {
-                        return attr.to_owned();
+                        return AtomString::from(attr);
                     }
                 },
                 None => continue,
@@ -1556,7 +1585,7 @@ impl<'dom> LayoutDom<'dom, Element> {
         }
         // TODO: Check meta tags for a pragma-set default language
         // TODO: Check HTTP Content-Language header
-        String::new()
+        AtomString::default()
     }
 
     #[inline]
@@ -1630,7 +1659,7 @@ impl<'dom> LayoutDom<'dom, Element> {
             return;
         };
 
-        let element_internals = unsafe { element_internals.to_layout() };
+        let element_internals: LayoutDom<'_, _> = unsafe { element_internals.to_layout() };
         if let Some(states) = element_internals.unsafe_get().custom_states_for_layout() {
             for state in unsafe { states.unsafe_get().set_for_layout().iter() } {
                 // FIXME: This creates new atoms whenever it is called, which is not optimal.
@@ -1672,11 +1701,8 @@ impl Element {
         *self.prefix.borrow_mut() = prefix;
     }
 
-    pub(crate) fn set_custom_element_registry(
-        &self,
-        registry: Option<DomRoot<CustomElementRegistry>>,
-    ) {
-        self.ensure_rare_data().custom_element_registry = registry.as_deref().map(Dom::from_ref);
+    pub(crate) fn set_custom_element_registry(&self, registry: Option<&CustomElementRegistry>) {
+        self.ensure_rare_data().custom_element_registry = registry.map(Dom::from_ref);
     }
 
     pub(crate) fn custom_element_registry(&self) -> Option<DomRoot<CustomElementRegistry>> {
@@ -1976,7 +2002,7 @@ impl Element {
                 new_value,
                 attr.namespace().clone(),
             );
-            ScriptThread::enqueue_callback_reaction(self, reaction, None);
+            ScriptThread::enqueue_callback_reaction(cx, self, reaction, None);
         }
 
         // Step 3. Run the attribute change steps with element, attribute’s local name, oldValue, newValue, and attribute’s namespace.
@@ -2297,7 +2323,12 @@ impl Element {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#the-style-attribute>
-    fn update_style_attribute(&self, attr: AttrRef<'_>, mutation: AttributeMutation) {
+    fn update_style_attribute(
+        &self,
+        cx: &mut JSContext,
+        attr: AttrRef<'_>,
+        mutation: AttributeMutation,
+    ) {
         let doc = self.upcast::<Node>().owner_doc();
         // Modifying the `style` attribute might change style.
         *self.style_attribute.borrow_mut() = match mutation {
@@ -2320,6 +2351,7 @@ impl Element {
                         if global
                             .get_csp_list()
                             .should_elements_inline_type_behavior_be_blocked(
+                                cx,
                                 global,
                                 self,
                                 InlineCheckType::StyleAttribute,
@@ -2485,7 +2517,7 @@ impl Element {
             return false;
         }
         // Step 2: If element is a script element, then for each attribute of element’s attribute list:
-        if self.downcast::<HTMLScriptElement>().is_some() {
+        if self.is::<HTMLScriptElement>() {
             for attr in self.attrs().borrow().iter() {
                 // Step 2.1: If attribute’s name contains an ASCII case-insensitive match
                 // for "<script" or "<style", return "Not Nonceable".
@@ -2783,6 +2815,44 @@ impl Element {
                 .is_some_and(|custom_element_definition| {
                     custom_element_definition.has_attribute_changed_callback()
                 })
+    }
+
+    pub(crate) fn register_current_id_and_name_attribute(&self, cx: &mut JSContext) {
+        if let Some(shadow_root) = self.containing_shadow_root() {
+            if let Some(ref id) = *self.id_attribute.borrow() {
+                shadow_root.register_element_id(self, id, CanGc::from_cx(cx));
+            }
+        } else {
+            let document = self.owner_document();
+            if let Some(ref id) = *self.id_attribute.borrow() {
+                document.register_element_id(cx, self, id);
+            }
+            if let Some(ref name) = self.name_attribute() {
+                document.register_element_name(self, name);
+            }
+        }
+    }
+
+    pub(crate) fn unregister_current_id_and_name_attribute(&self, cx: &mut JSContext) {
+        if let Some(shadow_root) = self.containing_shadow_root() {
+            // Only unregister the element id if the node was disconnected from it's
+            // shadow root (as opposed to the whole shadow tree being disconnected as a
+            // whole)
+            if self.upcast::<Node>().is_in_a_shadow_tree() {
+                return;
+            }
+            if let Some(ref id) = *self.id_attribute.borrow() {
+                shadow_root.unregister_element_id(id);
+            }
+        } else {
+            let document = self.owner_document();
+            if let Some(ref id) = *self.id_attribute.borrow() {
+                document.unregister_element_id(cx, id);
+            }
+            if let Some(ref name) = self.name_attribute() {
+                document.unregister_element_name(name);
+            }
+        }
     }
 }
 
@@ -3132,16 +3202,16 @@ impl ElementMethods<crate::DomTypeHolder> for Element {
             .into_iter()
             .map(|rect| {
                 DOMRect::new(
+                    cx,
                     win.upcast(),
                     rect.origin.x.to_f64_px(),
                     rect.origin.y.to_f64_px(),
                     rect.size.width.to_f64_px(),
                     rect.size.height.to_f64_px(),
-                    CanGc::from_cx(cx),
                 )
             })
             .collect();
-        DOMRectList::new(&win, rects, CanGc::from_cx(cx))
+        DOMRectList::new(cx, &win, rects)
     }
 
     /// <https://drafts.csswg.org/cssom-view/#dom-element-getboundingclientrect>
@@ -3150,12 +3220,12 @@ impl ElementMethods<crate::DomTypeHolder> for Element {
         let rect = self.upcast::<Node>().border_box().unwrap_or_default();
         debug_assert!(rect.size.width.to_f64_px() >= 0.0 && rect.size.height.to_f64_px() >= 0.0);
         DOMRect::new(
+            cx,
             win.upcast(),
             rect.origin.x.to_f64_px(),
             rect.origin.y.to_f64_px(),
             rect.size.width.to_f64_px(),
             rect.size.height.to_f64_px(),
-            CanGc::from_cx(cx),
         )
     }
 
@@ -3741,15 +3811,23 @@ impl ElementMethods<crate::DomTypeHolder> for Element {
     }
 
     /// <https://dom.spec.whatwg.org/#dom-parentnode-queryselector>
-    fn QuerySelector(&self, selectors: DOMString) -> Fallible<Option<DomRoot<Element>>> {
+    fn QuerySelector(
+        &self,
+        cx: &mut JSContext,
+        selectors: DOMString,
+    ) -> Fallible<Option<DomRoot<Element>>> {
         let root = self.upcast::<Node>();
-        root.query_selector(selectors)
+        root.query_selector(cx.no_gc(), selectors)
     }
 
     /// <https://dom.spec.whatwg.org/#dom-parentnode-queryselectorall>
-    fn QuerySelectorAll(&self, selectors: DOMString) -> Fallible<DomRoot<NodeList>> {
+    fn QuerySelectorAll(
+        &self,
+        cx: &mut JSContext,
+        selectors: DOMString,
+    ) -> Fallible<DomRoot<NodeList>> {
         let root = self.upcast::<Node>();
-        root.query_selector_all(selectors)
+        root.query_selector_all(cx.no_gc(), selectors)
     }
 
     /// <https://dom.spec.whatwg.org/#dom-childnode-before>
@@ -3790,7 +3868,7 @@ impl ElementMethods<crate::DomTypeHolder> for Element {
         let quirks_mode = document.quirks_mode();
         Ok(with_layout_state(|| {
             #[expect(unsafe_code)]
-            let layout_element = unsafe { traced_self.to_layout() };
+            let layout_element: LayoutDom<'_, _> = unsafe { traced_self.to_layout() };
             dom_apis::element_matches(
                 &ServoDangerousStyleElement::from(layout_element.upcast()),
                 &selectors,
@@ -3822,7 +3900,7 @@ impl ElementMethods<crate::DomTypeHolder> for Element {
         let quirks_mode = document.quirks_mode();
         let closest_element = with_layout_state(|| {
             #[expect(unsafe_code)]
-            let layout_element = unsafe { traced_self.to_layout() };
+            let layout_element: LayoutDom<'_, _> = unsafe { traced_self.to_layout() };
             dom_apis::element_closest(
                 ServoDangerousStyleElement::from(layout_element.upcast()),
                 &selectors,
@@ -3939,9 +4017,83 @@ impl ElementMethods<crate::DomTypeHolder> for Element {
     }
 
     /// <https://fullscreen.spec.whatwg.org/#dom-element-requestfullscreen>
-    fn RequestFullscreen(&self, can_gc: CanGc) -> Rc<Promise> {
+    fn RequestFullscreen(&self, cx: &mut CurrentRealm) -> Rc<Promise> {
         let doc = self.owner_document();
-        doc.enter_fullscreen(self, can_gc)
+        doc.enter_fullscreen(cx, self)
+    }
+
+    /// <https://w3c.github.io/pointerevents/#dom-element-setpointercapture>
+    fn SetPointerCapture(&self, pointer_id: i32) -> ErrorResult {
+        let document = self.owner_document();
+        let event_handler = document.event_handler();
+
+        // Step 1. If the pointerId provided as the method's argument does not match any of
+        // the active pointers, then throw a DOMException with the name "NotFoundError".
+        //
+        // Note: "active pointers" is global across documents. We can only cheaply check
+        // active pointers in this element's document. If the pointer is active in another
+        // document (e.g., parent/child frame), step 5 below will silently terminate.
+        // We intentionally do not throw here in that case to avoid being stricter than
+        // the spec.
+
+        // Step 2. If the element is not connected, throw a "InvalidStateError" DOMException.
+        if !self.upcast::<Node>().is_connected() {
+            return Err(Error::InvalidState(Some(
+                "Can't capture pointer on an unconnected element".into(),
+            )));
+        }
+
+        // Step 3. If this method is invoked while the document has a locked element
+        // (pointerLockElement), throw an "InvalidStateError" DOMException.
+        // TODO: Implement when pointer lock is supported.
+
+        // Step 4/5. If the pointer is not in the active buttons state or the element's
+        // node document is not the active document of the pointer, then terminate these
+        // steps. `is_active_pointer` on this document covers both conditions: it returns
+        // true only when the pointer is in the active buttons state in *this* document,
+        // which implies this document is the pointer's active document.
+        if !event_handler.is_active_pointer(pointer_id) {
+            return Ok(());
+        }
+
+        // Step 6. For the specified pointerId, set the pending pointer capture target
+        // override to the Element on which this method was invoked.
+        event_handler.set_pending_pointer_capture(pointer_id, self);
+
+        Ok(())
+    }
+
+    /// <https://w3c.github.io/pointerevents/#dom-element-releasepointercapture>
+    fn ReleasePointerCapture(&self, pointer_id: i32) -> ErrorResult {
+        let document = self.owner_document();
+        let event_handler = document.event_handler();
+
+        // Step 1. If the pointerId provided as the method's argument does not match any of
+        // the active pointers and these steps are not being invoked as a result of the
+        // implicit release of pointer capture, then throw a DOMException with the name "NotFoundError".
+        if !event_handler.is_active_pointer(pointer_id) {
+            return Err(Error::NotFound(Some(
+                "Can't release a pointer that is not active".into(),
+            )));
+        }
+
+        // Step 2. If hasPointerCapture is false for the Element with the specified pointerId,
+        // then terminate these steps.
+        if !event_handler.has_pointer_capture(pointer_id, self) {
+            return Ok(());
+        }
+
+        // Step 3. For the specified pointerId, clear the pending pointer capture target override.
+        event_handler.clear_pending_pointer_capture(pointer_id);
+
+        Ok(())
+    }
+
+    /// <https://w3c.github.io/pointerevents/#dom-element-haspointercapture>
+    fn HasPointerCapture(&self, pointer_id: i32) -> bool {
+        let document = self.owner_document();
+        let event_handler = document.event_handler();
+        event_handler.has_pointer_capture(pointer_id, self)
     }
 
     /// <https://dom.spec.whatwg.org/#dom-element-attachshadow>
@@ -4342,12 +4494,10 @@ impl ElementMethods<crate::DomTypeHolder> for Element {
     }
 
     /// <https://dom.spec.whatwg.org/#dom-slotable-assignedslot>
-    fn GetAssignedSlot(&self) -> Option<DomRoot<HTMLSlotElement>> {
-        let cx = GlobalScope::get_cx();
-
+    fn GetAssignedSlot(&self, cx: &JSContext) -> Option<DomRoot<HTMLSlotElement>> {
         // > The assignedSlot getter steps are to return the result of
         // > find a slot given this and with the open flag set.
-        rooted!(in(cx) let slottable = Slottable(Dom::from_ref(self.upcast::<Node>())));
+        rooted!(&in(cx) let slottable = Slottable(Dom::from_ref(self.upcast::<Node>())));
         slottable.find_a_slot(true)
     }
 
@@ -4356,6 +4506,54 @@ impl ElementMethods<crate::DomTypeHolder> for Element {
         self.ensure_rare_data()
             .part
             .or_init(|| DOMTokenList::new(cx, self, &local_name!("part"), None))
+    }
+
+    /// <https://drafts.csswg.org/web-animations-1/#dom-animatable-animate>
+    fn Animate(
+        &self,
+        cx: &mut JSContext,
+        keyframes: *mut JSObject,
+        options: UnrestrictedDoubleOrKeyframeAnimationOptions,
+    ) -> DomRoot<Animation> {
+        let window = self.owner_window();
+
+        // Step 1. Let target be the object on which this method was called.
+        let target = self;
+
+        // Step 2. Construct a new KeyframeEffect object effect in the relevant Realm
+        // of target by using the same procedure as the KeyframeEffect(target, keyframes, options)
+        // constructor, passing target as the target argument, and the keyframes and options arguments
+        //  as supplied.
+        //
+        // If the above procedure causes an exception to be thrown, propagate the exception and
+        // abort this procedure.
+        let parent_options = match options {
+            UnrestrictedDoubleOrKeyframeAnimationOptions::UnrestrictedDouble(value) => {
+                UnrestrictedDoubleOrKeyframeEffectOptions::UnrestrictedDouble(value)
+            },
+            UnrestrictedDoubleOrKeyframeAnimationOptions::KeyframeAnimationOptions(options) => {
+                UnrestrictedDoubleOrKeyframeEffectOptions::KeyframeEffectOptions(options.parent)
+            },
+        };
+        let effect =
+            KeyframeEffect::Constructor(cx, &window, None, Some(target), keyframes, parent_options);
+
+        // TODO: Step 3. If options is a KeyframeAnimationOptions object, let timeline be the timeline member of
+        // options or, if timeline member of options is missing, the default document timeline of the node document
+        // of the element on which this method was called.
+
+        // Step 4. Construct a new Animation object, animation, in the relevant Realm of target by using
+        // the same procedure as the Animation() constructor, passing effect and timeline as arguments of
+        // the same name.
+        let animation = Animation::Constructor(cx, &window, None, Some(effect.upcast()));
+
+        // TODO: Step 5. If options is a KeyframeAnimationOptions object, assign the value of the id member of options
+        // to animation’s id attribute.
+
+        // TODO: Step 6. Run the procedure to play an animation for animation with the auto-rewind flag set to true.
+
+        // Step 7. Return animation.
+        animation
     }
 }
 
@@ -4399,6 +4597,7 @@ impl VirtualMethods for Element {
                         let source = &**attr.value();
                         let source_line = 1; // TODO(#9604) get current JS execution line
                         evtarget.set_event_handler_uncompiled(
+                            cx,
                             self.owner_window().get_url(),
                             source_line,
                             event_name,
@@ -4412,7 +4611,7 @@ impl VirtualMethods for Element {
                     },
                 }
             },
-            local_name!("style") => self.update_style_attribute(attr, mutation),
+            local_name!("style") => self.update_style_attribute(cx, attr, mutation),
             local_name!("id") => {
                 // https://dom.spec.whatwg.org/#ref-for-concept-element-attributes-change-ext%E2%91%A2
                 *self.id_attribute.borrow_mut() = mutation.new_value(attr).and_then(|value| {
@@ -4432,39 +4631,31 @@ impl VirtualMethods for Element {
                     match mutation {
                         AttributeMutation::Set(old_value, _) => {
                             if let Some(old_value) = old_value {
-                                let old_value = old_value.as_atom().clone();
+                                let old_value = old_value.as_atom();
                                 if let Some(ref shadow_root) = containing_shadow_root {
-                                    shadow_root.unregister_element_id(
-                                        self,
-                                        old_value,
-                                        CanGc::from_cx(cx),
-                                    );
+                                    shadow_root.unregister_element_id(old_value);
                                 } else {
-                                    doc.unregister_element_id(cx, self, old_value);
+                                    doc.unregister_element_id(cx, old_value);
                                 }
                             }
                             if value != atom!("") {
                                 if let Some(ref shadow_root) = containing_shadow_root {
                                     shadow_root.register_element_id(
                                         self,
-                                        value,
+                                        &value,
                                         CanGc::from_cx(cx),
                                     );
                                 } else {
-                                    doc.register_element_id(cx, self, value);
+                                    doc.register_element_id(cx, self, &value);
                                 }
                             }
                         },
                         AttributeMutation::Removed => {
                             if value != atom!("") {
                                 if let Some(ref shadow_root) = containing_shadow_root {
-                                    shadow_root.unregister_element_id(
-                                        self,
-                                        value,
-                                        CanGc::from_cx(cx),
-                                    );
+                                    shadow_root.unregister_element_id(&value);
                                 } else {
-                                    doc.unregister_element_id(cx, self, value);
+                                    doc.unregister_element_id(cx, &value);
                                 }
                             }
                         },
@@ -4489,16 +4680,15 @@ impl VirtualMethods for Element {
                     match mutation {
                         AttributeMutation::Set(old_value, _) => {
                             if let Some(old_value) = old_value {
-                                let old_value = old_value.as_atom().clone();
-                                doc.unregister_element_name(self, old_value);
+                                doc.unregister_element_name(old_value.as_atom());
                             }
                             if value != atom!("") {
-                                doc.register_element_name(self, value);
+                                doc.register_element_name(self, &value);
                             }
                         },
                         AttributeMutation::Removed => {
                             if value != atom!("") {
-                                doc.unregister_element_name(self, value);
+                                doc.unregister_element_name(&value);
                             }
                         },
                     }
@@ -4510,9 +4700,9 @@ impl VirtualMethods for Element {
 
                 // Slottable name change steps from https://dom.spec.whatwg.org/#light-tree-slotables
                 if let Some(assigned_slot) = slottable.assigned_slot() {
-                    assigned_slot.assign_slottables(cx.no_gc());
+                    assigned_slot.assign_slottables(cx);
                 }
-                slottable.assign_a_slot(cx.no_gc());
+                slottable.assign_a_slot(cx);
             },
             _ => {
                 // FIXME(emilio): This is pretty dubious, and should be done in
@@ -4583,8 +4773,6 @@ impl VirtualMethods for Element {
             f.bind_form_control_to_tree(cx);
         }
 
-        let doc = self.owner_document();
-
         if let Some(ref shadow_root) = self.shadow_root() {
             shadow_root.bind_to_tree(cx, context);
         }
@@ -4593,18 +4781,7 @@ impl VirtualMethods for Element {
             return;
         }
 
-        if let Some(ref id) = *self.id_attribute.borrow() {
-            if let Some(shadow_root) = self.containing_shadow_root() {
-                shadow_root.register_element_id(self, id.clone(), CanGc::from_cx(cx));
-            } else {
-                doc.register_element_id(cx, self, id.clone());
-            }
-        }
-        if let Some(ref name) = self.name_attribute() &&
-            self.containing_shadow_root().is_none()
-        {
-            doc.register_element_name(self, name.clone());
-        }
+        self.register_current_id_and_name_attribute(cx);
     }
 
     fn unbind_from_tree(&self, cx: &mut JSContext, context: &UnbindContext) {
@@ -4625,24 +4802,10 @@ impl VirtualMethods for Element {
 
         let fullscreen = doc.fullscreen_element();
         if fullscreen.as_deref() == Some(self) {
-            doc.exit_fullscreen(CanGc::from_cx(cx));
+            doc.exit_fullscreen(cx);
         }
-        if let Some(ref value) = *self.id_attribute.borrow() {
-            if let Some(ref shadow_root) = self.containing_shadow_root() {
-                // Only unregister the element id if the node was disconnected from it's shadow root
-                // (as opposed to the whole shadow tree being disconnected as a whole)
-                if !self.upcast::<Node>().is_in_a_shadow_tree() {
-                    shadow_root.unregister_element_id(self, value.clone(), CanGc::from_cx(cx));
-                }
-            } else {
-                doc.unregister_element_id(cx, self, value.clone());
-            }
-        }
-        if let Some(ref value) = self.name_attribute() &&
-            self.containing_shadow_root().is_none()
-        {
-            doc.unregister_element_name(self, value.clone());
-        }
+
+        self.unregister_current_id_and_name_attribute(cx);
     }
 
     fn children_changed(&self, cx: &mut JSContext, mutation: &ChildrenMutation) {

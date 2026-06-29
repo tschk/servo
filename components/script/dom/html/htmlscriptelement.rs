@@ -13,7 +13,7 @@ use dom_struct::dom_struct;
 use encoding_rs::Encoding;
 use html5ever::{LocalName, Prefix, local_name};
 use js::context::JSContext;
-use js::rust::{HandleObject, Stencil};
+use js::rust::HandleObject;
 use net_traits::http_status::HttpStatus;
 use net_traits::request::{
     CorsSettings, Destination, ParserMetadata, Referrer, RequestBuilder, RequestId,
@@ -25,7 +25,6 @@ use servo_url::ServoUrl;
 use style::attr::AttrValue;
 use style::str::{HTML_SPACE_CHARACTERS, StaticStringVec};
 use stylo_atoms::Atom;
-use uuid::Uuid;
 
 use crate::document_loader::{LoadBlocker, LoadType};
 use crate::dom::bindings::codegen::Bindings::DOMTokenListBinding::DOMTokenListMethods;
@@ -35,7 +34,7 @@ use crate::dom::bindings::codegen::Bindings::NodeBinding::NodeMethods;
 use crate::dom::bindings::codegen::UnionTypes::{
     TrustedScriptOrString, TrustedScriptURLOrUSVString,
 };
-use crate::dom::bindings::error::{Error, Fallible};
+use crate::dom::bindings::error::Fallible;
 use crate::dom::bindings::inheritance::Castable;
 use crate::dom::bindings::refcounted::Trusted;
 use crate::dom::bindings::reflector::DomGlobal;
@@ -51,14 +50,14 @@ use crate::dom::element::{
     reflect_cross_origin_attribute, reflect_referrer_policy_attribute, set_cross_origin_attribute,
 };
 use crate::dom::event::eventtarget::EventTarget;
-use crate::dom::global_scope_script_execution::{ClassicScript, ErrorReporting, RethrowErrors};
 use crate::dom::globalscope::GlobalScope;
+use crate::dom::globalscope::script_execution::{ClassicScript, ErrorReporting, RethrowErrors};
 use crate::dom::html::htmlelement::HTMLElement;
+use crate::dom::node::virtualmethods::VirtualMethods;
 use crate::dom::node::{ChildrenMutation, CloneChildrenFlag, Node, NodeTraits, UnbindContext};
 use crate::dom::performance::performanceresourcetiming::InitiatorType;
 use crate::dom::trustedtypes::trustedscript::TrustedScript;
 use crate::dom::trustedtypes::trustedscripturl::TrustedScriptURL;
-use crate::dom::virtualmethods::VirtualMethods;
 use crate::dom::window::Window;
 use crate::fetch::{RequestWithGlobalScope, create_a_potential_cors_request};
 use crate::network_listener::{self, FetchResponseListener, ResourceTimingListener};
@@ -67,10 +66,6 @@ use crate::script_module::{
     fetch_inline_module_script, parse_an_import_map_string, register_import_map,
 };
 use crate::script_runtime::IntroductionType;
-
-/// An unique id for script element.
-#[derive(Clone, Copy, Debug, Eq, Hash, JSTraceable, PartialEq, MallocSizeOf)]
-pub(crate) struct ScriptId(#[no_trace] Uuid);
 
 #[dom_struct]
 pub(crate) struct HTMLScriptElement {
@@ -101,10 +96,6 @@ pub(crate) struct HTMLScriptElement {
     /// Track line line_number
     line_number: u64,
 
-    /// Unique id for each script element
-    #[ignore_malloc_size_of = "Defined in uuid"]
-    id: ScriptId,
-
     /// <https://w3c.github.io/trusted-types/dist/spec/#htmlscriptelement-script-text>
     script_text: DomRefCell<DOMString>,
 
@@ -130,7 +121,6 @@ impl HTMLScriptElement {
         creator: ElementCreator,
     ) -> HTMLScriptElement {
         HTMLScriptElement {
-            id: ScriptId(Uuid::new_v4()),
             htmlelement: HTMLElement::new_inherited(local_name, prefix, document),
             already_started: Cell::new(false),
             delaying_the_load_event: Default::default(),
@@ -163,10 +153,6 @@ impl HTMLScriptElement {
             document,
             proto,
         )
-    }
-
-    pub(crate) fn get_script_id(&self) -> ScriptId {
-        self.id
     }
 
     /// Marks that element as delaying the load event or not.
@@ -240,78 +226,6 @@ pub(crate) enum ScriptType {
     ImportMap,
 }
 
-#[derive(JSTraceable, MallocSizeOf)]
-pub(crate) struct CompiledSourceCode {
-    #[ignore_malloc_size_of = "SM handles JS values"]
-    pub(crate) source_code: Stencil,
-    #[conditional_malloc_size_of = "Rc is hard"]
-    pub(crate) original_text: Rc<DOMString>,
-}
-
-#[derive(JSTraceable, MallocSizeOf)]
-pub(crate) enum SourceCode {
-    Text(#[conditional_malloc_size_of] Rc<DOMString>),
-    Compiled(CompiledSourceCode),
-}
-
-#[derive(JSTraceable, MallocSizeOf)]
-pub(crate) struct ScriptOrigin {
-    pub code: SourceCode,
-    #[no_trace]
-    pub url: ServoUrl,
-    external: bool,
-    pub fetch_options: ScriptFetchOptions,
-    type_: ScriptType,
-    unminified_dir: Option<String>,
-    import_map: Fallible<ImportMap>,
-}
-
-impl ScriptOrigin {
-    pub(crate) fn internal(
-        text: Rc<DOMString>,
-        url: ServoUrl,
-        fetch_options: ScriptFetchOptions,
-        type_: ScriptType,
-        unminified_dir: Option<String>,
-        import_map: Fallible<ImportMap>,
-    ) -> ScriptOrigin {
-        ScriptOrigin {
-            code: SourceCode::Text(text),
-            url,
-            external: false,
-            fetch_options,
-            type_,
-            unminified_dir,
-            import_map,
-        }
-    }
-
-    pub(crate) fn external(
-        text: Rc<DOMString>,
-        url: ServoUrl,
-        fetch_options: ScriptFetchOptions,
-        type_: ScriptType,
-        unminified_dir: Option<String>,
-    ) -> ScriptOrigin {
-        ScriptOrigin {
-            code: SourceCode::Text(text),
-            url,
-            external: true,
-            fetch_options,
-            type_,
-            unminified_dir,
-            import_map: Err(Error::NotFound(None)),
-        }
-    }
-
-    pub(crate) fn text(&self) -> Rc<DOMString> {
-        match &self.code {
-            SourceCode::Text(text) => Rc::clone(text),
-            SourceCode::Compiled(compiled_script) => Rc::clone(&compiled_script.original_text),
-        }
-    }
-}
-
 /// <https://html.spec.whatwg.org/multipage/#steps-to-run-when-the-result-is-ready>
 fn finish_fetching_a_script(
     elem: &HTMLScriptElement,
@@ -348,11 +262,10 @@ pub(crate) type ScriptResult = Result<Script, ()>;
 
 // TODO merge classic and module scripts
 #[derive(JSTraceable, MallocSizeOf)]
-#[expect(clippy::large_enum_variant)]
 pub(crate) enum Script {
     Classic(ClassicScript),
     Module(#[conditional_malloc_size_of] Rc<ModuleTree>),
-    ImportMap(ScriptOrigin),
+    ImportMap(Fallible<ImportMap>),
 }
 
 /// The context required for asynchronously loading an external script source.
@@ -469,8 +382,10 @@ impl FetchResponseListener for ClassicContext {
 
         let global = elem.global();
 
-        if let Some(window) = global.downcast::<Window>() {
-            substitute_with_local_script(window, &mut source_text, final_url.clone());
+        if let Some(window) = global.downcast::<Window>() &&
+            let Some(script_source) = window.local_script_source()
+        {
+            substitute_with_local_script(script_source, &mut source_text, final_url.clone());
         }
 
         // Step 5.6. Let mutedErrors be true if response was CORS-cross-origin, and false otherwise.
@@ -524,10 +439,15 @@ impl FetchResponseListener for ClassicContext {
         // }
     }
 
-    fn process_csp_violations(&mut self, _request_id: RequestId, violations: Vec<Violation>) {
+    fn process_csp_violations(
+        &mut self,
+        cx: &mut js::context::JSContext,
+        _request_id: RequestId,
+        violations: Vec<Violation>,
+    ) {
         let global = &self.resource_timing_global();
         let elem = self.elem.root();
-        global.report_csp_violations(violations, Some(elem.upcast()), None);
+        global.report_csp_violations(cx, violations, Some(elem.upcast()), None);
     }
 }
 
@@ -754,6 +674,7 @@ impl HTMLScriptElement {
             global
                 .get_csp_list()
                 .should_elements_inline_type_behavior_be_blocked(
+                    cx,
                     global,
                     element,
                     InlineCheckType::Script,
@@ -950,7 +871,7 @@ impl HTMLScriptElement {
                     if was_parser_inserted &&
                         doc.get_current_parser()
                             .is_some_and(|parser| parser.script_nesting_level() <= 1) &&
-                        doc.get_script_blocking_stylesheets_count() > 0
+                        doc.has_a_stylesheet_that_is_blocking_scripts()
                     {
                         // Step 34.2: classic, has no src, was parser-inserted, is blocked on stylesheet.
                         doc.set_pending_parsing_blocking_script(self, Some(result));
@@ -1008,20 +929,9 @@ impl HTMLScriptElement {
                 ScriptType::ImportMap => {
                     // Step 32.1 Let result be the result of creating an import map
                     // parse result given source text and base URL.
-                    let import_map_result = parse_an_import_map_string(
-                        cx,
-                        global,
-                        Rc::clone(&text_rc),
-                        base_url.clone(),
-                    );
-                    let script = Script::ImportMap(ScriptOrigin::internal(
-                        text_rc,
-                        base_url,
-                        options,
-                        script_type,
-                        self.global().unminified_js_dir(),
-                        import_map_result,
-                    ));
+                    let import_map_result =
+                        parse_an_import_map_string(cx, global, Rc::clone(&text_rc), base_url);
+                    let script = Script::ImportMap(import_map_result);
 
                     // Step 34.3
                     self.execute(cx, Ok(script));
@@ -1110,9 +1020,9 @@ impl HTMLScriptElement {
                 self.owner_global()
                     .run_a_module_script(cx, module_tree, false);
             },
-            Script::ImportMap(script) => {
+            Script::ImportMap(import_map) => {
                 // Step 6."importmap".1. Register an import map given el's relevant global object and el's result.
-                register_import_map(cx, &self.owner_global(), script.import_map);
+                register_import_map(cx, &self.owner_global(), import_map);
             },
         }
 
@@ -1191,16 +1101,8 @@ impl HTMLScriptElement {
         self.parser_inserted.set(parser_inserted);
     }
 
-    pub(crate) fn get_parser_inserted(&self) -> bool {
-        self.parser_inserted.get()
-    }
-
     pub(crate) fn set_already_started(&self, already_started: bool) {
         self.already_started.set(already_started);
-    }
-
-    pub(crate) fn get_non_blocking(&self) -> bool {
-        self.non_blocking.get()
     }
 
     fn text(&self) -> DOMString {
@@ -1484,16 +1386,9 @@ impl HTMLScriptElementMethods<crate::DomTypeHolder> for HTMLScriptElement {
     }
 }
 
-pub(crate) fn substitute_with_local_script(
-    window: &Window,
-    script: &mut Cow<'_, str>,
-    url: ServoUrl,
-) {
-    if window.local_script_source().is_none() {
-        return;
-    }
-    let mut path = PathBuf::from(window.local_script_source().clone().unwrap());
-    path = path.join(&url[url::Position::BeforeHost..]);
+pub fn substitute_with_local_script(script_source: &str, script: &mut Cow<'_, str>, url: ServoUrl) {
+    let mut path = PathBuf::from(script_source);
+    path = path.join(&url[url::Position::BeforeHost..url::Position::AfterPath]);
     debug!("Attempting to read script stored at: {:?}", path);
     match read_to_string(path.clone()) {
         Ok(local_script) => {

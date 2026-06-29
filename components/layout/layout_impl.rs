@@ -21,7 +21,7 @@ use fonts_traits::StylesheetWebFontLoadFinishedCallback;
 use icu_locid::subtags::Language;
 use layout_api::{
     AxesOverflow, BoxAreaType, CSSPixelRectVec, DangerousStyleNode, IFrameSizes, Layout,
-    LayoutConfig, LayoutElement, LayoutFactory, LayoutNode, NodeRenderingType,
+    LayoutConfig, LayoutDamage, LayoutElement, LayoutFactory, LayoutNode, NodeRenderingType,
     OffsetParentResponse, PhysicalSides, QueryMsg, ReflowGoal, ReflowPhasesRun, ReflowRequest,
     ReflowRequestRestyle, ReflowResult, ReflowStatistics, ScrollContainerQueryFlags,
     ScrollContainerResponse, TrustedNodeAddress, with_layout_state,
@@ -62,9 +62,10 @@ use style::invalidation::element::restyle_hints::RestyleHint;
 use style::invalidation::stylesheets::StylesheetInvalidationSet;
 use style::media_queries::{MediaList, MediaType};
 use style::properties::style_structs::Font;
-use style::properties::{ComputedValues, PropertyId};
+use style::properties::{ComputedValues, LonghandId, NonCustomPropertyId, PropertyId, ShorthandId};
 use style::queries::values::PrefersColorScheme;
-use style::selector_parser::{PseudoElement, RestyleDamage, SnapshotMap};
+use style::selector_parser::{PseudoElement, SnapshotMap};
+use style::servo::media_features::PointerCapabilities;
 use style::shared_lock::{SharedRwLock, SharedRwLockReadGuard, StylesheetGuards};
 use style::stylesheets::{
     CustomMediaMap, DocumentStyleSheet, Origin, Stylesheet, StylesheetInDocument,
@@ -88,7 +89,8 @@ use crate::display_list::{DisplayListBuilder, HitTest, PaintTimingHandler, Stack
 use crate::dom::NodeExt;
 use crate::query::{
     find_character_offset_in_fragment_descendants, get_the_text_steps, process_box_area_request,
-    process_box_areas_request, process_client_rect_request, process_containing_block_query,
+    process_box_areas_request, process_client_rect_request,
+    process_containing_block_descendant_query, process_containing_block_query,
     process_current_css_zoom_query, process_effective_overflow_query,
     process_node_scroll_area_request, process_offset_parent_query, process_padding_request,
     process_resolved_font_style_query, process_resolved_style_request,
@@ -270,14 +272,17 @@ impl Layout for LayoutThread {
     fn set_viewport_details(&mut self, viewport_details: ViewportDetails) -> bool {
         let device = self.stylist.device_mut();
         let device_pixel_ratio = Scale::new(viewport_details.hidpi_scale_factor.get());
+        let device_size = viewport_details.device_size.cast_unit();
         if device.viewport_size() == viewport_details.size &&
-            device.device_pixel_ratio() == device_pixel_ratio
+            device.device_pixel_ratio() == device_pixel_ratio &&
+            device.device_size() == device_size
         {
             return false;
         }
 
         device.set_viewport_size(viewport_details.size);
         device.set_device_pixel_ratio(device_pixel_ratio);
+        device.set_device_size(device_size);
         self.device_has_changed = true;
         true
     }
@@ -321,8 +326,11 @@ impl Layout for LayoutThread {
         let guard = stylesheet.shared_lock.read();
         let stylesheet = DocumentStyleSheet(stylesheet.clone());
         self.stylist.remove_stylesheet(stylesheet.clone(), &guard);
-        self.font_context
-            .remove_all_web_fonts_from_stylesheet(&stylesheet);
+        self.font_context.remove_all_web_fonts_from_stylesheet(
+            &stylesheet,
+            self.stylist.device(),
+            &guard,
+        );
     }
 
     #[servo_tracing::instrument(skip_all)]
@@ -364,6 +372,24 @@ impl Layout for LayoutThread {
         with_layout_state(|| {
             let node = unsafe { ServoLayoutNode::new(&node) };
             process_containing_block_query(node)
+        })
+    }
+
+    /// Return the node corresponding to the containing block of the provided node.
+    #[servo_tracing::instrument(skip_all)]
+    fn query_containing_block_is_descendant(
+        &self,
+        root: TrustedNodeAddress,
+        possible_descendant: TrustedNodeAddress,
+    ) -> bool {
+        with_layout_state(|| {
+            let (root, possible_descendant) = unsafe {
+                (
+                    ServoLayoutNode::new(&root),
+                    ServoLayoutNode::new(&possible_descendant),
+                )
+            };
+            process_containing_block_descendant_query(root, possible_descendant)
         })
     }
 
@@ -772,10 +798,13 @@ impl LayoutThread {
             MediaType::screen(),
             QuirksMode::NoQuirks,
             config.viewport_details.size,
+            config.viewport_details.device_size.cast_unit(),
             Scale::new(config.viewport_details.hidpi_scale_factor.get()),
             Box::new(LayoutFontMetricsProvider(config.font_context.clone())),
             ComputedValues::initial_values_with_font_override(font),
             config.theme.into(),
+            PointerCapabilities::default(),
+            PointerCapabilities::default(),
         );
 
         LayoutThread {
@@ -935,7 +964,11 @@ impl LayoutThread {
         }
     }
 
-    fn handle_accessibility_tree_update(&self, root_element: &ServoLayoutNode) -> bool {
+    fn handle_accessibility_tree_update(
+        &self,
+        root_element: &ServoLayoutNode,
+        reflow_request: &mut ReflowRequest,
+    ) -> bool {
         if !self.needs_accessibility_update() {
             return false;
         }
@@ -945,7 +978,10 @@ impl LayoutThread {
         };
 
         let accessibility_tree = &mut *accessibility_tree;
-        if let Some(tree_update) = accessibility_tree.update_tree(root_element) {
+        let rooted_nodes =
+            std::mem::take(&mut reflow_request.rooted_nodes_for_accessibility_integrity_check);
+
+        if let Some(tree_update) = accessibility_tree.update_tree(root_element, rooted_nodes) {
             // FIXME: Handle send error. Could have a method on accessibility tree to
             // finalise after sending, removing accessibility damage? On fail, retain damage
             // for next reflow, as well as retaining document.needs_accessibility_update.
@@ -1015,7 +1051,7 @@ impl LayoutThread {
         if self.handle_update_scroll_node_request(&reflow_request) {
             reflow_phases_run.insert(ReflowPhasesRun::UpdatedScrollNodeOffset);
         }
-        if self.handle_accessibility_tree_update(&root_element.as_node()) {
+        if self.handle_accessibility_tree_update(&root_element.as_node(), &mut reflow_request) {
             reflow_phases_run.insert(ReflowPhasesRun::UpdatedAccessibilityTree);
         }
 
@@ -1168,9 +1204,12 @@ impl LayoutThread {
             ),
             font_context: self.font_context.clone(),
             iframe_sizes: Mutex::default(),
-            use_rayon: rayon_pool.is_some(),
+            allow_parallel_layout: rayon_pool.is_some(),
             image_resolver: image_resolver.clone(),
             painter_id: self.webview_id.into(),
+            parallelism_job_count_minimum: pref!(layout_parallelism_job_count_minimum) as usize,
+            parallelism_job_size_minimum: pref!(layout_parallelism_job_size_minimum) as usize,
+            device_size: reflow_request.viewport_details.device_size.cast_unit(),
         };
 
         let restyle = reflow_request
@@ -1208,12 +1247,13 @@ impl LayoutThread {
 
         let root_node = root_element.as_node();
         let damage_from_environment = if device_has_changed {
-            RestyleDamage::RELAYOUT
+            LayoutDamage::Relayout
         } else {
-            Default::default()
+            LayoutDamage::empty()
         };
 
         let mut box_tree = self.box_tree.borrow_mut();
+        let mut layout_roots = Vec::new();
         let damage = {
             let box_tree = &mut *box_tree;
             let mut compute_damage_and_build_box_tree = || {
@@ -1223,6 +1263,7 @@ impl LayoutThread {
                     dirty_root.layout_node(),
                     root_node,
                     damage_from_environment,
+                    &mut layout_roots,
                 )
             };
 
@@ -1233,15 +1274,15 @@ impl LayoutThread {
             }
         };
 
-        if damage.contains(RestyleDamage::REBUILD_STACKING_CONTEXT) {
+        if damage.contains(LayoutDamage::RebuildStackingContextTree) {
             self.need_new_stacking_context_tree.set(true);
         }
-        if damage.contains(RestyleDamage::REPAINT) {
+        if damage.contains(LayoutDamage::Repaint) {
             self.need_new_display_list.set(true);
         }
 
-        if !damage.contains(RestyleDamage::RELAYOUT) {
-            if damage.contains(RestyleDamage::RECALCULATE_OVERFLOW) {
+        if !damage.contains(LayoutDamage::Relayout) {
+            if damage.contains(LayoutDamage::RecalculateOverflow) {
                 assert!(self.need_new_display_list.get());
                 assert!(self.need_new_stacking_context_tree.get());
                 self.fragment_tree
@@ -1251,8 +1292,21 @@ impl LayoutThread {
                     .clear_scrollable_overflow();
             }
 
-            layout_context.style_context.stylist.rule_tree().maybe_gc();
-            return (ReflowPhasesRun::empty(), IFrameSizes::default());
+            if !damage.contains(LayoutDamage::DescendantCollectedAsLayoutRoot) {
+                layout_context.style_context.stylist.rule_tree().maybe_gc();
+                return (ReflowPhasesRun::empty(), IFrameSizes::default());
+            }
+
+            debug_assert!(!layout_roots.is_empty());
+            if layout_roots
+                .into_iter()
+                .all(|layout_root| layout_root.try_layout(&layout_context))
+            {
+                return (
+                    ReflowPhasesRun::RanLayout,
+                    std::mem::take(&mut *layout_context.iframe_sizes.lock()),
+                );
+            }
         }
 
         let box_tree = &*box_tree;
@@ -1809,16 +1863,46 @@ impl ReflowPhases {
     /// [`ReflowGoals`] need the basic restyle + box tree layout + fragment tree layout,
     /// so [`ReflowPhases::empty()`] implies that.
     fn necessary(reflow_goal: &ReflowGoal) -> Self {
+        let is_inset_longhand = |longhand: LonghandId| {
+            matches!(
+                longhand,
+                LonghandId::Top |
+                    LonghandId::Right |
+                    LonghandId::Bottom |
+                    LonghandId::Left |
+                    LonghandId::InsetInlineStart |
+                    LonghandId::InsetInlineEnd |
+                    LonghandId::InsetBlockStart |
+                    LonghandId::InsetBlockEnd
+            )
+        };
+
+        let is_inset_property =
+            |property: NonCustomPropertyId| match property.longhand_or_shorthand() {
+                Ok(longhand) => is_inset_longhand(longhand),
+                // Special case for the `All` shorthand as it has many longhands.
+                Err(ShorthandId::All) => true,
+                Err(shorthand) => shorthand.longhands().any(is_inset_longhand),
+            };
+
         match reflow_goal {
             ReflowGoal::LayoutQuery(query) => match query {
+                // Resolving insets requires the creation of the stacking context, but other style properties
+                // do not. This should be kept in sync with `LayoutThread::query_resolved_style()`.
+                QueryMsg::ResolvedStyleQuery(PropertyId::NonCustom(non_custom_property_id))
+                    if is_inset_property(*non_custom_property_id) =>
+                {
+                    Self::StackingContextTreeConstruction
+                },
+                QueryMsg::ResolvedStyleQuery(_) => Self::empty(),
                 QueryMsg::NodesFromPointQuery => {
                     Self::StackingContextTreeConstruction | Self::DisplayListConstruction
                 },
                 QueryMsg::BoxArea |
                 QueryMsg::BoxAreas |
                 QueryMsg::ElementsFromPoint |
+                QueryMsg::FlushForUpdateTheRenderingQuery |
                 QueryMsg::OffsetParentQuery |
-                QueryMsg::ResolvedStyleQuery |
                 QueryMsg::ScrollingAreaOrOffsetQuery |
                 QueryMsg::TextIndexQuery => Self::StackingContextTreeConstruction,
                 QueryMsg::ClientRectQuery |

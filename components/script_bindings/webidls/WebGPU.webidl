@@ -91,8 +91,10 @@ interface GPU {
 };
 
 dictionary GPURequestAdapterOptions {
+    DOMString featureLevel = "core";
     GPUPowerPreference powerPreference;
     boolean forceFallbackAdapter = false;
+    boolean xrCompatible = false;
 };
 
 enum GPUPowerPreference {
@@ -115,6 +117,7 @@ dictionary GPUDeviceDescriptor : GPUObjectDescriptorBase {
 };
 
 enum GPUFeatureName {
+    "core-features-and-limits",
     "depth-clip-control",
     "depth32float-stencil8",
     "texture-compression-bc",
@@ -166,7 +169,9 @@ interface GPUDevice : EventTarget {
     GPUCommandEncoder createCommandEncoder(optional GPUCommandEncoderDescriptor descriptor = {});
     [Throws]
     GPURenderBundleEncoder createRenderBundleEncoder(GPURenderBundleEncoderDescriptor descriptor);
-    //GPUQuerySet createQuerySet(GPUQuerySetDescriptor descriptor);
+
+    [Throws]
+    GPUQuerySet createQuerySet(GPUQuerySetDescriptor descriptor);
 };
 GPUDevice includes GPUObjectBase;
 
@@ -895,12 +900,20 @@ dictionary GPUTexelCopyTextureInfo {
 };
 
 dictionary GPUCopyExternalImageDestInfo : GPUTexelCopyTextureInfo {
-    //GPUPredefinedColorSpace colorSpace = "srgb"; //TODO
+    PredefinedColorSpace colorSpace = "srgb";
     boolean premultipliedAlpha = false;
 };
 
-dictionary GPUImageCopyExternalImage {
-    required (ImageBitmap or HTMLCanvasElement or OffscreenCanvas) source;
+typedef (ImageBitmap or
+         ImageData or
+         HTMLImageElement or
+         HTMLVideoElement or
+         //VideoFrame or
+         HTMLCanvasElement or
+         OffscreenCanvas) GPUCopyExternalImageSource;
+
+dictionary GPUCopyExternalImageSourceInfo {
+    required GPUCopyExternalImageSource source;
     GPUOrigin2D origin = {};
     boolean flipY = false;
 };
@@ -954,6 +967,13 @@ interface GPUCommandEncoder {
         GPUExtent3D copySize);
     */
 
+    undefined resolveQuerySet(
+        GPUQuerySet querySet,
+        GPUSize32 firstQuery,
+        GPUSize32 queryCount,
+        GPUBuffer destination,
+        GPUSize64 destinationOffset);
+
     GPUCommandBuffer finish(optional GPUCommandBufferDescriptor descriptor = {});
 };
 GPUCommandEncoder includes GPUObjectBase;
@@ -977,9 +997,9 @@ interface mixin GPUBindingCommandsMixin {
 };
 
 interface mixin GPUDebugCommandsMixin {
-    //undefined pushDebugGroup(USVString groupLabel);
-    //undefined popDebugGroup();
-    //undefined insertDebugMarker(USVString markerLabel);
+    undefined pushDebugGroup(USVString groupLabel);
+    undefined popDebugGroup();
+    undefined insertDebugMarker(USVString markerLabel);
 };
 
 [Exposed=(Window, Worker), SecureContext, Pref="dom_webgpu_enabled"]
@@ -995,7 +1015,14 @@ GPUComputePassEncoder includes GPUCommandsMixin;
 GPUComputePassEncoder includes GPUDebugCommandsMixin;
 GPUComputePassEncoder includes GPUBindingCommandsMixin;
 
+dictionary GPUComputePassTimestampWrites {
+    required GPUQuerySet querySet;
+    GPUSize32 beginningOfPassWriteIndex;
+    GPUSize32 endOfPassWriteIndex;
+};
+
 dictionary GPUComputePassDescriptor : GPUObjectDescriptorBase {
+    GPUComputePassTimestampWrites timestampWrites;
 };
 
 [Exposed=(Window, Worker), SecureContext, Pref="dom_webgpu_enabled"]
@@ -1023,11 +1050,17 @@ GPURenderPassEncoder includes GPUDebugCommandsMixin;
 GPURenderPassEncoder includes GPUBindingCommandsMixin;
 GPURenderPassEncoder includes GPURenderCommandsMixin;
 
+dictionary GPURenderPassTimestampWrites {
+    required GPUQuerySet querySet;
+    GPUSize32 beginningOfPassWriteIndex;
+    GPUSize32 endOfPassWriteIndex;
+};
+
 dictionary GPURenderPassDescriptor : GPUObjectDescriptorBase {
     required sequence<GPURenderPassColorAttachment> colorAttachments;
     GPURenderPassDepthStencilAttachment depthStencilAttachment;
     GPUQuerySet occlusionQuerySet;
-    //GPURenderPassTimestampWrites timestampWrites;
+    GPURenderPassTimestampWrites timestampWrites;
     //GPUSize64 maxDrawCount = 50000000;
 };
 
@@ -1145,17 +1178,20 @@ interface GPUQueue {
       GPUTexelCopyBufferLayout dataLayout,
       GPUExtent3D size);
 
-    //[Throws]
-    //undefined copyExternalImageToTexture(
-    //  GPUImageCopyExternalImage source,
-    //  GPUCopyExternalImageDestInfo destination,
-    //  GPUExtent3D copySize);
+    [Throws]
+    undefined copyExternalImageToTexture(
+        GPUCopyExternalImageSourceInfo source,
+        GPUCopyExternalImageDestInfo destination,
+        GPUExtent3D copySize);
 };
 GPUQueue includes GPUObjectBase;
 
 [Exposed=(Window, Worker), SecureContext, Pref="dom_webgpu_enabled"]
 interface GPUQuerySet {
     undefined destroy();
+
+    readonly attribute GPUQueryType type;
+    readonly attribute GPUSize32Out count;
 };
 GPUQuerySet includes GPUObjectBase;
 

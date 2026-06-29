@@ -19,6 +19,7 @@ use style::queries::values::PrefersColorScheme;
 use style::rule_tree::{RuleCascadeFlags, StyleSource};
 use style::selector_map::SelectorMap;
 use style::selector_parser::{SelectorImpl, SelectorParser};
+use style::servo::media_features::PointerCapabilities;
 use style::shared_lock::SharedRwLock;
 use style::stylesheets::StyleRule;
 use style::stylist::{
@@ -257,10 +258,13 @@ fn mock_stylist() -> Stylist {
         MediaType::screen(),
         QuirksMode::NoQuirks,
         Size2D::new(0f32, 0f32),
+        Size2D::new(0f32, 0f32),
         Scale::new(1.0),
         Box::new(DummyMetricsProvider),
         initial_style,
         PrefersColorScheme::Light,
+        PointerCapabilities::default(),
+        PointerCapabilities::default(),
     );
     Stylist::new(device, QuirksMode::NoQuirks)
 }

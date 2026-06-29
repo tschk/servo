@@ -11,7 +11,7 @@ use encoding_rs::{Encoding, UTF_8};
 use headers::{ContentType, HeaderMapExt};
 use html5ever::{LocalName, Prefix, local_name};
 use http::Method;
-use js::context::JSContext;
+use js::context::{JSContext, NoGC};
 use js::rust::HandleObject;
 use mime::{self, Mime};
 use net_traits::request::Referrer;
@@ -76,12 +76,12 @@ use crate::dom::html::htmlselectelement::HTMLSelectElement;
 use crate::dom::html::htmltextareaelement::HTMLTextAreaElement;
 use crate::dom::html::input_element::HTMLInputElement;
 use crate::dom::input_element::input_type::InputType;
+use crate::dom::node::virtualmethods::VirtualMethods;
 use crate::dom::node::{Node, NodeFlags, NodeTraits, UnbindContext, VecPreOrderInsertionHelper};
 use crate::dom::nodelist::{NodeList, RadioListMode};
 use crate::dom::radionodelist::RadioNodeList;
 use crate::dom::submitevent::SubmitEvent;
 use crate::dom::types::{DocumentFragment, HTMLIFrameElement};
-use crate::dom::virtualmethods::VirtualMethods;
 use crate::dom::window::Window;
 use crate::links::{LinkRelations, get_element_target, valid_navigable_target_name_or_keyword};
 use crate::navigation::navigate;
@@ -436,13 +436,13 @@ impl HTMLFormElementMethods<crate::DomTypeHolder> for HTMLFormElement {
 
     /// <https://html.spec.whatwg.org/multipage/#dom-form-length>
     fn Length(&self, cx: &mut JSContext) -> u32 {
-        self.Elements(cx).Length()
+        self.Elements(cx).Length(cx)
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-form-item>
     fn IndexedGetter(&self, cx: &mut JSContext, index: u32) -> Option<DomRoot<Element>> {
         let elements = self.Elements(cx);
-        elements.IndexedGetter(index)
+        elements.IndexedGetter(cx, index)
     }
 
     /// <https://html.spec.whatwg.org/multipage/#the-form-element%3Adetermine-the-value-of-a-named-property>
@@ -454,12 +454,12 @@ impl HTMLFormElementMethods<crate::DomTypeHolder> for HTMLFormElement {
         // Step 1
         let mut candidates =
             RadioNodeList::new_controls_except_image_inputs(cx, &window, self, &name);
-        let mut candidates_length = candidates.Length();
+        let mut candidates_length = candidates.Length(cx);
 
         // Step 2
         if candidates_length == 0 {
             candidates = RadioNodeList::new_images(cx, &window, self, &name);
-            candidates_length = candidates.Length();
+            candidates_length = candidates.Length(cx);
         }
 
         let mut past_names_map = self.past_names_map.borrow_mut();
@@ -521,7 +521,7 @@ impl HTMLFormElementMethods<crate::DomTypeHolder> for HTMLFormElement {
     }
 
     // https://html.spec.whatwg.org/multipage/#the-form-element:supported-property-names
-    fn SupportedPropertyNames(&self) -> Vec<DOMString> {
+    fn SupportedPropertyNames(&self, _: &NoGC) -> Vec<DOMString> {
         // Step 1
         #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
         enum SourcedNameSource {
@@ -771,12 +771,12 @@ impl HTMLFormElement {
 
             // Step 6.5
             let event = SubmitEvent::new(
+                cx,
                 self.global().as_window(),
                 atom!("submit"),
                 true,
                 true,
                 submitter_button.map(DomRoot::from_ref),
-                CanGc::from_cx(cx),
             );
             let event = event.upcast::<Event>();
             event.fire(cx, self.upcast::<EventTarget>());
@@ -1228,9 +1228,9 @@ impl HTMLFormElement {
     /// 5.x substeps are mostly handled inside element-specific methods
     fn get_unclean_dataset(
         &self,
+        cx: &mut JSContext,
         submitter: Option<FormSubmitterElement>,
         encoding: Option<&'static Encoding>,
-        can_gc: CanGc,
     ) -> Vec<FormDatum> {
         let mut data_set = Vec::new();
         for child in self.controls.borrow().iter() {
@@ -1248,7 +1248,12 @@ impl HTMLFormElement {
                 match element {
                     HTMLElementTypeId::HTMLInputElement => {
                         let input = child.downcast::<HTMLInputElement>().unwrap();
-                        data_set.append(&mut input.form_datums(submitter, encoding));
+                        let (ref mut form_datums, should_continue) =
+                            input.form_datums(submitter, encoding);
+                        data_set.append(form_datums);
+                        if should_continue {
+                            continue;
+                        }
                     },
                     HTMLElementTypeId::HTMLButtonElement => {
                         let button = child.downcast::<HTMLButtonElement>().unwrap();
@@ -1261,7 +1266,7 @@ impl HTMLFormElement {
                     },
                     HTMLElementTypeId::HTMLSelectElement => {
                         let select = child.downcast::<HTMLSelectElement>().unwrap();
-                        select.push_form_data(&mut data_set);
+                        select.push_form_data(cx.no_gc(), &mut data_set);
                     },
                     HTMLElementTypeId::HTMLTextAreaElement => {
                         let textarea = child.downcast::<HTMLTextAreaElement>().unwrap();
@@ -1278,8 +1283,9 @@ impl HTMLFormElement {
                         let custom = child.downcast::<HTMLElement>().unwrap();
                         if custom.is_form_associated_custom_element() {
                             // https://html.spec.whatwg.org/multipage/#face-entry-construction
-                            let internals =
-                                custom.upcast::<Element>().ensure_element_internals(can_gc);
+                            let internals = custom
+                                .upcast::<Element>()
+                                .ensure_element_internals(CanGc::from_cx(cx));
                             internals.perform_entry_construction(&mut data_set);
                             // Otherwise no form value has been set so there is nothing to do.
                         }
@@ -1288,22 +1294,27 @@ impl HTMLFormElement {
                 }
             }
 
-            // Step: 5.13. Add an entry if element has dirname attribute
-            // An element can only have a dirname attribute if it is a textarea element
-            // or an input element whose type attribute is in either the Text state or the Search state
+            // Step: 5.11.1 Let dirname be the value of the element's dirname attribute.
             let child_element = child.downcast::<Element>().unwrap();
-            let input_matches = child_element
-                .downcast::<HTMLInputElement>()
-                .is_some_and(|input| {
-                    matches!(
-                        *input.input_type(),
-                        InputType::Text(_) | InputType::Search(_)
-                    )
-                });
-            let textarea_matches = child_element.is::<HTMLTextAreaElement>();
             let dirname = child_element.get_string_attribute(&local_name!("dirname"));
-            if (input_matches || textarea_matches) && !dirname.is_empty() {
+
+            // Step: 5.11. If the element has a dirname attribute, that attribute's value is not the empty
+            // string, and the element is an auto-directionality form-associated element:
+            // From: <https://html.spec.whatwg.org/multipage/#auto-directionality-form-associated-elements>
+            // Input elements whose type attribute is in the Hidden, Text, Search, Telephone, URL, Email,
+            // Password, Submit Button, Reset Button, or Button state, and textarea elements.
+            let is_input_auto_directionality_form_associated_element = child_element
+                .downcast::<HTMLInputElement>()
+                .is_some_and(|input| input.is_auto_directionality_form_associated_element());
+            let is_textarea_element = child_element.is::<HTMLTextAreaElement>();
+            if !dirname.is_empty() &&
+                (is_input_auto_directionality_form_associated_element || is_textarea_element)
+            {
+                // Step: 5.11.2 Let dir be the string "ltr" if the directionality of the element is 'ltr',
+                // and "rtl" otherwise (i.e., when the directionality of the element is 'rtl').
                 let dir = DOMString::from(child_element.directionality());
+
+                // Step: 5.11.3 Create an entry with dirname and dir, and append it to entry list.
                 data_set.push(FormDatum {
                     ty: DOMString::from("string"),
                     name: dirname,
@@ -1330,7 +1341,7 @@ impl HTMLFormElement {
         self.constructing_entry_list.set(true);
 
         // Step 3-6
-        let ret = self.get_unclean_dataset(submitter, encoding, CanGc::from_cx(cx));
+        let ret = self.get_unclean_dataset(cx, submitter, encoding);
 
         let window = self.owner_window();
 
@@ -1339,12 +1350,12 @@ impl HTMLFormElement {
 
         // Step 7
         let event = FormDataEvent::new(
+            cx,
             &window,
             atom!("formdata"),
             EventBubbles::Bubbles,
             EventCancelable::NotCancelable,
             &form_data,
-            CanGc::from_cx(cx),
         );
 
         event
@@ -1456,7 +1467,7 @@ impl Element {
         if let Some(input_element) = self.downcast::<HTMLInputElement>() {
             input_element.reset(cx);
         } else if let Some(select_element) = self.downcast::<HTMLSelectElement>() {
-            select_element.reset();
+            select_element.reset(cx);
         } else if let Some(textarea_element) = self.downcast::<HTMLTextAreaElement>() {
             textarea_element.reset(cx);
         } else if let Some(output_element) = self.downcast::<HTMLOutputElement>() {
@@ -1465,6 +1476,7 @@ impl Element {
             html_element.is_form_associated_custom_element()
         {
             ScriptThread::enqueue_callback_reaction(
+                cx,
                 html_element.upcast::<Element>(),
                 CallbackReaction::FormReset,
                 None,
@@ -1685,9 +1697,9 @@ pub(crate) trait FormControl: DomObject<ReflectorType = ()> + NodeTraits {
             let first_relevant_element = if let Some(shadow_root) = self.containing_shadow_root() {
                 shadow_root
                     .upcast::<DocumentFragment>()
-                    .GetElementById(form_id)
+                    .GetElementById(cx, form_id)
             } else {
-                node.owner_document().GetElementById(form_id)
+                node.owner_document().GetElementById(cx, form_id)
             };
 
             first_relevant_element.and_then(DomRoot::downcast::<HTMLFormElement>)
@@ -1708,6 +1720,7 @@ pub(crate) trait FormControl: DomObject<ReflectorType = ()> + NodeTraits {
                 html_elem.is_form_associated_custom_element()
             {
                 ScriptThread::enqueue_callback_reaction(
+                    cx,
                     elem,
                     CallbackReaction::FormAssociated(
                         new_owner.as_ref().map(|form| DomRoot::from_ref(&**form)),

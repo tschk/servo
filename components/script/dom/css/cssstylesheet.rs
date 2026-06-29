@@ -12,7 +12,7 @@ use js::rust::HandleObject;
 use script_bindings::cell::DomRefCell;
 use script_bindings::codegen::GenericBindings::StyleSheetBinding::StyleSheetMethods;
 use script_bindings::inheritance::Castable;
-use script_bindings::reflector::{reflect_dom_object, reflect_dom_object_with_proto};
+use script_bindings::reflector::{reflect_dom_object, reflect_dom_object_with_proto_and_cx};
 use script_bindings::root::Dom;
 use servo_arc::Arc;
 use style::media_queries::MediaList as StyleMediaList;
@@ -131,6 +131,7 @@ impl CSSStyleSheet {
 
     #[allow(clippy::too_many_arguments)]
     fn new_with_proto(
+        cx: &mut JSContext,
         window: &Window,
         proto: Option<HandleObject>,
         owner: Option<&Element>,
@@ -139,9 +140,8 @@ impl CSSStyleSheet {
         title: Option<DOMString>,
         stylesheet: Arc<StyleStyleSheet>,
         constructor_document: Option<&Document>,
-        can_gc: CanGc,
     ) -> DomRoot<CSSStyleSheet> {
-        reflect_dom_object_with_proto(
+        reflect_dom_object_with_proto_and_cx(
             Box::new(CSSStyleSheet::new_inherited(
                 owner,
                 type_,
@@ -152,7 +152,7 @@ impl CSSStyleSheet {
             )),
             window,
             proto,
-            can_gc,
+            cx,
         )
     }
 
@@ -260,7 +260,7 @@ impl CSSStyleSheet {
         }
     }
 
-    pub(crate) fn will_modify(&self) {
+    pub(crate) fn will_modify(&self, cx: &mut JSContext) {
         let Some(node) = self.owner_node.get() else {
             return;
         };
@@ -269,7 +269,7 @@ impl CSSStyleSheet {
             return;
         };
 
-        node.will_modify_stylesheet();
+        node.will_modify_stylesheet(cx);
     }
 
     pub(crate) fn update_style_stylesheet(
@@ -306,12 +306,12 @@ impl CSSStyleSheet {
     }
 
     /// <https://drafts.csswg.org/cssom/#dom-cssstylesheet-replacesync> Steps 2+
-    fn do_replace_sync(&self, text: USVString) {
+    fn do_replace_sync(&self, cx: &mut JSContext, text: USVString) {
         // Step 2. Let rules be the result of running parse a stylesheet’s contents from text.
         let global = self.global();
         let window = global.as_window();
 
-        self.will_modify();
+        self.will_modify(cx);
 
         let _span = profile_traits::trace_span!("ParseStylesheet").entered();
         let sheet = self.style_stylesheet();
@@ -345,9 +345,9 @@ impl CSSStyleSheet {
 impl CSSStyleSheetMethods<crate::DomTypeHolder> for CSSStyleSheet {
     /// <https://drafts.csswg.org/cssom/#dom-cssstylesheet-cssstylesheet>
     fn Constructor(
+        cx: &mut JSContext,
         window: &Window,
         proto: Option<HandleObject>,
-        can_gc: CanGc,
         options: &CSSStyleSheetInit,
     ) -> DomRoot<Self> {
         let doc = window.Document();
@@ -374,6 +374,7 @@ impl CSSStyleSheetMethods<crate::DomTypeHolder> for CSSStyleSheet {
             stylesheet.set_disabled(true);
         }
         Self::new_with_proto(
+            cx,
             window,
             proto,
             None, // owner
@@ -382,7 +383,6 @@ impl CSSStyleSheetMethods<crate::DomTypeHolder> for CSSStyleSheet {
             None, // title
             stylesheet,
             Some(&window.Document()), // constructor_document
-            can_gc,
         )
     }
 
@@ -432,7 +432,7 @@ impl CSSStyleSheetMethods<crate::DomTypeHolder> for CSSStyleSheet {
                 "This method can only be called on modifiable style sheets".to_string(),
             )));
         }
-        self.rulelist(cx).remove_rule(index)
+        self.rulelist(cx).remove_rule(cx, index)
     }
 
     /// <https://drafts.csswg.org/cssom/#dom-cssstylesheet-rules>
@@ -510,20 +510,20 @@ impl CSSStyleSheetMethods<crate::DomTypeHolder> for CSSStyleSheet {
                 let sheet = trusted_sheet.root();
 
                 // Step 4.1..4.3
-                sheet.do_replace_sync(text);
+                sheet.do_replace_sync(cx, text);
 
                 // Step 4.4. Unset sheet’s disallow modification flag.
                 sheet.disallow_modification.set(false);
 
                 // Step 4.5. Resolve promise with sheet.
-                trusted_promise.root().resolve_native_with_cx(cx, &sheet);
+                trusted_promise.root().resolve_native(cx, &sheet);
             }));
 
         Ok(promise)
     }
 
     /// <https://drafts.csswg.org/cssom/#dom-cssstylesheet-replacesync>
-    fn ReplaceSync(&self, text: USVString) -> Result<(), Error> {
+    fn ReplaceSync(&self, cx: &mut js::context::JSContext, text: USVString) -> Result<(), Error> {
         // Step 1. If the constructed flag is not set, or the disallow modification flag is set,
         // throw a NotAllowedError DOMException.
         if !self.is_constructed() || self.disallow_modification() {
@@ -536,7 +536,7 @@ impl CSSStyleSheetMethods<crate::DomTypeHolder> for CSSStyleSheet {
                 "This method can only be called on modifiable style sheets".to_string(),
             )));
         }
-        self.do_replace_sync(text);
+        self.do_replace_sync(cx, text);
         Ok(())
     }
 }

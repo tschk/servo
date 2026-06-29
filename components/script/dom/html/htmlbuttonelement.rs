@@ -34,12 +34,12 @@ use crate::dom::html::htmlformelement::{
     FormControl, FormDatum, FormDatumValue, FormSubmitterElement, HTMLFormElement, ResetFrom,
     SubmittedFrom,
 };
+use crate::dom::node::virtualmethods::{VirtualMethods, vtable_for};
 use crate::dom::node::{BindContext, Node, NodeTraits, UnbindContext};
 use crate::dom::nodelist::NodeList;
 use crate::dom::types::HTMLInputElement;
 use crate::dom::validation::{Validatable, is_barred_by_datalist_ancestor};
 use crate::dom::validitystate::{ValidationFlags, ValidityState};
-use crate::dom::virtualmethods::{VirtualMethods, vtable_for};
 use crate::script_runtime::CanGc;
 
 #[derive(Clone, Copy, JSTraceable, MallocSizeOf, PartialEq)]
@@ -283,7 +283,7 @@ impl HTMLButtonElement {
             .perform_validation_and_update(cx, ValidationFlags::all());
     }
 
-    fn command_for_element(&self) -> Option<DomRoot<Element>> {
+    fn command_for_element(&self, cx: &mut JSContext) -> Option<DomRoot<Element>> {
         let command_for_value = self
             .upcast::<Element>()
             .get_attribute_string_value(&local_name!("commandfor"))?
@@ -294,9 +294,9 @@ impl HTMLButtonElement {
             .GetRootNode(&GetRootNodeOptions::empty());
 
         if let Some(document) = root_node.downcast::<Document>() {
-            return document.GetElementById(command_for_value);
+            return document.GetElementById(cx, command_for_value);
         } else if let Some(document_fragment) = root_node.downcast::<DocumentFragment>() {
-            return document_fragment.GetElementById(command_for_value);
+            return document_fragment.GetElementById(cx, command_for_value);
         }
         unreachable!("Button element must be in a document or document fragment");
     }
@@ -540,7 +540,7 @@ impl Activatable for HTMLButtonElement {
         // Step 4. Let target be the result of running element's get the commandfor-associated
         // element.
         // Step 5. If target is not null:
-        if let Some(target) = self.command_for_element() {
+        if let Some(target) = self.command_for_element(cx) {
             // Steps 5.1 Let command be element's command attribute.
             let command = self.command_state();
             // Step 5.2 If the result of determining if a command is valid for a target given command and target is false, then return.
@@ -553,6 +553,7 @@ impl Activatable for HTMLButtonElement {
             // TODO source attribute
             // Step 5.4 If continue is false, then return.
             let event = CommandEvent::new(
+                cx,
                 &self.owner_window(),
                 atom!("command"),
                 EventBubbles::DoesNotBubble,
@@ -560,7 +561,6 @@ impl Activatable for HTMLButtonElement {
                 Some(DomRoot::from_ref(self.upcast())),
                 self.upcast::<Element>()
                     .get_string_attribute(&local_name!("command")),
-                CanGc::from_cx(cx),
             );
             let event = event.upcast::<Event>();
             if !event.fire(cx, target.upcast::<EventTarget>()) {

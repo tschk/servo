@@ -36,8 +36,8 @@ use crate::dom::element::attributes::storage::AttrRef;
 use crate::dom::element::{AttributeMutation, Element, ElementCreator};
 use crate::dom::html::htmlelement::HTMLElement;
 use crate::dom::medialist::MediaList;
+use crate::dom::node::virtualmethods::VirtualMethods;
 use crate::dom::node::{BindContext, ChildrenMutation, Node, NodeTraits, UnbindContext};
-use crate::dom::virtualmethods::VirtualMethods;
 use crate::script_runtime::CanGc;
 use crate::stylesheet_loader::StylesheetOwner;
 
@@ -80,7 +80,7 @@ impl HTMLStyleElement {
     }
 
     pub(crate) fn new(
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         local_name: LocalName,
         prefix: Option<Prefix>,
         document: &Document,
@@ -103,7 +103,7 @@ impl HTMLStyleElement {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#update-a-style-block>
-    pub(crate) fn update_a_style_block(&self) {
+    pub(crate) fn update_a_style_block(&self, cx: &mut JSContext) {
         // Step 1. Let element be the style element.
         //
         // That's self
@@ -137,6 +137,7 @@ impl HTMLStyleElement {
         if global
             .get_csp_list()
             .should_elements_inline_type_behavior_be_blocked(
+                cx,
                 global,
                 self.upcast(),
                 InlineCheckType::Style,
@@ -210,7 +211,7 @@ impl HTMLStyleElement {
 
         // Finally, update our stylesheet, regardless of which scenario we ran into
         self.clean_stylesheet_ownership();
-        self.set_stylesheet(sheet, cache_key);
+        self.set_stylesheet(cx, sheet, cache_key);
     }
 
     // FIXME(emilio): This is duplicated with HTMLLinkElement::set_stylesheet.
@@ -219,23 +220,24 @@ impl HTMLStyleElement {
     // this function has a bit difference with `HTMLLinkElement::set_stylesheet` now.
     pub(crate) fn set_stylesheet(
         &self,
+        cx: &mut JSContext,
         s: Arc<Stylesheet>,
         cache_key: Option<StylesheetContentsCacheKey>,
     ) {
         *self.stylesheet.borrow_mut() = Some(s.clone());
         *self.stylesheetcontents_cache_key.borrow_mut() = cache_key;
         self.stylesheet_list_owner()
-            .add_owned_stylesheet(self.upcast(), s);
+            .add_owned_stylesheet(cx, self.upcast(), s);
     }
 
-    pub(crate) fn will_modify_stylesheet(&self) {
+    pub(crate) fn will_modify_stylesheet(&self, cx: &mut JSContext) {
         if let Some(stylesheet_with_owned_contents) = self.create_owned_contents_stylesheet() {
             self.remove_stylesheet();
             if let Some(cssom_stylesheet) = self.cssom_stylesheet.get() {
                 let guard = stylesheet_with_owned_contents.shared_lock.read();
                 cssom_stylesheet.update_style_stylesheet(&stylesheet_with_owned_contents, &guard);
             }
-            self.set_stylesheet(stylesheet_with_owned_contents, None);
+            self.set_stylesheet(cx, stylesheet_with_owned_contents, None);
         }
     }
 
@@ -324,7 +326,7 @@ impl VirtualMethods for HTMLStyleElement {
         // https://html.spec.whatwg.org/multipage/#update-a-style-block
         // > The element is not on the stack of open elements of an HTML parser or XML parser, and its children changed steps run.
         if !self.in_stack_of_open_elements.get() {
-            self.update_a_style_block();
+            self.update_a_style_block(cx);
         }
     }
 
@@ -334,7 +336,7 @@ impl VirtualMethods for HTMLStyleElement {
         // https://html.spec.whatwg.org/multipage/#update-a-style-block
         // > The element is not on the stack of open elements of an HTML parser or XML parser, and it becomes connected or disconnected.
         if !self.in_stack_of_open_elements.get() {
-            self.update_a_style_block();
+            self.update_a_style_block(cx);
         }
     }
 
@@ -344,7 +346,7 @@ impl VirtualMethods for HTMLStyleElement {
 
         // https://html.spec.whatwg.org/multipage/#update-a-style-block
         // > The element is popped off the stack of open elements of an HTML parser or XML parser.
-        self.update_a_style_block();
+        self.update_a_style_block(cx);
     }
 
     fn unbind_from_tree(&self, cx: &mut js::context::JSContext, context: &UnbindContext) {
@@ -355,7 +357,7 @@ impl VirtualMethods for HTMLStyleElement {
         // https://html.spec.whatwg.org/multipage/#update-a-style-block
         // > The element is not on the stack of open elements of an HTML parser or XML parser, and it becomes connected or disconnected.
         if !self.in_stack_of_open_elements.get() {
-            self.update_a_style_block();
+            self.update_a_style_block(cx);
         }
     }
 
@@ -383,7 +385,7 @@ impl VirtualMethods for HTMLStyleElement {
                 return;
             }
             self.remove_stylesheet();
-            self.update_a_style_block();
+            self.update_a_style_block(cx);
         } else if attr.name() == "media" &&
             let Some(ref stylesheet) = *self.stylesheet.borrow_mut()
         {

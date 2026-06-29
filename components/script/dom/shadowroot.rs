@@ -8,11 +8,11 @@ use std::collections::hash_map::Entry;
 
 use dom_struct::dom_struct;
 use html5ever::serialize::TraversalScope;
+use js::context::JSContext;
 use js::rust::{HandleValue, MutableHandleValue};
 use script_bindings::cell::{DomRefCell, RefMut};
 use script_bindings::error::{ErrorResult, Fallible};
 use script_bindings::reflector::reflect_dom_object;
-use script_bindings::script_runtime::JSContext;
 use servo_arc::Arc;
 use style::author_styles::AuthorStyles;
 use style::invalidation::element::restyle_hints::RestyleHint;
@@ -41,6 +41,7 @@ use crate::dom::bindings::root::{Dom, DomRoot, LayoutDom, MutNullableDom};
 use crate::dom::bindings::str::DOMString;
 use crate::dom::css::cssstylesheet::CSSStyleSheet;
 use crate::dom::css::stylesheetlist::{StyleSheetList, StyleSheetListOwner};
+use crate::dom::customelementregistry::CustomElementRegistry;
 use crate::dom::document::Document;
 use crate::dom::documentfragment::DocumentFragment;
 use crate::dom::documentorshadowroot::{
@@ -50,6 +51,7 @@ use crate::dom::element::Element;
 use crate::dom::html::htmlslotelement::HTMLSlotElement;
 use crate::dom::htmldetailselement::DetailsNameGroups;
 use crate::dom::iterators::ShadowIncluding;
+use crate::dom::node::virtualmethods::{VirtualMethods, vtable_for};
 use crate::dom::node::{
     BindContext, IsShadowTree, Node, NodeDamage, NodeFlags, NodeTraits, UnbindContext,
     VecPreOrderInsertionHelper,
@@ -57,7 +59,6 @@ use crate::dom::node::{
 use crate::dom::sanitizer::Sanitizer;
 use crate::dom::trustedtypes::trustedhtml::TrustedHTML;
 use crate::dom::types::EventTarget;
-use crate::dom::virtualmethods::{VirtualMethods, vtable_for};
 use crate::dom::window::Window;
 use crate::script_runtime::CanGc;
 use crate::stylesheet_set::StylesheetSetRef;
@@ -72,6 +73,7 @@ pub(crate) enum IsUserAgentWidget {
 /// <https://dom.spec.whatwg.org/#interface-shadowroot>
 #[dom_struct]
 pub(crate) struct ShadowRoot {
+    /// The [`DocumentFragment`] that this [`ShadowRoot`] inherits from.
     document_fragment: DocumentFragment,
     document_or_shadow_root: DocumentOrShadowRoot,
     document: Dom<Document>,
@@ -202,7 +204,12 @@ impl ShadowRoot {
     ///
     /// <https://drafts.csswg.org/cssom/#documentorshadowroot-final-css-style-sheets>
     #[cfg_attr(crown, expect(crown::unrooted_must_root))] // Owner needs to be rooted already necessarily.
-    pub(crate) fn add_owned_stylesheet(&self, owner_node: &Element, sheet: Arc<Stylesheet>) {
+    pub(crate) fn add_owned_stylesheet(
+        &self,
+        cx: &mut JSContext,
+        owner_node: &Element,
+        sheet: Arc<Stylesheet>,
+    ) {
         let stylesheets = &mut self.author_styles.borrow_mut().stylesheets;
 
         // FIXME(stevennovaryo): This is almost identical with the one in Document::add_stylesheet.
@@ -221,10 +228,7 @@ impl ShadowRoot {
             .cloned();
 
         if self.document.has_browsing_context() {
-            let document_context = self.window.web_font_context();
-            self.window
-                .layout_mut()
-                .load_web_fonts_from_stylesheet(&sheet, &document_context);
+            self.document.load_web_fonts_from_stylesheet(cx, &sheet);
         }
 
         DocumentOrShadowRoot::add_stylesheet(
@@ -238,7 +242,11 @@ impl ShadowRoot {
 
     /// Append a constructed stylesheet to the back of shadow root stylesheet set.
     #[cfg_attr(crown, expect(crown::unrooted_must_root))]
-    pub(crate) fn append_constructed_stylesheet(&self, cssom_stylesheet: &CSSStyleSheet) {
+    pub(crate) fn append_constructed_stylesheet(
+        &self,
+        cx: &mut JSContext,
+        cssom_stylesheet: &CSSStyleSheet,
+    ) {
         debug_assert!(cssom_stylesheet.is_constructed());
 
         let stylesheets = &mut self.author_styles.borrow_mut().stylesheets;
@@ -247,10 +255,7 @@ impl ShadowRoot {
         let insertion_point = stylesheets.iter().last().cloned();
 
         if self.document.has_browsing_context() {
-            let document_context = self.window.web_font_context();
-            self.window
-                .layout_mut()
-                .load_web_fonts_from_stylesheet(&sheet, &document_context);
+            self.document.load_web_fonts_from_stylesheet(cx, &sheet);
         }
 
         DocumentOrShadowRoot::add_stylesheet(
@@ -286,27 +291,13 @@ impl ShadowRoot {
 
     /// Remove any existing association between the provided id and any elements
     /// in this shadow tree.
-    pub(crate) fn unregister_element_id(&self, to_unregister: &Element, id: Atom, _can_gc: CanGc) {
-        self.document_or_shadow_root.unregister_named_element(
-            self.document_fragment.id_map(),
-            to_unregister,
-            &id,
-        );
+    pub(crate) fn unregister_element_id(&self, id: &Atom) {
+        self.document_fragment.id_map().remove(id);
     }
 
     /// Associate an element present in this shadow tree with the provided id.
-    pub(crate) fn register_element_id(&self, element: &Element, id: Atom, _can_gc: CanGc) {
-        let root = self
-            .upcast::<Node>()
-            .inclusive_ancestors(ShadowIncluding::No)
-            .last()
-            .unwrap();
-        self.document_or_shadow_root.register_named_element(
-            self.document_fragment.id_map(),
-            element,
-            &id,
-            root,
-        );
+    pub(crate) fn register_element_id(&self, element: &Element, id: &Atom, _can_gc: CanGc) {
+        self.document_fragment.id_map().add(id, element)
     }
 
     pub(crate) fn register_slot(&self, slot: &HTMLSlotElement) {
@@ -382,6 +373,15 @@ impl ShadowRoot {
             |details_name_groups| details_name_groups.get_or_insert_default(),
         )
     }
+
+    pub(crate) fn custom_element_registry(&self) -> Option<DomRoot<CustomElementRegistry>> {
+        self.document_or_shadow_root.custom_element_registry()
+    }
+
+    pub(crate) fn set_custom_element_registry(&self, registry: &CustomElementRegistry) {
+        self.document_or_shadow_root
+            .set_custom_element_registry(Some(registry));
+    }
 }
 
 impl ShadowRootMethods<crate::DomTypeHolder> for ShadowRoot {
@@ -390,11 +390,17 @@ impl ShadowRootMethods<crate::DomTypeHolder> for ShadowRoot {
         self.document_or_shadow_root.active_element(self.upcast())
     }
 
+    /// <https://dom.spec.whatwg.org/#dom-documentorshadowroot-customelementregistry>
+    fn GetCustomElementRegistry(&self) -> Option<DomRoot<CustomElementRegistry>> {
+        self.custom_element_registry()
+    }
+
     /// <https://drafts.csswg.org/cssom-view/#dom-document-elementfrompoint>
     fn ElementFromPoint(&self, x: Finite<f64>, y: Finite<f64>) -> Option<DomRoot<Element>> {
         // Return the result of running the retargeting algorithm with context object
         // and the original result as input.
         match self.document_or_shadow_root.element_from_point(
+            self.upcast(),
             x,
             y,
             None,
@@ -415,7 +421,13 @@ impl ShadowRootMethods<crate::DomTypeHolder> for ShadowRoot {
         let mut elements = Vec::new();
         for e in self
             .document_or_shadow_root
-            .elements_from_point(x, y, None, self.document.has_browsing_context())
+            .elements_from_point(
+                self.upcast(),
+                x,
+                y,
+                None,
+                self.document.has_browsing_context(),
+            )
             .iter()
         {
             let retargeted_node = e.upcast::<EventTarget>().retarget(self.upcast());
@@ -465,7 +477,7 @@ impl ShadowRootMethods<crate::DomTypeHolder> for ShadowRoot {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-shadowroot-gethtml>
-    fn GetHTML(&self, cx: &mut js::context::JSContext, options: &GetHTMLOptions) -> DOMString {
+    fn GetHTML(&self, cx: &mut JSContext, options: &GetHTMLOptions) -> DOMString {
         // > ShadowRoot's getHTML(options) method steps are to return the result of HTML fragment serialization
         // >  algorithm with this, options["serializableShadowRoots"], and options["shadowRoots"].
         self.upcast::<Node>().html_serialize(
@@ -477,10 +489,7 @@ impl ShadowRootMethods<crate::DomTypeHolder> for ShadowRoot {
     }
 
     /// <https://html.spec.whatwg.org/multipage/#dom-shadowroot-innerhtml>
-    fn GetInnerHTML(
-        &self,
-        cx: &mut js::context::JSContext,
-    ) -> Fallible<TrustedHTMLOrNullIsEmptyString> {
+    fn GetInnerHTML(&self, cx: &mut JSContext) -> Fallible<TrustedHTMLOrNullIsEmptyString> {
         // ShadowRoot's innerHTML getter steps are to return the result of running fragment serializing
         // algorithm steps with this and true.
         self.upcast::<Node>()
@@ -491,7 +500,7 @@ impl ShadowRootMethods<crate::DomTypeHolder> for ShadowRoot {
     /// <https://html.spec.whatwg.org/multipage/#dom-shadowroot-innerhtml>
     fn SetInnerHTML(
         &self,
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         value: TrustedHTMLOrNullIsEmptyString,
     ) -> ErrorResult {
         // Step 1. Let compliantString be the result of invoking the Get Trusted Type compliant string algorithm
@@ -526,7 +535,7 @@ impl ShadowRootMethods<crate::DomTypeHolder> for ShadowRoot {
     /// <https://html.spec.whatwg.org/multipage/#dom-shadowroot-sethtmlunsafe>
     fn SetHTMLUnsafe(
         &self,
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         value: TrustedHTMLOrString,
         options: &SetHTMLUnsafeOptions,
     ) -> ErrorResult {
@@ -557,7 +566,7 @@ impl ShadowRootMethods<crate::DomTypeHolder> for ShadowRoot {
     /// <https://wicg.github.io/sanitizer-api/#dom-shadowroot-sethtml>
     fn SetHTML(
         &self,
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         html: DOMString,
         options: &SetHTMLOptions,
     ) -> ErrorResult {
@@ -574,8 +583,9 @@ impl ShadowRootMethods<crate::DomTypeHolder> for ShadowRoot {
     event_handler!(slotchange, GetOnslotchange, SetOnslotchange);
 
     /// <https://drafts.csswg.org/cssom/#dom-documentorshadowroot-adoptedstylesheets>
-    fn AdoptedStyleSheets(&self, context: JSContext, can_gc: CanGc, retval: MutableHandleValue) {
+    fn AdoptedStyleSheets(&self, cx: &mut JSContext, retval: MutableHandleValue) {
         self.adopted_stylesheets_frozen_types.get_or_init(
+            cx,
             || {
                 self.adopted_stylesheets
                     .borrow()
@@ -584,25 +594,17 @@ impl ShadowRootMethods<crate::DomTypeHolder> for ShadowRoot {
                     .map(|sheet| sheet.as_rooted())
                     .collect()
             },
-            context,
             retval,
-            can_gc,
         );
     }
 
     /// <https://drafts.csswg.org/cssom/#dom-documentorshadowroot-adoptedstylesheets>
-    fn SetAdoptedStyleSheets(
-        &self,
-        context: JSContext,
-        val: HandleValue,
-        can_gc: CanGc,
-    ) -> ErrorResult {
+    fn SetAdoptedStyleSheets(&self, cx: &mut JSContext, val: HandleValue) -> ErrorResult {
         let result = DocumentOrShadowRoot::set_adopted_stylesheet_from_jsval(
-            context,
+            cx,
             self.adopted_stylesheets.borrow_mut().as_mut(),
             val,
             &StyleSheetListOwner::ShadowRoot(Dom::from_ref(self)),
-            can_gc,
         );
 
         // If update is successful, clear the FrozenArray cache.
@@ -627,7 +629,7 @@ impl VirtualMethods for ShadowRoot {
         Some(self.upcast::<DocumentFragment>() as &dyn VirtualMethods)
     }
 
-    fn bind_to_tree(&self, cx: &mut js::context::JSContext, context: &BindContext) {
+    fn bind_to_tree(&self, cx: &mut JSContext, context: &BindContext) {
         if let Some(s) = self.super_type() {
             s.bind_to_tree(cx, context);
         }
@@ -655,7 +657,7 @@ impl VirtualMethods for ShadowRoot {
         }
     }
 
-    fn unbind_from_tree(&self, cx: &mut js::context::JSContext, context: &UnbindContext) {
+    fn unbind_from_tree(&self, cx: &mut JSContext, context: &UnbindContext) {
         if let Some(s) = self.super_type() {
             s.unbind_from_tree(cx, context);
         }

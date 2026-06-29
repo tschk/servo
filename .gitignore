@@ -5,7 +5,6 @@
 /.servobuild
 /.wpt
 /.vs
-/android-toolchains
 /target
 /tests/wpt/reftests-report/report.html
 /python/_virtualenv*
@@ -42,9 +41,6 @@ webrender-captures/
 .idea
 *.iws
 *.iml
-
-## Gradle
-.gradle
 
 ## VSCode
 .vscode

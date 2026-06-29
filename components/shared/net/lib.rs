@@ -21,7 +21,7 @@ use malloc_size_of::malloc_size_of_is_0;
 use malloc_size_of_derive::MallocSizeOf;
 use mime::Mime;
 use profile_traits::mem::ReportsChan;
-use rand::{RngCore, rng};
+use rand::{Rng, rng};
 use request::RequestId;
 use rustc_hash::FxHashMap;
 use rustls_pki_types::CertificateDer;
@@ -1271,34 +1271,6 @@ pub fn trim_http_whitespace(mut slice: &[u8]) -> &[u8] {
     }
 
     slice
-}
-
-pub fn http_percent_encode(bytes: &[u8]) -> String {
-    // This encode set is used for HTTP header values and is defined at
-    // https://tools.ietf.org/html/rfc5987#section-3.2
-    const HTTP_VALUE: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
-        .add(b' ')
-        .add(b'"')
-        .add(b'%')
-        .add(b'\'')
-        .add(b'(')
-        .add(b')')
-        .add(b'*')
-        .add(b',')
-        .add(b'/')
-        .add(b':')
-        .add(b';')
-        .add(b'<')
-        .add(b'-')
-        .add(b'>')
-        .add(b'?')
-        .add(b'[')
-        .add(b'\\')
-        .add(b']')
-        .add(b'{')
-        .add(b'}');
-
-    percent_encoding::percent_encode(bytes, HTTP_VALUE).to_string()
 }
 
 /// Returns the cached current system locale, or en-US by default.

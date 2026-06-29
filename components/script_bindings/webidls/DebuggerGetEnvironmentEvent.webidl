@@ -24,6 +24,6 @@ dictionary EnvironmentInfo {
     DOMString type_;
     DOMString scopeKind;
     DOMString functionDisplayName;
-    sequence<PropertyDescriptor> bindingVariables;
-    sequence<ObjectPreview> previews;
+    required DOMString serializedBindings;
+    DOMString serializedObject;
 };

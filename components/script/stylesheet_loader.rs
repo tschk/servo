@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 use std::io::{Read, Seek, Write};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crossbeam_channel::Sender;
 use cssparser::SourceLocation;
@@ -53,6 +54,18 @@ use crate::unminify::{
     BeautifyFileType, create_output_file, create_temp_files, execute_js_beautify,
 };
 
+/// An struct which is used to uniquely identify a [`StylesheetContext`] for
+/// tracking the set of script-blocking stylesheets.
+#[derive(Clone, Copy, Eq, Hash, JSTraceable, MallocSizeOf, PartialEq)]
+pub(crate) struct StylesheetContextId(usize);
+
+impl StylesheetContextId {
+    fn next() -> Self {
+        static NEXT_STYLESHEET_CONTEXT_INDEX: AtomicUsize = AtomicUsize::new(0);
+        Self(NEXT_STYLESHEET_CONTEXT_INDEX.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
 pub(crate) trait StylesheetOwner {
     /// Returns whether this element was inserted by the parser (i.e., it should
     /// trigger a document-load-blocking load).
@@ -82,6 +95,9 @@ pub(crate) enum StylesheetContextSource {
 
 /// The context required for asynchronously loading an external stylesheet.
 struct StylesheetContext {
+    /// The id associated with this [`StylesheetContext`]. This is used to uniquely identify
+    /// it in the `Document`'s script-blocking stylesheet set.
+    id: StylesheetContextId,
     /// The element that initiated the request.
     element: Trusted<HTMLElement>,
     source: StylesheetContextSource,
@@ -233,7 +249,7 @@ impl StylesheetContext {
         cx: &mut js::context::JSContext,
     ) {
         if self.is_script_blocking {
-            document.decrement_script_blocking_stylesheet_count();
+            document.remove_script_blocking_stylesheet(self.id);
         }
 
         if self.is_render_blocking {
@@ -284,16 +300,12 @@ impl StylesheetContext {
                 //
                 // Note that even in the failure case, we should create an empty stylesheet.
                 // That's why `set_stylesheet` also removes the previous stylesheet
-                link.set_stylesheet(stylesheet);
+                link.set_stylesheet(cx, stylesheet);
             },
             StylesheetContextSource::Import(import_rule) => {
-                // Construct a new WebFontDocumentContext for the stylesheet
-                let window = element.owner_window();
-                let document_context = window.web_font_context();
-
                 // Layout knows about this stylesheet, because Stylo added it to the Stylist,
                 // but Layout doesn't know about any new web fonts that it contains.
-                document.load_web_fonts_from_stylesheet(&stylesheet, &document_context);
+                document.load_web_fonts_from_stylesheet(cx, &stylesheet);
 
                 let mut guard = document.style_shared_author_lock().write();
                 import_rule.write_with(&mut guard).stylesheet = ImportSheet::Sheet(stylesheet);
@@ -382,7 +394,7 @@ impl FetchResponseListener for StylesheetContext {
         let element = self.element.root();
 
         // https://html.spec.whatwg.org/multipage/#link-type-stylesheet:process-the-linked-resource
-        if element.downcast::<HTMLLinkElement>().is_some() {
+        if element.is::<HTMLLinkElement>() {
             // Step 1. If the resource's Content-Type metadata is not text/css, then set success to false.
             let is_css = MimeClassifier::is_css(
                 &metadata.resource_content_type_metadata(LoadContext::Style, &self.data),
@@ -428,9 +440,14 @@ impl FetchResponseListener for StylesheetContext {
         loader.parse(self, &element, &document, cx);
     }
 
-    fn process_csp_violations(&mut self, _request_id: RequestId, violations: Vec<Violation>) {
+    fn process_csp_violations(
+        &mut self,
+        cx: &mut js::context::JSContext,
+        _request_id: RequestId,
+        violations: Vec<Violation>,
+    ) {
         let global = &self.resource_timing_global();
-        global.report_csp_violations(violations, None, None);
+        global.report_csp_violations(cx, violations, None, None);
     }
 }
 
@@ -480,6 +497,7 @@ impl ElementStylesheetLoader<'_> {
             .downcast::<HTMLLinkElement>()
             .map(HTMLLinkElement::get_request_generation_id);
         let mut context = StylesheetContext {
+            id: StylesheetContextId::next(),
             element: Trusted::new(element),
             source,
             media,
@@ -508,7 +526,7 @@ impl ElementStylesheetLoader<'_> {
         context.is_script_blocking =
             context.contributes_a_script_blocking_style_sheet(element, owner, &document);
         if context.is_script_blocking {
-            document.increment_script_blocking_stylesheet_count();
+            document.add_script_blocking_stylesheet(context.id);
         }
 
         // If element's media attribute's value matches the environment and

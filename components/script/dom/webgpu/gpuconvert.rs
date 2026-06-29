@@ -5,23 +5,28 @@
 use std::borrow::Cow;
 use std::num::NonZeroU64;
 
+use js::context::JSContext;
+use script_bindings::codegen::GenericBindings::WebGPUBinding::GPUQueryType;
 use webgpu_traits::WebGPUTextureView;
 use wgpu_core::binding_model::{BindGroupEntry, BindingResource, BufferBinding};
-use wgpu_core::command as wgpu_com;
+use wgpu_core::command::{self as wgpu_com, ComputePassDescriptor, PassTimestampWrites};
 use wgpu_core::pipeline::ProgrammableStageDescriptor;
-use wgpu_core::resource::TextureDescriptor;
+use wgpu_core::resource::{QuerySetDescriptor, TextureDescriptor};
 use wgpu_types::{self, AstcBlock, AstcChannel};
 
 use crate::conversions::{Convert, TryConvert};
+use crate::dom::bindings::codegen::Bindings::CanvasRenderingContext2DBinding::PredefinedColorSpace;
 use crate::dom::bindings::codegen::Bindings::WebGPUBinding::{
     GPUAddressMode, GPUBindGroupEntry, GPUBindGroupLayoutEntry, GPUBindingResource,
     GPUBlendComponent, GPUBlendFactor, GPUBlendOperation, GPUBufferBindingType, GPUColor,
-    GPUCompareFunction, GPUCullMode, GPUExtent3D, GPUFilterMode, GPUFrontFace, GPUIndexFormat,
-    GPULoadOp, GPUMipmapFilterMode, GPUObjectDescriptorBase, GPUOrigin3D, GPUPrimitiveState,
-    GPUPrimitiveTopology, GPUProgrammableStage, GPUSamplerBindingType, GPUStencilOperation,
-    GPUStorageTextureAccess, GPUStoreOp, GPUTexelCopyBufferInfo, GPUTexelCopyBufferLayout,
-    GPUTexelCopyTextureInfo, GPUTextureAspect, GPUTextureDescriptor, GPUTextureDimension,
-    GPUTextureFormat, GPUTextureSampleType, GPUTextureViewDimension, GPUVertexFormat,
+    GPUCompareFunction, GPUComputePassDescriptor, GPUComputePassTimestampWrites, GPUCullMode,
+    GPUExtent3D, GPUFilterMode, GPUFrontFace, GPUIndexFormat, GPULoadOp, GPUMipmapFilterMode,
+    GPUObjectDescriptorBase, GPUOrigin2D, GPUOrigin3D, GPUPrimitiveState, GPUPrimitiveTopology,
+    GPUProgrammableStage, GPUQuerySetDescriptor, GPURenderPassTimestampWrites,
+    GPUSamplerBindingType, GPUStencilOperation, GPUStorageTextureAccess, GPUStoreOp,
+    GPUTexelCopyBufferInfo, GPUTexelCopyBufferLayout, GPUTexelCopyTextureInfo, GPUTextureAspect,
+    GPUTextureDescriptor, GPUTextureDimension, GPUTextureFormat, GPUTextureSampleType,
+    GPUTextureViewDimension, GPUVertexFormat,
 };
 use crate::dom::bindings::codegen::UnionTypes::GPUTextureOrGPUTextureView;
 use crate::dom::bindings::error::{Error, Fallible};
@@ -526,6 +531,29 @@ impl TryConvert<wgpu_types::Origin3d> for &GPUOrigin3D {
     }
 }
 
+impl TryConvert<wgpu_types::Origin2d> for &GPUOrigin2D {
+    type Error = Error;
+
+    /// <https://gpuweb.github.io/gpuweb/#abstract-opdef-validate-gpuorigin2d-shape>
+    fn try_convert(self) -> Result<wgpu_types::Origin2d, Self::Error> {
+        match self {
+            GPUOrigin2D::RangeEnforcedUnsignedLongSequence(v) => {
+                if v.len() > 2 {
+                    Err(Error::Type(
+                        c"sequence is too long for GPUOrigin2D".to_owned(),
+                    ))
+                } else {
+                    Ok(wgpu_types::Origin2d {
+                        x: v.first().copied().unwrap_or(0),
+                        y: v.get(1).copied().unwrap_or(0),
+                    })
+                }
+            },
+            GPUOrigin2D::GPUOrigin2DDict(d) => Ok(wgpu_types::Origin2d { x: d.x, y: d.y }),
+        }
+    }
+}
+
 impl TryConvert<wgpu_com::TexelCopyTextureInfo> for &GPUTexelCopyTextureInfo {
     type Error = Error;
 
@@ -703,39 +731,39 @@ impl<'a> Convert<ProgrammableStageDescriptor<'a>> for &GPUProgrammableStage {
     }
 }
 
-impl Convert<WebGPUTextureView> for &GPUTextureOrGPUTextureView {
-    fn convert(self) -> WebGPUTextureView {
-        match self {
-            GPUTextureOrGPUTextureView::GPUTextureView(view) => view.id(),
-            GPUTextureOrGPUTextureView::GPUTexture(texture) => texture.get_default_view(),
-        }
+pub(crate) fn convert_texture_for_wgpu_with_cx(
+    cx: &mut JSContext,
+    texture_view: &GPUTextureOrGPUTextureView,
+) -> WebGPUTextureView {
+    match texture_view {
+        GPUTextureOrGPUTextureView::GPUTextureView(view) => view.id(),
+        GPUTextureOrGPUTextureView::GPUTexture(texture) => texture.get_default_view(cx),
     }
 }
 
-impl<'a> Convert<BindGroupEntry<'a>> for &GPUBindGroupEntry {
-    fn convert(self) -> BindGroupEntry<'a> {
-        BindGroupEntry {
-            binding: self.binding,
-            resource: match self.resource {
-                GPUBindingResource::GPUSampler(ref s) => BindingResource::Sampler(s.id().0),
-                GPUBindingResource::GPUTextureView(ref t) => BindingResource::TextureView(t.id().0),
-                GPUBindingResource::GPUTexture(ref t) => {
-                    BindingResource::TextureView(t.get_default_view().0)
-                },
-                GPUBindingResource::GPUBufferBinding(ref b) => {
-                    BindingResource::Buffer(BufferBinding {
-                        buffer: b.buffer.id().0,
-                        offset: b.offset,
-                        size: b.size,
-                    })
-                },
-                GPUBindingResource::GPUBuffer(ref b) => BindingResource::Buffer(BufferBinding {
-                    buffer: b.id().0,
-                    offset: 0,
-                    size: None,
-                }),
+pub(crate) fn convert_bind_group_entry<'a>(
+    cx: &mut JSContext,
+    bind_group: &GPUBindGroupEntry,
+) -> BindGroupEntry<'a> {
+    BindGroupEntry {
+        binding: bind_group.binding,
+        resource: match bind_group.resource {
+            GPUBindingResource::GPUSampler(ref s) => BindingResource::Sampler(s.id().0),
+            GPUBindingResource::GPUTextureView(ref t) => BindingResource::TextureView(t.id().0),
+            GPUBindingResource::GPUTexture(ref t) => {
+                BindingResource::TextureView(t.get_default_view(cx).0)
             },
-        }
+            GPUBindingResource::GPUBufferBinding(ref b) => BindingResource::Buffer(BufferBinding {
+                buffer: b.buffer.id().0,
+                offset: b.offset,
+                size: b.size,
+            }),
+            GPUBindingResource::GPUBuffer(ref b) => BindingResource::Buffer(BufferBinding {
+                buffer: b.id().0,
+                offset: 0,
+                size: None,
+            }),
+        },
     }
 }
 
@@ -745,6 +773,56 @@ impl Convert<wgpu_types::TextureDimension> for GPUTextureDimension {
             GPUTextureDimension::_1d => wgpu_types::TextureDimension::D1,
             GPUTextureDimension::_2d => wgpu_types::TextureDimension::D2,
             GPUTextureDimension::_3d => wgpu_types::TextureDimension::D3,
+        }
+    }
+}
+
+impl Convert<wgpu_types::PredefinedColorSpace> for PredefinedColorSpace {
+    fn convert(self) -> wgpu_types::PredefinedColorSpace {
+        match self {
+            PredefinedColorSpace::Srgb => wgpu_types::PredefinedColorSpace::Srgb,
+        }
+    }
+}
+
+impl Convert<QuerySetDescriptor<'static>> for &GPUQuerySetDescriptor {
+    fn convert(self) -> QuerySetDescriptor<'static> {
+        QuerySetDescriptor {
+            label: (&self.parent).convert(),
+            count: self.count,
+            ty: match self.type_ {
+                GPUQueryType::Occlusion => wgpu_types::QueryType::Occlusion,
+                GPUQueryType::Timestamp => wgpu_types::QueryType::Timestamp,
+            },
+        }
+    }
+}
+
+impl Convert<PassTimestampWrites> for &GPUComputePassTimestampWrites {
+    fn convert(self) -> PassTimestampWrites {
+        PassTimestampWrites {
+            query_set: self.querySet.id().0,
+            beginning_of_pass_write_index: self.beginningOfPassWriteIndex,
+            end_of_pass_write_index: self.endOfPassWriteIndex,
+        }
+    }
+}
+
+impl Convert<PassTimestampWrites> for &GPURenderPassTimestampWrites {
+    fn convert(self) -> PassTimestampWrites {
+        PassTimestampWrites {
+            query_set: self.querySet.id().0,
+            beginning_of_pass_write_index: self.beginningOfPassWriteIndex,
+            end_of_pass_write_index: self.endOfPassWriteIndex,
+        }
+    }
+}
+
+impl Convert<ComputePassDescriptor<'static>> for &GPUComputePassDescriptor {
+    fn convert(self) -> ComputePassDescriptor<'static> {
+        ComputePassDescriptor {
+            label: (&self.parent).convert(),
+            timestamp_writes: self.timestampWrites.as_ref().map(Convert::convert),
         }
     }
 }

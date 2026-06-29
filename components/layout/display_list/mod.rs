@@ -50,7 +50,7 @@ use webrender_api::{
     self as wr, BorderDetails, BorderRadius, BorderSide, BoxShadowClipMode, BuiltDisplayList,
     ClipChainId, ClipMode, ColorF, CommonItemProperties, ComplexClipRegion, GlyphInstance,
     NinePatchBorder, NinePatchBorderSource, NormalBorder, PrimitiveFlags, PropertyBinding,
-    PropertyBindingKey, RasterSpace, SpatialId, SpatialTreeItemKey, StackingContextFlags, units,
+    PropertyBindingKey, RasterSpace, SpatialId, StackingContextFlags, units,
 };
 use wr::units::LayoutVector2D;
 
@@ -60,9 +60,9 @@ use crate::display_list::conversions::FilterToWebRender;
 pub(crate) use crate::display_list::conversions::ToWebRender;
 use crate::display_list::paint_traversal::{PaintTraversal, PaintTraversalHandler, TraversalState};
 use crate::fragment_tree::{
-    BackgroundMode, BaseFragment, BoxFragment, ContainingBlockCalculation, Fragment, FragmentFlags,
-    FragmentStatus, FragmentTree, IFrameFragment, ImageFragment, PositioningFragment,
-    SpecificLayoutInfo, Tag, TextFragment,
+    BackgroundMode, BaseFragment, BoxFragment, BoxFragmentWithStyle, ContainingBlockCalculation,
+    Fragment, FragmentFlags, FragmentStatus, FragmentTree, IFrameFragment, ImageFragment,
+    PositioningFragment, SpecificLayoutInfo, Tag, TextFragment,
 };
 use crate::geom::{
     LengthPercentageOrAuto, PhysicalPoint, PhysicalRect, PhysicalSides, PhysicalSize,
@@ -271,15 +271,11 @@ impl DisplayListBuilder<'_> {
         // A count of the number of SpatialTree nodes pushed to the WebRender display
         // list. This is merely to ensure that the currently-unused SpatialTreeItemKey
         // produced for every SpatialTree node is unique.
-        let mut spatial_tree_count = 0;
         let mut scroll_tree = std::mem::take(&mut self.paint_info.scroll_tree);
         let mut mapping = Vec::with_capacity(scroll_tree.nodes.len());
 
         mapping.push(SpatialId::root_reference_frame(self.pipeline_id()));
         mapping.push(SpatialId::root_scroll_node(self.pipeline_id()));
-
-        let pipeline_id = self.pipeline_id();
-        let pipeline_tag = ((pipeline_id.0 as u64) << 32) | pipeline_id.1 as u64;
 
         for node in scroll_tree.nodes.iter().skip(2) {
             let parent_scroll_node_id = node
@@ -289,11 +285,6 @@ impl DisplayListBuilder<'_> {
                 .get(parent_scroll_node_id.index)
                 .expect("Should add spatial nodes to display list in order");
 
-            // Produce a new SpatialTreeItemKey. This is currently unused by WebRender,
-            // but has to be unique to the entire scene.
-            spatial_tree_count += 1;
-            let spatial_tree_item_key = SpatialTreeItemKey::new(pipeline_tag, spatial_tree_count);
-
             mapping.push(match &node.info {
                 SpatialTreeNodeInfo::ReferenceFrame(info) => {
                     let spatial_id = self.wr().push_reference_frame(
@@ -302,7 +293,6 @@ impl DisplayListBuilder<'_> {
                         info.transform_style,
                         PropertyBinding::Value(*info.transform.to_transform()),
                         info.kind,
-                        spatial_tree_item_key,
                     );
                     self.wr().pop_reference_frame();
                     spatial_id
@@ -316,7 +306,6 @@ impl DisplayListBuilder<'_> {
                         LayoutVector2D::zero(), /* external_scroll_offset */
                         0,                      /* scroll_offset_generation */
                         wr::HasScrollLinkedEffect::No,
-                        spatial_tree_item_key,
                     )
                 },
                 SpatialTreeNodeInfo::Sticky(info) => {
@@ -327,8 +316,7 @@ impl DisplayListBuilder<'_> {
                         info.vertical_offset_bounds,
                         info.horizontal_offset_bounds,
                         LayoutVector2D::zero(), /* previously_applied_offset */
-                        spatial_tree_item_key,
-                        None, /* transform */
+                        None,                   /* transform */
                     )
                 },
             });
@@ -420,7 +408,7 @@ impl DisplayListBuilder<'_> {
         // actually need to create a stacking context, just avoid creating one.
         let style = fragment.style();
         let effects = style.get_effects();
-        let transform_style = style.get_used_transform_style();
+        let transform_style = style.used_transform_style(fragment.base.flags);
         if effects.filter.0.is_empty() &&
             effects.opacity == 1.0 &&
             effects.mix_blend_mode == ComputedMixBlendMode::Normal &&
@@ -464,7 +452,6 @@ impl DisplayListBuilder<'_> {
         };
 
         self.wr().push_stacking_context(
-            LayoutPoint::zero(), // origin
             spatial_id,
             style.get_webrender_primitive_flags(),
             clip_chain_id,
@@ -472,7 +459,6 @@ impl DisplayListBuilder<'_> {
             effects.mix_blend_mode.to_webrender(),
             &filters,
             &[], // filter_datas
-            &[], // filter_primitives
             wr::RasterSpace::Screen,
             wr::StackingContextFlags::empty(),
             None, // snapshot
@@ -693,7 +679,7 @@ impl PaintTraversalHandler for DisplayListBuilder<'_> {
         }
     }
 
-    fn visit_box(&mut self, state: &TraversalState, fragment: &Arc<BoxFragment>) {
+    fn visit_box(&mut self, state: &TraversalState, fragment: &BoxFragmentWithStyle<'_>) {
         fragment.base.visit_fragment(self);
 
         if let Some(mut inspector_highlight) = self.inspector_highlight.take() &&
@@ -827,6 +813,7 @@ impl PaintTraversalHandler for DisplayListBuilder<'_> {
         let Some(fragment) = self.fragment_tree.root_box_fragment() else {
             return;
         };
+        let fragment = fragment.with_style();
 
         let source_style = {
             // > For documents whose root element is an HTML HTML element or an XHTML html element
@@ -901,16 +888,17 @@ impl PaintTraversalHandler for DisplayListBuilder<'_> {
     }
 
     fn visit_box_for_outline(&mut self, state: &TraversalState, fragment: &Arc<BoxFragment>) {
+        let fragment = fragment.with_style();
         if fragment.style().get_inherited_box().visibility != Visibility::Visible {
             return;
         };
-        BuilderForBoxFragment::new(fragment, state.origin).build_outline(self, state)
+        BuilderForBoxFragment::new(&fragment, state.origin).build_outline(self, state)
     }
 
     fn visit_box_for_collapsed_table_borders(
         &mut self,
         state: &TraversalState,
-        fragment: &Arc<BoxFragment>,
+        fragment: &BoxFragmentWithStyle<'_>,
     ) {
         if fragment.style().get_inherited_box().visibility != Visibility::Visible {
             return;
@@ -1123,17 +1111,34 @@ impl Fragment {
         }
 
         let mut rect = rect.to_webrender();
-        let line_thickness = rect.height().ceil();
-
+        let wavy_line_thickness = rect.height().ceil();
         if text_decoration.style == ComputedTextDecorationStyle::Wavy {
-            rect = rect.inflate(0.0, line_thickness * 1.0);
+            rect = rect.inflate(0.0, wavy_line_thickness);
         }
+
+        // In Servo, text decorations can span multiple text fragments. In order to have dots,
+        // dashes, and wavy line segments match up between multiple fragments, this code extends
+        // the painting rect for the decoration types for which this matters to the origin. As
+        // the rectangle starts at the origin, all painted decorations will be in phase. As the
+        // clipping rectangle is left unchanged, the actual painted region remains the size of
+        // the original rectangle.
+        let expand_rect_for_text_decoration = |mut rect: Box2D<f32, LayoutPixel>| {
+            if matches!(
+                text_decoration.style,
+                ComputedTextDecorationStyle::Dotted |
+                    ComputedTextDecorationStyle::Dashed |
+                    ComputedTextDecorationStyle::Wavy,
+            ) {
+                rect.min.x = rect.min.x.min(0.0);
+            }
+            rect
+        };
 
         let common_properties = builder.common_properties(state, rect, parent_style);
         builder.wr().push_line(
             &common_properties,
-            &rect,
-            line_thickness,
+            &expand_rect_for_text_decoration(rect),
+            wavy_line_thickness,
             wr::LineOrientation::Horizontal,
             &rgba(text_decoration.color),
             text_decoration.style.to_webrender(),
@@ -1150,7 +1155,7 @@ impl Fragment {
             builder.wr().push_line(
                 &common_properties,
                 &rect,
-                line_thickness,
+                wavy_line_thickness,
                 wr::LineOrientation::Horizontal,
                 &rgba(text_decoration.color),
                 text_decoration.style.to_webrender(),
@@ -1321,20 +1326,23 @@ impl Fragment {
 }
 
 struct BuilderForBoxFragment<'a> {
-    fragment: &'a BoxFragment,
+    fragment: &'a BoxFragmentWithStyle<'a>,
     containing_block_origin: PhysicalPoint<Au>,
     border_rect: units::LayoutRect,
     margin_rect: OnceCell<units::LayoutRect>,
     padding_rect: OnceCell<units::LayoutRect>,
     content_rect: OnceCell<units::LayoutRect>,
-    border_radius: wr::BorderRadius,
+    border_radius: OnceCell<wr::BorderRadius>,
     border_edge_clip_chain_id: RefCell<Option<ClipChainId>>,
     padding_edge_clip_chain_id: RefCell<Option<ClipChainId>>,
     content_edge_clip_chain_id: RefCell<Option<ClipChainId>>,
 }
 
 impl<'a> BuilderForBoxFragment<'a> {
-    fn new(fragment: &'a BoxFragment, containing_block_origin: PhysicalPoint<Au>) -> Self {
+    fn new(
+        fragment: &'a BoxFragmentWithStyle<'a>,
+        containing_block_origin: PhysicalPoint<Au>,
+    ) -> Self {
         let border_rect = fragment
             .border_rect()
             .translate(containing_block_origin.to_vector());
@@ -1342,7 +1350,7 @@ impl<'a> BuilderForBoxFragment<'a> {
             fragment,
             containing_block_origin,
             border_rect: border_rect.to_webrender(),
-            border_radius: fragment.border_radius(),
+            border_radius: OnceCell::new(),
             margin_rect: OnceCell::new(),
             padding_rect: OnceCell::new(),
             content_rect: OnceCell::new(),
@@ -1350,6 +1358,12 @@ impl<'a> BuilderForBoxFragment<'a> {
             padding_edge_clip_chain_id: RefCell::new(None),
             content_edge_clip_chain_id: RefCell::new(None),
         }
+    }
+
+    fn border_radius(&self) -> BorderRadius {
+        *self
+            .border_radius
+            .get_or_init(|| self.fragment.border_radius())
     }
 
     fn content_rect(&self) -> &units::LayoutRect {
@@ -1391,7 +1405,7 @@ impl<'a> BuilderForBoxFragment<'a> {
 
         let maybe_clip = builder.maybe_create_clip(
             state,
-            self.border_radius,
+            self.border_radius(),
             self.border_rect,
             force_clip_creation,
         );
@@ -1409,7 +1423,7 @@ impl<'a> BuilderForBoxFragment<'a> {
             return Some(clip);
         }
 
-        let radii = offset_radii(self.border_radius, -self.fragment.border.to_webrender());
+        let radii = offset_radii(self.border_radius(), -self.fragment.border.to_webrender());
         let maybe_clip =
             builder.maybe_create_clip(state, radii, *self.padding_rect(), force_clip_creation);
         *self.padding_edge_clip_chain_id.borrow_mut() = maybe_clip;
@@ -1427,7 +1441,7 @@ impl<'a> BuilderForBoxFragment<'a> {
         }
 
         let radii = offset_radii(
-            self.border_radius,
+            self.border_radius(),
             -(self.fragment.border + self.fragment.padding).to_webrender(),
         );
         let maybe_clip =
@@ -1490,7 +1504,7 @@ impl<'a> BuilderForBoxFragment<'a> {
             .paint_info
             .external_scroll_id_for_scroll_tree_node(state.spatial_id);
 
-        let mut common = builder.common_properties(state, rect, &self.fragment.style());
+        let mut common = builder.common_properties(state, rect, self.fragment.style());
         if let Some(clip_chain_id) = self.border_edge_clip(builder, state, false) {
             common.clip_chain_id = clip_chain_id;
         }
@@ -1582,7 +1596,7 @@ impl<'a> BuilderForBoxFragment<'a> {
         }
 
         let painter = BackgroundPainter {
-            style: &self.fragment.style(),
+            style: self.fragment.style(),
             painting_area_override: None,
             positioning_area_override: None,
         };
@@ -1610,13 +1624,11 @@ impl<'a> BuilderForBoxFragment<'a> {
          -> bool {
             let spatial_id = builder.spatial_id(state.spatial_id);
             builder.wr().push_stacking_context(
-                LayoutPoint::zero(), // origin
                 spatial_id,
                 PrimitiveFlags::empty(),
                 None,
                 webrender_api::TransformStyle::Flat,
                 blend_mode.to_webrender(),
-                &[],
                 &[],
                 &[],
                 RasterSpace::Screen,
@@ -1637,9 +1649,11 @@ impl<'a> BuilderForBoxFragment<'a> {
         let node = self.fragment.base.tag.map(|tag| tag.node);
         // Reverse because the property is top layer first, we want to paint bottom layer first.
         for (index, image) in b.background_image.0.iter().enumerate().rev() {
-            match builder.image_resolver.resolve_image(node, image) {
-                Err(_) => {},
-                Ok(ResolvedImage::Gradient(gradient)) => {
+            let Ok(resolved_image) = builder.image_resolver.resolve_image(node, image) else {
+                continue;
+            };
+            match resolved_image {
+                ResolvedImage::Gradient(_) | ResolvedImage::Color(_) => {
                     let intrinsic = NaturalSizes::empty();
                     let Some(layer) =
                         &background::layout_layer(self, painter, builder, state, index, intrinsic)
@@ -1652,32 +1666,43 @@ impl<'a> BuilderForBoxFragment<'a> {
                         push_stacking_context(builder, layer.blend_mode, Default::default());
                     }
 
-                    match gradient::build(style, gradient, layer.tile_size, builder) {
-                        WebRenderGradient::Linear(linear_gradient) => builder.wr().push_gradient(
-                            &layer.common,
-                            layer.bounds,
-                            linear_gradient,
-                            layer.tile_size,
-                            layer.tile_spacing,
-                        ),
-                        WebRenderGradient::Radial(radial_gradient) => {
-                            builder.wr().push_radial_gradient(
-                                &layer.common,
-                                layer.bounds,
-                                radial_gradient,
-                                layer.tile_size,
-                                layer.tile_spacing,
-                            )
+                    match resolved_image {
+                        ResolvedImage::Gradient(gradient) => {
+                            match gradient::build(style, gradient, layer.tile_size, builder) {
+                                WebRenderGradient::Linear(linear_gradient) => {
+                                    builder.wr().push_gradient(
+                                        &layer.common,
+                                        layer.bounds,
+                                        linear_gradient,
+                                        layer.tile_size,
+                                        layer.tile_spacing,
+                                    )
+                                },
+                                WebRenderGradient::Radial(radial_gradient) => {
+                                    builder.wr().push_radial_gradient(
+                                        &layer.common,
+                                        layer.bounds,
+                                        radial_gradient,
+                                        layer.tile_size,
+                                        layer.tile_spacing,
+                                    )
+                                },
+                                WebRenderGradient::Conic(conic_gradient) => {
+                                    builder.wr().push_conic_gradient(
+                                        &layer.common,
+                                        layer.bounds,
+                                        conic_gradient,
+                                        layer.tile_size,
+                                        layer.tile_spacing,
+                                    )
+                                },
+                            }
                         },
-                        WebRenderGradient::Conic(conic_gradient) => {
-                            builder.wr().push_conic_gradient(
-                                &layer.common,
-                                layer.bounds,
-                                conic_gradient,
-                                layer.tile_size,
-                                layer.tile_spacing,
-                            )
+                        ResolvedImage::Color(color) => {
+                            let color = rgba(style.resolve_color(color));
+                            builder.wr().push_rect(&layer.common, layer.bounds, color);
                         },
+                        _ => {},
                     }
 
                     if needs_blending {
@@ -1690,7 +1715,7 @@ impl<'a> BuilderForBoxFragment<'a> {
                         style.clone_opacity(),
                     );
                 },
-                Ok(ResolvedImage::Image { image, size }) => {
+                ResolvedImage::Image { image, size } => {
                     // FIXME: https://drafts.csswg.org/css-images-4/#the-image-resolution
                     let dppx = 1.0;
                     let intrinsic =
@@ -1829,7 +1854,7 @@ impl<'a> BuilderForBoxFragment<'a> {
             return;
         };
         let mut common =
-            builder.common_properties(state, units::LayoutRect::default(), &self.fragment.style());
+            builder.common_properties(state, units::LayoutRect::default(), self.fragment.style());
         let radius = wr::BorderRadius::default();
         let mut column_sum = Au::zero();
         for (x, column_size) in table_info.track_sizes.x.iter().enumerate() {
@@ -1913,10 +1938,10 @@ impl<'a> BuilderForBoxFragment<'a> {
             right: self.build_border_side(style_color.right),
             bottom: self.build_border_side(style_color.bottom),
             left: self.build_border_side(style_color.left),
-            radius: self.border_radius,
+            radius: self.border_radius(),
             do_aa: true,
         });
-        let common = builder.common_properties(state, self.border_rect, &style);
+        let common = builder.common_properties(state, self.border_rect, style);
         builder
             .wr()
             .push_border(&common, self.border_rect, border_widths, details)
@@ -1944,7 +1969,7 @@ impl<'a> BuilderForBoxFragment<'a> {
         let border_image_repeat = &border_style_struct.border_image_repeat;
         let border_image_fill = border_style_struct.border_image_slice.fill;
         let border_image_slice = &border_style_struct.border_image_slice.offsets;
-        let common = builder.common_properties(state, border_image_area.to_box2d(), &style);
+        let common = builder.common_properties(state, border_image_area.to_box2d(), style);
 
         let stops = Vec::new();
         let mut width = border_image_size.width;
@@ -1995,7 +2020,7 @@ impl<'a> BuilderForBoxFragment<'a> {
                 NinePatchBorderSource::Image(key, image_rendering)
             },
             Ok(ResolvedImage::Gradient(gradient)) => {
-                match gradient::build(&style, gradient, border_image_size, builder) {
+                match gradient::build(style, gradient, border_image_size, builder) {
                     WebRenderGradient::Linear(gradient) => {
                         NinePatchBorderSource::Gradient(gradient)
                     },
@@ -2006,6 +2031,21 @@ impl<'a> BuilderForBoxFragment<'a> {
                         NinePatchBorderSource::ConicGradient(gradient)
                     },
                 }
+            },
+            Ok(ResolvedImage::Color(color)) => {
+                // NinePatchBorderSource doesn't support a lone color, so pretend that
+                // its a linear gradient.
+                let color = rgba(style.resolve_color(color));
+                let gradient = builder.wr().create_gradient(
+                    Point2D::zero(),
+                    Point2D::zero(),
+                    vec![
+                        wr::GradientStop { offset: 0.0, color },
+                        wr::GradientStop { offset: 1.0, color },
+                    ],
+                    wr::ExtendMode::Clamp,
+                );
+                NinePatchBorderSource::Gradient(gradient)
             },
         };
 
@@ -2059,7 +2099,7 @@ impl<'a> BuilderForBoxFragment<'a> {
             offset.max(-self.border_rect.width() / 2.0 + width),
             offset.max(-self.border_rect.height() / 2.0 + width),
         );
-        let common = builder.common_properties(state, outline_rect, &style);
+        let common = builder.common_properties(state, outline_rect, style);
         let widths = SideOffsets2D::new_all_same(width);
         let border_style = match outline.outline_style {
             // TODO: treating 'auto' as 'solid' is allowed by the spec,
@@ -2076,7 +2116,7 @@ impl<'a> BuilderForBoxFragment<'a> {
             right: side,
             bottom: side,
             left: side,
-            radius: offset_radii(self.border_radius, SideOffsets2D::new_all_same(offset)),
+            radius: offset_radii(self.border_radius(), SideOffsets2D::new_all_same(offset)),
             do_aa: true,
         });
         builder
@@ -2117,8 +2157,23 @@ impl<'a> BuilderForBoxFragment<'a> {
                         .inflate(extra_size_from_blur, extra_size_from_blur)
                 },
             };
-            let common = builder.common_properties(state, clip_rect, &style);
-
+            let border_radius = match clip_mode {
+                BoxShadowClipMode::Inset => {
+                    // The `border-radius` value applies to the border box, but inset shadows
+                    // use the padding box instead. So we need to shrink the `border-radius`
+                    // by the border widths.
+                    offset_radii(self.border_radius(), -self.fragment.border.to_webrender())
+                },
+                BoxShadowClipMode::Outset => self.border_radius(),
+            };
+            let shadow_radius = offset_radii(
+                border_radius,
+                SideOffsets2D::new_all_same(match clip_mode {
+                    BoxShadowClipMode::Inset => -spread,
+                    BoxShadowClipMode::Outset => spread,
+                }),
+            );
+            let common = builder.common_properties(state, clip_rect, style);
             builder.wr().push_box_shadow(
                 &common,
                 rect,
@@ -2126,7 +2181,8 @@ impl<'a> BuilderForBoxFragment<'a> {
                 rgba(style.resolve_color(&box_shadow.base.color)),
                 blur,
                 spread,
-                self.border_radius,
+                border_radius,
+                shadow_radius,
                 clip_mode,
             );
         }
@@ -2139,7 +2195,7 @@ fn rgba(color: AbsoluteColor) -> wr::ColorF {
         rgba.components.0.clamp(0.0, 1.0),
         rgba.components.1.clamp(0.0, 1.0),
         rgba.components.2.clamp(0.0, 1.0),
-        rgba.alpha,
+        rgba.alpha.clamp(0.0, 1.0),
     )
 }
 

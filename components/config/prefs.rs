@@ -40,6 +40,12 @@ pub fn add_observer(observer: Box<dyn PreferencesObserver>) {
 /// Update the values of the global preferences for the current process. This also notifies the
 /// observers previously added using [`add_observer`].
 pub fn set(preferences: Preferences) {
+    // Get list of changes, returning early if the preferences haven't changed.
+    let changed = preferences.diff(&PREFERENCES.read().unwrap());
+    if changed.is_empty() {
+        return;
+    }
+
     // Map between Stylo preference names and Servo preference names as the This should be
     // kept in sync with components/script/dom/bindings/codegen/run.py which generates the
     // DOM CSS style accessors.
@@ -63,8 +69,6 @@ pub fn set(preferences: Preferences) {
         "layout.variable_fonts.enabled",
         preferences.layout_variable_fonts_enabled
     );
-
-    let changed = preferences.diff(&PREFERENCES.read().unwrap());
 
     *PREFERENCES.write().unwrap() = preferences;
 
@@ -128,10 +132,16 @@ pub struct Preferences {
     /// Selects canvas backend
     ///
     /// Available values:
-    /// - ` `/`auto`
     /// - vello
-    /// - vello_cpu
+    /// - Everything else selects vello_cpu
     pub dom_canvas_backend: String,
+    /// Maximum number of buffered canvas commands before an automatic flush is triggered.
+    ///
+    /// A lower value keeps the paint thread fed with work (better parallelism),
+    /// while a higher value improves batching efficiency (fewer channel operations, lower power).
+    ///
+    /// See <https://github.com/servo/servo/pull/45301> for measurements.
+    pub dom_canvas_msg_buffer_size: u64,
     pub dom_clipboardevent_enabled: bool,
     pub dom_composition_event_enabled: bool,
     // feature: CookieStore | #37674 | Web/API/CookieStore
@@ -142,6 +152,8 @@ pub struct Preferences {
     pub dom_crypto_subtle_enabled: bool,
     pub dom_document_dblclick_timeout: i64,
     pub dom_document_dblclick_dist: i64,
+    // feature: File and Directory Entries API | #45653 | Web/API/File_and_Directory_Entries_API
+    pub dom_entries_api_enabled: bool,
     // feature: Document.execCommand | #25005 | Web/API/Document/execCommand
     pub dom_exec_command_enabled: bool,
     // feature: CSS Font Loading API | #29376 | Web/API/CSS_Font_Loading_API
@@ -203,6 +215,8 @@ pub struct Preferences {
     pub dom_touch_events_legacy_apis_enabled: bool,
     /// <https://html.spec.whatwg.org/multipage/#transient-activation-duration>
     pub dom_transient_activation_duration_ms: i64,
+    // feature: Web Animations | #36950 | Web/API/Web_Animations_API
+    pub dom_web_animations_enabled: bool,
     /// Enable WebGL2 APIs.
     // feature: WebGL2 | #41394 | Web/API/WebGL2RenderingContext
     pub dom_webgl2_enabled: bool,
@@ -289,6 +303,29 @@ pub struct Preferences {
     pub layout_css_attr_enabled: bool,
     pub layout_style_sharing_cache_enabled: bool,
     pub layout_threads: i64,
+    /// The minimum number of parallelizable jobs required before turning on parallelism
+    /// for a set of jobs.
+    ///
+    /// When deciding whether or not to parallelize layout, this is the minimum number of
+    /// jobs that must be larger than [`Self::layout_parallelism_job_size_minimum`] to
+    /// turn on parallelism. An exception is when doing box tree layout, where Servo does
+    /// not know the depth of the tree. In that case any task that has more jobs than this
+    /// value will be parallelized.
+    ///
+    /// The goal of these two values is to allow tuning Servo's parallelism for both wide
+    /// and deep trees.
+    pub layout_parallelism_job_count_minimum: u64,
+    /// The minimum size of a layout job to be considered for parallelization.
+    ///
+    /// When deciding whether or not to parallelize layout, jobs greater than this size
+    /// are counted when considering the [`Self::layout_parallelism_job_count_minimum`]
+    /// threshold for turning on parallelism. Generally the size of the job is based on
+    /// the number of tasks to process in the subtree. For instance, this might be the
+    /// number of boxes to process in a box tree subtree.
+    ///
+    /// The goal of these two values is to allow tuning Servo's parallelism for both wide
+    /// and deep trees.
+    pub layout_parallelism_job_size_minimum: u64,
     pub layout_unimplemented: bool,
     // feature: Variable fonts | #38800 | Web/CSS/Guides/Fonts/Variable_fonts
     pub layout_variable_fonts_enabled: bool,
@@ -351,6 +388,9 @@ pub struct Preferences {
     /// Whether to run accessibility tree integrity checks, and any other expensive checks.
     /// This should only be true in tests.
     pub expensive_accessibility_test_assertions_enabled: bool,
+    /// Exposes internal JS API functions that are usually restricted to `about:...` pages
+    /// Useful if you want to get memory report or force GC in a test page
+    pub expose_servointernals_globally: bool,
 }
 
 impl Preferences {
@@ -370,6 +410,7 @@ impl Preferences {
             dom_canvas_capture_enabled: false,
             dom_canvas_text_enabled: true,
             dom_canvas_backend: String::new(),
+            dom_canvas_msg_buffer_size: 16,
             dom_clipboardevent_enabled: true,
             dom_composition_event_enabled: false,
             dom_cookiestore_enabled: false,
@@ -377,6 +418,7 @@ impl Preferences {
             dom_crypto_subtle_enabled: true,
             dom_document_dblclick_dist: 1,
             dom_document_dblclick_timeout: 300,
+            dom_entries_api_enabled: false,
             dom_exec_command_enabled: false,
             dom_fontface_enabled: false,
             dom_fullscreen_test: false,
@@ -400,7 +442,7 @@ impl Preferences {
             dom_storage_manager_api_enabled: false,
             dom_serviceworker_enabled: false,
             dom_serviceworker_timeout_seconds: 60,
-            dom_sharedworker_enabled: false,
+            dom_sharedworker_enabled: true,
             dom_servo_helpers_enabled: false,
             dom_servoparser_async_html_tokenizer_enabled: false,
             dom_testbinding_enabled: false,
@@ -421,6 +463,7 @@ impl Preferences {
             dom_touch_events_legacy_apis_enabled: cfg!(target_os = "android") |
                 cfg!(target_env = "ohos"),
             dom_transient_activation_duration_ms: 5000,
+            dom_web_animations_enabled: false,
             dom_webgl2_enabled: false,
             dom_webgpu_enabled: false,
             dom_webgpu_wgpu_backend: String::new(),
@@ -496,6 +539,8 @@ impl Preferences {
             layout_style_sharing_cache_enabled: true,
             // TODO(mrobinson): This should likely be based on the number of processors.
             layout_threads: 3,
+            layout_parallelism_job_count_minimum: 4,
+            layout_parallelism_job_size_minimum: 16,
             layout_unimplemented: false,
             layout_variable_fonts_enabled: false,
             layout_writing_mode_enabled: false,
@@ -522,6 +567,7 @@ impl Preferences {
             webgl_testing_context_creation_error: false,
             user_agent: String::new(),
             viewport_meta_enabled: false,
+            expose_servointernals_globally: false,
         }
     }
 

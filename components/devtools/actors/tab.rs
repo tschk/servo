@@ -9,13 +9,15 @@
 //!
 //! [Firefox JS implementation]: https://searchfox.org/mozilla-central/source/devtools/server/actors/descriptors/tab.js
 
+use std::sync::Arc;
+
 use devtools_traits::DevtoolScriptControlMsg;
 use malloc_size_of_derive::MallocSizeOf;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use servo_url::ServoUrl;
 
-use crate::actor::{Actor, ActorEncode, ActorError, ActorRegistry};
+use crate::actor::{Actor, ActorEncode, ActorError, ActorRegistry, new_actor_name};
 use crate::actors::browsing_context::{BrowsingContextActor, BrowsingContextActorMsg};
 use crate::actors::root::{DescriptorTraits, RootActor};
 use crate::actors::watcher::{WatcherActor, WatcherActorMsg};
@@ -38,16 +40,6 @@ pub(crate) struct TabDescriptorActorMsg {
     title: String,
     traits: DescriptorTraits,
     url: String,
-}
-
-impl TabDescriptorActorMsg {
-    pub fn browser_id(&self) -> u32 {
-        self.browser_id
-    }
-
-    pub fn actor(&self) -> String {
-        self.actor.clone()
-    }
 }
 
 #[derive(Serialize)]
@@ -76,8 +68,8 @@ pub(crate) struct TabDescriptorActor {
 }
 
 impl Actor for TabDescriptorActor {
-    fn name(&self) -> String {
-        self.name.clone()
+    fn name(&self) -> &str {
+        &self.name
     }
 
     /// The tab actor can handle the following messages:
@@ -104,18 +96,18 @@ impl Actor for TabDescriptorActor {
 
         match msg_type {
             "getTarget" => request.reply_final(&GetTargetReply {
-                from: self.name(),
-                frame: registry.encode::<BrowsingContextActor, _>(&self.browsing_context_name),
+                from: self.name().into(),
+                frame: browsing_context_actor.encode(registry),
             })?,
             "getFavicon" => {
                 // TODO: Return a favicon when available
                 request.reply_final(&GetFaviconReply {
-                    from: self.name(),
+                    from: self.name().into(),
                     favicon: String::new(),
                 })?
             },
             "getWatcher" => request.reply_final(&GetWatcherReply {
-                from: self.name(),
+                from: self.name().into(),
                 watcher: registry.encode::<WatcherActor, _>(&browsing_context_actor.watcher_name),
             })?,
             "goBack" => {
@@ -123,14 +115,18 @@ impl Actor for TabDescriptorActor {
                     .script_chan()
                     .send(DevtoolScriptControlMsg::GoBack(pipeline))
                     .map_err(|_| ActorError::Internal)?;
-                request.reply_final(&EmptyReplyMsg { from: self.name() })?
+                request.reply_final(&EmptyReplyMsg {
+                    from: self.name().into(),
+                })?
             },
             "goForward" => {
                 browsing_context_actor
                     .script_chan()
                     .send(DevtoolScriptControlMsg::GoForward(pipeline))
                     .map_err(|_| ActorError::Internal)?;
-                request.reply_final(&EmptyReplyMsg { from: self.name() })?
+                request.reply_final(&EmptyReplyMsg {
+                    from: self.name().into(),
+                })?
             },
             "navigateTo" => {
                 if msg.get("waitForLoad").unwrap_or(&Value::Bool(false)) != &Value::Bool(false) {
@@ -148,7 +144,9 @@ impl Actor for TabDescriptorActor {
                     .send(DevtoolScriptControlMsg::NavigateTo(pipeline, url))
                     .map_err(|_| ActorError::Internal)?;
 
-                request.reply_final(&EmptyReplyMsg { from: self.name() })?
+                request.reply_final(&EmptyReplyMsg {
+                    from: self.name().into(),
+                })?
             },
             "reloadDescriptor" => {
                 // There is an extra bypassCache parameter that we don't currently use.
@@ -157,7 +155,9 @@ impl Actor for TabDescriptorActor {
                     .send(DevtoolScriptControlMsg::Reload(pipeline))
                     .map_err(|_| ActorError::Internal)?;
 
-                request.reply_final(&EmptyReplyMsg { from: self.name() })?
+                request.reply_final(&EmptyReplyMsg {
+                    from: self.name().into(),
+                })?
             },
             _ => return Err(ActorError::UnrecognizedPacketType),
         };
@@ -166,16 +166,15 @@ impl Actor for TabDescriptorActor {
 }
 
 impl TabDescriptorActor {
-    pub(crate) fn register(registry: &ActorRegistry, browsing_context_name: String) -> String {
-        let name = registry.new_name::<Self>();
+    pub(crate) fn register(registry: &ActorRegistry, browsing_context_name: String) -> Arc<Self> {
+        let name = new_actor_name::<Self>();
         let root_actor = registry.find::<RootActor>("root");
         root_actor.tabs.borrow_mut().push(name.clone());
         let actor = Self {
-            name: name.clone(),
+            name,
             browsing_context_name,
         };
-        registry.register::<Self>(actor);
-        name
+        registry.register::<Self>(actor)
     }
 
     pub(crate) fn is_top_level_global(&self, registry: &ActorRegistry) -> bool {
@@ -191,13 +190,14 @@ impl ActorEncode<TabDescriptorActorMsg> for TabDescriptorActor {
     fn encode(&self, registry: &ActorRegistry) -> TabDescriptorActorMsg {
         let browsing_context_actor =
             registry.find::<BrowsingContextActor>(&self.browsing_context_name);
+        let root_actor = registry.find::<RootActor>("root");
         TabDescriptorActorMsg {
-            actor: self.name(),
+            actor: self.name().into(),
             browser_id: browsing_context_actor.browser_id.value(),
             browsing_context_id: browsing_context_actor.browsing_context_id.value(),
             is_zombie_tab: false,
             outer_window_id: browsing_context_actor.outer_window_id().value(),
-            selected: false,
+            selected: root_actor.active_tab().as_deref() == Some(self.name()),
             title: browsing_context_actor.title(),
             traits: DescriptorTraits {
                 watcher: true,

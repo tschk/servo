@@ -11,6 +11,7 @@ use brotli::CompressorWriter as BrotliEncoder;
 use dom_struct::dom_struct;
 use flate2::Compression;
 use flate2::write::{DeflateEncoder, GzEncoder, ZlibEncoder};
+use js::context::JSContext;
 use js::jsapi::JSObject;
 use js::jsval::UndefinedValue;
 use js::rust::{HandleObject as SafeHandleObject, HandleValue as SafeHandleValue};
@@ -23,14 +24,13 @@ use crate::dom::bindings::codegen::Bindings::CompressionStreamBinding::{
     CompressionFormat, CompressionStreamMethods,
 };
 use crate::dom::bindings::codegen::UnionTypes::ArrayBufferViewOrArrayBuffer;
-use crate::dom::bindings::conversions::{SafeFromJSValConvertible, SafeToJSValConvertible};
+use crate::dom::bindings::conversions::{FromJSValConvertible, SafeToJSValConvertible};
 use crate::dom::bindings::error::{Error, Fallible};
 use crate::dom::bindings::root::{Dom, DomRoot};
 use crate::dom::stream::transformstreamdefaultcontroller::TransformerType;
 use crate::dom::types::{
     GlobalScope, ReadableStream, TransformStream, TransformStreamDefaultController, WritableStream,
 };
-use crate::script_runtime::{CanGc, JSContext as SafeJSContext};
 
 pub(crate) const BROTLI_BUFFER_SIZE: usize = 4096;
 const BROTLI_QUALITIY_LEVEL: u32 = 5;
@@ -63,7 +63,7 @@ impl CompressionStream {
     }
 
     fn new_with_proto(
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         global: &GlobalScope,
         proto: Option<SafeHandleObject>,
         transform: &TransformStream,
@@ -81,7 +81,7 @@ impl CompressionStream {
 impl CompressionStreamMethods<crate::DomTypeHolder> for CompressionStream {
     /// <https://compression.spec.whatwg.org/#dom-compressionstream-compressionstream>
     fn Constructor(
-        cx: &mut js::context::JSContext,
+        cx: &mut JSContext,
         global: &GlobalScope,
         proto: Option<SafeHandleObject>,
         format: CompressionFormat,
@@ -91,7 +91,7 @@ impl CompressionStreamMethods<crate::DomTypeHolder> for CompressionStream {
 
         // Step 2. Set this’s format to format.
         // Step 5. Set this’s transform to a new TransformStream.
-        let transform = TransformStream::new_with_proto(global, None, CanGc::from_cx(cx));
+        let transform = TransformStream::new_with_proto(cx, global, None);
         let compression_stream =
             CompressionStream::new_with_proto(cx, global, proto, &transform, format);
 
@@ -123,14 +123,14 @@ impl CompressionStreamMethods<crate::DomTypeHolder> for CompressionStream {
 
 /// <https://compression.spec.whatwg.org/#compress-and-enqueue-a-chunk>
 pub(crate) fn compress_and_enqueue_a_chunk(
-    cx: &mut js::context::JSContext,
+    cx: &mut JSContext,
     global: &GlobalScope,
     cs: &CompressionStream,
     chunk: SafeHandleValue,
     controller: &TransformStreamDefaultController,
 ) -> Fallible<()> {
     // Step 1. If chunk is not a BufferSource type, then throw a TypeError.
-    let chunk = convert_chunk_to_vec(cx.into(), chunk, CanGc::from_cx(cx))?;
+    let chunk = convert_chunk_to_vec(cx, chunk)?;
 
     // Step 2. Let buffer be the result of compressing chunk with cs’s format and context.
     // NOTE: In our implementation, the enum type of context already indicates the format.
@@ -149,15 +149,10 @@ pub(crate) fn compress_and_enqueue_a_chunk(
     // Step 5. For each Uint8Array array of arrays, enqueue array in cs’s transform.
     // NOTE: We process the result in a single Uint8Array.
     rooted!(&in(cx) let mut js_object = ptr::null_mut::<JSObject>());
-    let buffer_source = create_buffer_source::<Uint8>(
-        cx.into(),
-        &buffer,
-        js_object.handle_mut(),
-        CanGc::from_cx(cx),
-    )
-    .map_err(|_| Error::Type(c"Cannot convert byte sequence to Uint8Array".to_owned()))?;
+    let buffer_source = create_buffer_source::<Uint8>(cx, &buffer, js_object.handle_mut())
+        .map_err(|_| Error::Type(c"Cannot convert byte sequence to Uint8Array".to_owned()))?;
     rooted!(&in(cx) let mut rval = UndefinedValue());
-    buffer_source.safe_to_jsval(cx.into(), rval.handle_mut(), CanGc::from_cx(cx));
+    buffer_source.safe_to_jsval(cx, rval.handle_mut());
     controller.enqueue(cx, global, rval.handle())?;
 
     Ok(())
@@ -165,7 +160,7 @@ pub(crate) fn compress_and_enqueue_a_chunk(
 
 /// <https://compression.spec.whatwg.org/#compress-flush-and-enqueue>
 pub(crate) fn compress_flush_and_enqueue(
-    cx: &mut js::context::JSContext,
+    cx: &mut JSContext,
     global: &GlobalScope,
     cs: &CompressionStream,
     controller: &TransformStreamDefaultController,
@@ -188,15 +183,10 @@ pub(crate) fn compress_flush_and_enqueue(
     // Step 4. For each Uint8Array array of arrays, enqueue array in cs’s transform.
     // NOTE: We process the result in a single Uint8Array.
     rooted!(&in(cx) let mut js_object = ptr::null_mut::<JSObject>());
-    let buffer_source = create_buffer_source::<Uint8>(
-        cx.into(),
-        &buffer,
-        js_object.handle_mut(),
-        CanGc::from_cx(cx),
-    )
-    .map_err(|_| Error::Type(c"Cannot convert byte sequence to Uint8Array".to_owned()))?;
+    let buffer_source = create_buffer_source::<Uint8>(cx, &buffer, js_object.handle_mut())
+        .map_err(|_| Error::Type(c"Cannot convert byte sequence to Uint8Array".to_owned()))?;
     rooted!(&in(cx) let mut rval = UndefinedValue());
-    buffer_source.safe_to_jsval(cx.into(), rval.handle_mut(), CanGc::from_cx(cx));
+    buffer_source.safe_to_jsval(cx, rval.handle_mut());
     controller.enqueue(cx, global, rval.handle())?;
 
     Ok(())
@@ -315,12 +305,11 @@ impl CompressionContext {
 }
 
 pub(crate) fn convert_chunk_to_vec(
-    cx: SafeJSContext,
+    cx: &mut JSContext,
     chunk: SafeHandleValue,
-    can_gc: CanGc,
 ) -> Result<Vec<u8>, Error> {
-    let conversion_result = ArrayBufferViewOrArrayBuffer::safe_from_jsval(cx, chunk, (), can_gc)
-        .map_err(|_| {
+    let conversion_result =
+        ArrayBufferViewOrArrayBuffer::safe_from_jsval(cx, chunk, ()).map_err(|_| {
             Error::Type(c"Unable to convert chunk into ArrayBuffer or ArrayBufferView".to_owned())
         })?;
     let buffer_source = conversion_result.get_success_value().ok_or_else(|| {

@@ -14,7 +14,7 @@ use js::jsval::UndefinedValue;
 use js::realm::CurrentRealm;
 use js::rust::{HandleObject as SafeHandleObject, HandleValue as SafeHandleValue};
 use script_bindings::cell::DomRefCell;
-use script_bindings::reflector::{Reflector, reflect_dom_object};
+use script_bindings::reflector::{Reflector, reflect_dom_object_with_cx};
 
 use crate::dom::bindings::callback::ExceptionHandling;
 use crate::dom::bindings::codegen::Bindings::TransformStreamDefaultControllerBinding::TransformStreamDefaultControllerMethods;
@@ -40,7 +40,6 @@ use crate::dom::promise::Promise;
 use crate::dom::promisenativehandler::{Callback, PromiseNativeHandler};
 use crate::dom::types::{DecompressionStream, TransformStream};
 use crate::realms::enter_auto_realm;
-use crate::script_runtime::CanGc;
 
 impl js::gc::Rootable for TransformTransformPromiseRejection {}
 
@@ -138,16 +137,16 @@ impl TransformStreamDefaultController {
     }
 
     pub(crate) fn new(
+        cx: &mut JSContext,
         global: &GlobalScope,
         transformer_type: TransformerType,
-        can_gc: CanGc,
     ) -> DomRoot<TransformStreamDefaultController> {
-        reflect_dom_object(
+        reflect_dom_object_with_cx(
             Box::new(TransformStreamDefaultController::new_inherited(
                 transformer_type,
             )),
             global,
-            can_gc,
+            cx,
         )
     }
 
@@ -190,10 +189,10 @@ impl TransformStreamDefaultController {
         }));
 
         let handler = PromiseNativeHandler::new(
+            cx,
             global,
             None,
             reject_handler.take().map(|h| Box::new(h) as Box<_>),
-            CanGc::from_cx(cx),
         );
         let mut realm = enter_auto_realm(cx, global);
         let realm = &mut realm.current_realm();
@@ -232,8 +231,8 @@ impl TransformStreamDefaultController {
                             ExceptionHandling::Rethrow,
                         )
                         .unwrap_or_else(|e| {
-                            let p = Promise::new2(cx, global);
-                            p.reject_error_with_cx(cx, e);
+                            let p = Promise::new(cx, global);
+                            p.reject_error(cx, e);
                             p
                         })
                 } else {
@@ -242,21 +241,11 @@ impl TransformStreamDefaultController {
                     // If result is an abrupt completion, return a promise rejected with result.[[Value]].
                     if let Err(error) = self.enqueue(cx, global, chunk) {
                         rooted!(&in(cx) let mut error_val = UndefinedValue());
-                        error.to_jsval(
-                            cx.into(),
-                            global,
-                            error_val.handle_mut(),
-                            CanGc::from_cx(cx),
-                        );
-                        Promise::new_rejected(
-                            global,
-                            cx.into(),
-                            error_val.handle(),
-                            CanGc::from_cx(cx),
-                        )
+                        error.to_jsval(cx, global, error_val.handle_mut());
+                        Promise::new_rejected(cx, global, error_val.handle())
                     } else {
                         // Otherwise, return a promise resolved with undefined.
-                        Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx))
+                        Promise::new_resolved(cx, global, ())
                     }
                 }
             },
@@ -272,7 +261,7 @@ impl TransformStreamDefaultController {
                     // Step 5.2 If result is a Promise, then return result.
                     // Note: not applicable, the spec does NOT require deode_and_enqueue_a_chunk() to return a Promise
                     // Step 5.3 Return a promise resolved with undefined.
-                    .map(|_| Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx)))
+                    .map(|_| Promise::new_resolved(cx, global, ()))
                     .unwrap_or_else(|e| {
                         // <https://streams.spec.whatwg.org/#transformstream-set-up>
                         // Step 5.1 If this throws an exception e,
@@ -280,7 +269,7 @@ impl TransformStreamDefaultController {
                         let realm = &mut realm.current_realm();
                         let p = Promise::new_in_realm(realm);
                         // return a promise rejected with e.
-                        p.reject_error(e, CanGc::from_cx(realm));
+                        p.reject_error(realm, e);
                         p
                     })
             },
@@ -295,7 +284,7 @@ impl TransformStreamDefaultController {
                     // Step 5.2 If result is a Promise, then return result.
                     // Note: not applicable, the spec does NOT require encode_and_enqueue_a_chunk() to return a Promise
                     // Step 5.3 Return a promise resolved with undefined.
-                    .map(|_| Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx)))
+                    .map(|_| Promise::new_resolved(cx, global, ()))
                     .unwrap_or_else(|e| {
                         // <https://streams.spec.whatwg.org/#transformstream-set-up>
                         // Step 5.1 If this throws an exception e,
@@ -303,7 +292,7 @@ impl TransformStreamDefaultController {
                         let realm = &mut realm.current_realm();
                         let p = Promise::new_in_realm(realm);
                         // return a promise rejected with e.
-                        p.reject_error(e, CanGc::from_cx(realm));
+                        p.reject_error(realm, e);
                         p
                     })
             },
@@ -319,7 +308,7 @@ impl TransformStreamDefaultController {
                     // Note: not applicable, the spec does NOT require
                     // compress_and_enqueue_a_chunk() to return a Promise.
                     // Step 5.3 Return a promise resolved with undefined.
-                    .map(|_| Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx)))
+                    .map(|_| Promise::new_resolved(cx, global, ()))
                     .unwrap_or_else(|e| {
                         // <https://streams.spec.whatwg.org/#transformstream-set-up>
                         // Step 5.1 If this throws an exception e,
@@ -327,7 +316,7 @@ impl TransformStreamDefaultController {
                         let realm = &mut realm.current_realm();
                         let p = Promise::new_in_realm(realm);
                         // return a promise rejected with e.
-                        p.reject_error(e, CanGc::from_cx(realm));
+                        p.reject_error(realm, e);
                         p
                     })
             },
@@ -343,7 +332,7 @@ impl TransformStreamDefaultController {
                     // Note: not applicable, the spec does NOT require
                     // decompress_and_enqueue_a_chunk() to return a Promise
                     // Step 5.3 Return a promise resolved with undefined.
-                    .map(|_| Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx)))
+                    .map(|_| Promise::new_resolved(cx, global, ()))
                     .unwrap_or_else(|e| {
                         // <https://streams.spec.whatwg.org/#transformstream-set-up>
                         // Step 5.1 If this throws an exception e,
@@ -351,7 +340,7 @@ impl TransformStreamDefaultController {
                         let realm = &mut realm.current_realm();
                         let p = Promise::new_in_realm(realm);
                         // return a promise rejected with e.
-                        p.reject_error(e, CanGc::from_cx(realm));
+                        p.reject_error(realm, e);
                         p
                     })
             },
@@ -384,13 +373,13 @@ impl TransformStreamDefaultController {
                     cancel
                         .Call_(cx, &this_object.handle(), chunk, ExceptionHandling::Rethrow)
                         .unwrap_or_else(|e| {
-                            let p = Promise::new2(cx, global);
-                            p.reject_error_with_cx(cx, e);
+                            let p = Promise::new(cx, global);
+                            p.reject_error(cx, e);
                             p
                         })
                 } else {
                     // Step 4. Let cancelAlgorithm be an algorithm which returns a promise resolved with undefined.
-                    Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx))
+                    Promise::new_resolved(cx, global, ())
                 }
             },
             TransformerType::Decoder(_) => {
@@ -402,7 +391,7 @@ impl TransformStreamDefaultController {
                 // Step 7.2 If result is a Promise, then return result.
                 // Note: Not applicable.
                 // Step 7.3 Return a promise resolved with undefined.
-                Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx))
+                Promise::new_resolved(cx, global, ())
             },
             TransformerType::Encoder(_) => {
                 // <https://streams.spec.whatwg.org/#transformstream-set-up>
@@ -413,7 +402,7 @@ impl TransformStreamDefaultController {
                 // Step 7.2 If result is a Promise, then return result.
                 // Note: Not applicable.
                 // Step 7.3 Return a promise resolved with undefined.
-                Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx))
+                Promise::new_resolved(cx, global, ())
             },
             TransformerType::Compressor(_) => {
                 // <https://streams.spec.whatwg.org/#transformstream-set-up>
@@ -424,7 +413,7 @@ impl TransformStreamDefaultController {
                 // Step 7.2 If result is a Promise, then return result.
                 // Note: Not applicable.
                 // Step 7.3 Return a promise resolved with undefined.
-                Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx))
+                Promise::new_resolved(cx, global, ())
             },
             TransformerType::Decompressor(_) => {
                 // <https://streams.spec.whatwg.org/#transformstream-set-up>
@@ -435,7 +424,7 @@ impl TransformStreamDefaultController {
                 // Step 7.2 If result is a Promise, then return result.
                 // Note: Not applicable.
                 // Step 7.3 Return a promise resolved with undefined.
-                Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx))
+                Promise::new_resolved(cx, global, ())
             },
         };
 
@@ -464,13 +453,13 @@ impl TransformStreamDefaultController {
                     flush
                         .Call_(cx, &this_object.handle(), self, ExceptionHandling::Rethrow)
                         .unwrap_or_else(|e| {
-                            let p = Promise::new2(cx, global);
-                            p.reject_error_with_cx(cx, e);
+                            let p = Promise::new(cx, global);
+                            p.reject_error(cx, e);
                             p
                         })
                 } else {
                     // Step 3. Let flushAlgorithm be an algorithm which returns a promise resolved with undefined.
-                    Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx))
+                    Promise::new_resolved(cx, global, ())
                 }
             },
             TransformerType::Decoder(decoder) => {
@@ -485,7 +474,7 @@ impl TransformStreamDefaultController {
                     // Step 6.2 If result is a Promise, then return result.
                     // Note: Not applicable. The spec does NOT require flush_and_enqueue algo to return a Promise
                     // Step 6.3 Return a promise resolved with undefined.
-                    .map(|_| Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx)))
+                    .map(|_| Promise::new_resolved(cx, global, ()))
                     .unwrap_or_else(|e| {
                         // <https://streams.spec.whatwg.org/#transformstream-set-up>
                         // Step 6.1 If this throws an exception e,
@@ -493,7 +482,7 @@ impl TransformStreamDefaultController {
                         let realm = &mut realm.current_realm();
                         let p = Promise::new_in_realm(realm);
                         // return a promise rejected with e.
-                        p.reject_error(e, CanGc::from_cx(realm));
+                        p.reject_error(realm, e);
                         p
                     })
             },
@@ -508,7 +497,7 @@ impl TransformStreamDefaultController {
                     // Step 6.2 If result is a Promise, then return result.
                     // Note: Not applicable. The spec does NOT require encode_and_flush algo to return a Promise
                     // Step 6.3 Return a promise resolved with undefined.
-                    .map(|_| Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx)))
+                    .map(|_| Promise::new_resolved(cx, global, ()))
                     .unwrap_or_else(|e| {
                         // <https://streams.spec.whatwg.org/#transformstream-set-up>
                         // Step 6.1 If this throws an exception e,
@@ -516,7 +505,7 @@ impl TransformStreamDefaultController {
                         let realm = &mut realm.current_realm();
                         let p = Promise::new_in_realm(realm);
                         // return a promise rejected with e.
-                        p.reject_error(e, CanGc::from_cx(realm));
+                        p.reject_error(realm, e);
                         p
                     })
             },
@@ -533,7 +522,7 @@ impl TransformStreamDefaultController {
                     // Note: Not applicable. The spec does NOT require compress_flush_and_enqueue
                     // algo to return a Promise.
                     // Step 6.3 Return a promise resolved with undefined.
-                    .map(|_| Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx)))
+                    .map(|_| Promise::new_resolved(cx, global, ()))
                     .unwrap_or_else(|e| {
                         // <https://streams.spec.whatwg.org/#transformstream-set-up>
                         // Step 6.1 If this throws an exception e,
@@ -541,7 +530,7 @@ impl TransformStreamDefaultController {
                         let realm = &mut realm.current_realm();
                         let p = Promise::new_in_realm(realm);
                         // return a promise rejected with e.
-                        p.reject_error(e, CanGc::from_cx(realm));
+                        p.reject_error(realm, e);
                         p
                     })
             },
@@ -558,7 +547,7 @@ impl TransformStreamDefaultController {
                     // Note: Not applicable. The spec does NOT require decompress_flush_and_enqueue
                     // algo to return a Promise.
                     // Step 6.3 Return a promise resolved with undefined.
-                    .map(|_| Promise::new_resolved(global, cx.into(), (), CanGc::from_cx(cx)))
+                    .map(|_| Promise::new_resolved(cx, global, ()))
                     .unwrap_or_else(|e| {
                         // <https://streams.spec.whatwg.org/#transformstream-set-up>
                         // Step 6.1 If this throws an exception e,
@@ -566,7 +555,7 @@ impl TransformStreamDefaultController {
                         let realm = &mut realm.current_realm();
                         let p = Promise::new_in_realm(realm);
                         // return a promise rejected with e.
-                        p.reject_error(e, CanGc::from_cx(realm));
+                        p.reject_error(realm, e);
                         p
                     })
             },
@@ -603,12 +592,9 @@ impl TransformStreamDefaultController {
         if let Err(error) = readable_controller.enqueue(cx, chunk) {
             // Perform ! TransformStreamErrorWritableAndUnblockWrite(stream, enqueueResult.[[Value]]).
             rooted!(&in(cx) let mut rooted_error = UndefinedValue());
-            error.clone().to_jsval(
-                cx.into(),
-                global,
-                rooted_error.handle_mut(),
-                CanGc::from_cx(cx),
-            );
+            error
+                .clone()
+                .to_jsval(cx, global, rooted_error.handle_mut());
             stream.error_writable_and_unblock_write(cx, global, rooted_error.handle());
 
             // Throw stream.[[readable]].[[storedError]].
@@ -636,7 +622,7 @@ impl TransformStreamDefaultController {
             assert!(backpressure);
 
             // Perform ! TransformStreamSetBackpressure(stream, true).
-            stream.set_backpressure(global, true, CanGc::from_cx(cx));
+            stream.set_backpressure(cx, global, true);
         }
         Ok(())
     }
@@ -687,12 +673,7 @@ impl TransformStreamDefaultController {
 
         // Perform ! TransformStreamErrorWritableAndUnblockWrite(stream, error).
         rooted!(&in(cx) let mut rooted_error = UndefinedValue());
-        error.to_jsval(
-            cx.into(),
-            global,
-            rooted_error.handle_mut(),
-            CanGc::from_cx(cx),
-        );
+        error.to_jsval(cx, global, rooted_error.handle_mut());
         stream.error_writable_and_unblock_write(cx, global, rooted_error.handle());
     }
 }

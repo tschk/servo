@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use dom_struct::dom_struct;
 use js::context::JSContext;
+use js::realm::CurrentRealm;
 use js::rust::CustomAutoRooterGuard;
 use js::typedarray::ArrayBuffer;
 use script_bindings::cell::DomRefCell;
@@ -67,8 +68,6 @@ use crate::dom::bindings::root::{DomRoot, MutNullableDom};
 use crate::dom::domexception::{DOMErrorName, DOMException};
 use crate::dom::eventtarget::EventTarget;
 use crate::dom::promise::Promise;
-use crate::realms::InRealm;
-use crate::script_runtime::CanGc;
 
 pub(crate) enum BaseAudioContextOptions {
     AudioContext(RealTimeAudioContextOptions),
@@ -200,7 +199,7 @@ impl BaseAudioContext {
     /// the promises because that would mean putting
     /// `#[cfg_attr(crown, expect(crown::unrooted_must_root))]` on even more functions, potentially
     /// hiding actual safety bugs.
-    fn fulfill_in_flight_resume_promises<F>(&self, f: F)
+    fn fulfill_in_flight_resume_promises<F>(&self, cx: &mut JSContext, f: F)
     where
         F: FnOnce(),
     {
@@ -212,8 +211,8 @@ impl BaseAudioContext {
         f();
         for promise in &*promises {
             match result {
-                Ok(ref value) => promise.resolve_native(value, CanGc::deprecated_note()),
-                Err(ref error) => promise.reject_error(error.clone(), CanGc::deprecated_note()),
+                Ok(ref value) => promise.resolve_native(cx, value),
+                Err(ref error) => promise.reject_error(cx, error.clone()),
             }
         }
     }
@@ -236,9 +235,9 @@ impl BaseAudioContext {
             Some(()) => {
                 self.take_pending_resume_promises(Ok(()));
                 self.global().task_manager().dom_manipulation_task_source().queue(
-                    task!(resume_success: move || {
+                    task!(resume_success: move |cx| {
                         let this = this.root();
-                        this.fulfill_in_flight_resume_promises(|| {
+                        this.fulfill_in_flight_resume_promises(cx, || {
                             if this.state.get() != AudioContextState::Running {
                                 this.state.set(AudioContextState::Running);
                                 this.global().task_manager().dom_manipulation_task_source().queue_simple_event(
@@ -257,8 +256,8 @@ impl BaseAudioContext {
                 self.global()
                     .task_manager()
                     .dom_manipulation_task_source()
-                    .queue(task!(resume_error: move || {
-                        this.root().fulfill_in_flight_resume_promises(|| {})
+                    .queue(task!(resume_error: move |cx| {
+                        this.root().fulfill_in_flight_resume_promises(cx, || {})
                     }));
             },
         }
@@ -287,19 +286,19 @@ impl BaseAudioContextMethods<crate::DomTypeHolder> for BaseAudioContext {
     }
 
     /// <https://webaudio.github.io/web-audio-api/#dom-baseaudiocontext-resume>
-    fn Resume(&self, comp: InRealm, can_gc: CanGc) -> Rc<Promise> {
+    fn Resume(&self, cx: &mut CurrentRealm) -> Rc<Promise> {
         // Step 1.
-        let promise = Promise::new_in_current_realm(comp, can_gc);
+        let promise = Promise::new_in_realm(cx);
 
         // Step 2.
         if self.audio_context_impl.lock().unwrap().state() == ProcessingState::Closed {
-            promise.reject_error(Error::InvalidState(None), can_gc);
+            promise.reject_error(cx, Error::InvalidState(None));
             return promise;
         }
 
         // Step 3.
         if self.state.get() == AudioContextState::Running {
-            promise.resolve_native(&(), can_gc);
+            promise.resolve_native(cx, &());
             return promise;
         }
 
@@ -318,14 +317,14 @@ impl BaseAudioContextMethods<crate::DomTypeHolder> for BaseAudioContext {
     }
 
     /// <https://webaudio.github.io/web-audio-api/#dom-baseaudiocontext-destination>
-    fn Destination(&self, can_gc: CanGc) -> DomRoot<AudioDestinationNode> {
+    fn Destination(&self, cx: &mut JSContext) -> DomRoot<AudioDestinationNode> {
         let global = self.global();
         self.destination.or_init(|| {
             let mut options = AudioNodeOptions::empty();
             options.channelCount = Some(self.channel_count);
             options.channelCountMode = Some(ChannelCountMode::Explicit);
             options.channelInterpretation = Some(ChannelInterpretation::Speakers);
-            AudioDestinationNode::new(&global, self, &options, can_gc)
+            AudioDestinationNode::new(cx, &global, self, &options)
         })
     }
 
@@ -460,14 +459,13 @@ impl BaseAudioContextMethods<crate::DomTypeHolder> for BaseAudioContext {
     /// <https://webaudio.github.io/web-audio-api/#dom-baseaudiocontext-decodeaudiodata>
     fn DecodeAudioData(
         &self,
+        cx: &mut CurrentRealm,
         audio_data: CustomAutoRooterGuard<ArrayBuffer>,
         decode_success_callback: Option<Rc<DecodeSuccessCallback>>,
         decode_error_callback: Option<Rc<DecodeErrorCallback>>,
-        comp: InRealm,
-        can_gc: CanGc,
     ) -> Rc<Promise> {
         // Step 1.
-        let promise = Promise::new_in_current_realm(comp, can_gc);
+        let promise = Promise::new_in_realm(cx);
 
         if audio_data.len() > 0 {
             // Step 2.
@@ -541,7 +539,7 @@ impl BaseAudioContextMethods<crate::DomTypeHolder> for BaseAudioContext {
                         if let Some(callback) = resolver.success_callback {
                             let _ = callback.Call__(cx, &buffer, ExceptionHandling::Report);
                         }
-                        resolver.promise.resolve_native_with_cx(cx, &buffer);
+                        resolver.promise.resolve_native(cx, &buffer);
                     }));
                 })
                 .error(move |error| {
@@ -551,15 +549,14 @@ impl BaseAudioContextMethods<crate::DomTypeHolder> for BaseAudioContext {
                         assert!(resolvers.contains_key(&uuid));
                         let resolver = resolvers.remove(&uuid).unwrap();
                         if let Some(callback) = resolver.error_callback {
-                            let exception = DOMException::new(
+                            let exception = DOMException::new(cx,
                                 &this.global(),
                                 DOMErrorName::DataCloneError,
-                                CanGc::from_cx(cx)
                             );
                             let _ = callback.Call__(cx, &exception, ExceptionHandling::Report);
                         }
                         let error = cformat!("Audio decode error {:?}", error);
-                        resolver.promise.reject_error_with_cx(cx, Error::Type(error));
+                        resolver.promise.reject_error(cx, Error::Type(error));
                     }));
                 })
                 .build();
@@ -569,7 +566,7 @@ impl BaseAudioContextMethods<crate::DomTypeHolder> for BaseAudioContext {
                 .decode_audio_data(audio_data, callbacks);
         } else {
             // Step 3.
-            promise.reject_error(Error::DataClone(None), can_gc);
+            promise.reject_error(cx, Error::DataClone(None));
             return promise;
         }
 

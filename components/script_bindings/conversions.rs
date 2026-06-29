@@ -32,19 +32,19 @@ use crate::inheritance::Castable;
 use crate::num::Finite;
 use crate::reflector::{DomObject, Reflector};
 use crate::root::DomRoot;
-use crate::script_runtime::{CanGc, JSContext as SafeJSContext};
+use crate::script_runtime::JSContext as SafeJSContext;
 use crate::str::{ByteString, DOMString, USVString};
 use crate::trace::RootedTraceableBox;
 use crate::utils::{DOMClass, DOMJSClass};
 
 /// A safe wrapper for `ToJSValConvertible`.
 pub trait SafeToJSValConvertible {
-    fn safe_to_jsval(&self, cx: SafeJSContext, rval: MutableHandleValue, can_gc: CanGc);
+    fn safe_to_jsval(&self, cx: &mut js::context::JSContext, rval: MutableHandleValue);
 }
 
 impl<T: ToJSValConvertible + ?Sized> SafeToJSValConvertible for T {
-    fn safe_to_jsval(&self, mut cx: SafeJSContext, rval: MutableHandleValue, _can_gc: CanGc) {
-        unsafe { self.to_jsval(cx.raw_cx(), rval) };
+    fn safe_to_jsval(&self, cx: &mut js::context::JSContext, rval: MutableHandleValue) {
+        ToJSValConvertible::safe_to_jsval(self, cx, rval);
     }
 }
 
@@ -76,32 +76,6 @@ pub enum StringificationBehavior {
     Default,
     /// Convert `null` to the empty string.
     Empty,
-}
-
-/// A safe wrapper for `FromJSValConvertible`.
-pub trait SafeFromJSValConvertible: Sized {
-    type Config;
-
-    #[allow(clippy::result_unit_err)] // Type definition depends on mozjs
-    fn safe_from_jsval(
-        cx: SafeJSContext,
-        value: HandleValue,
-        option: Self::Config,
-        _can_gc: CanGc,
-    ) -> Result<ConversionResult<Self>, ()>;
-}
-
-impl<T: FromJSValConvertible> SafeFromJSValConvertible for T {
-    type Config = <T as FromJSValConvertible>::Config;
-
-    fn safe_from_jsval(
-        mut cx: SafeJSContext,
-        value: HandleValue,
-        option: Self::Config,
-        _can_gc: CanGc,
-    ) -> Result<ConversionResult<Self>, ()> {
-        unsafe { T::from_jsval(cx.raw_cx(), value, option) }
-    }
 }
 
 // https://heycam.github.io/webidl/#es-DOMString
@@ -151,14 +125,14 @@ impl FromJSValConvertible for USVString {
         value: HandleValue,
         _: (),
     ) -> Result<ConversionResult<USVString>, ()> {
-        let Some(jsstr) = ptr::NonNull::new(unsafe { ToString(cx.raw_cx(), value) }) else {
+        let Some(jsstr) = ptr::NonNull::new(unsafe { ToString(cx, value) }) else {
             debug!("ToString failed");
             return Err(());
         };
 
         // FIXME(ajeffrey): Convert directly from DOMString to USVString
         Ok(ConversionResult::Success(USVString(unsafe {
-            jsstr_to_string(cx.raw_cx(), jsstr)
+            jsstr_to_string(cx, jsstr)
         })))
     }
 }
@@ -197,7 +171,7 @@ impl FromJSValConvertible for ByteString {
         _option: (),
     ) -> Result<ConversionResult<ByteString>, ()> {
         unsafe {
-            let string = ToString(cx.raw_cx(), value);
+            let string = ToString(cx, value);
             if string.is_null() {
                 debug!("ToString failed");
                 return Err(());
@@ -206,8 +180,7 @@ impl FromJSValConvertible for ByteString {
             let latin1 = JS_DeprecatedStringHasLatin1Chars(string);
             if latin1 {
                 let mut length = 0;
-                let chars =
-                    JS_GetLatin1StringCharsAndLength(cx.raw_cx(), ptr::null(), string, &mut length);
+                let chars = JS_GetLatin1StringCharsAndLength(cx, string, &mut length);
                 assert!(!chars.is_null());
 
                 let char_slice = slice::from_raw_parts(chars as *mut u8, length);
@@ -217,7 +190,7 @@ impl FromJSValConvertible for ByteString {
             }
 
             let mut length = 0;
-            let chars = JS_GetTwoByteStringCharsAndLength(cx.raw_cx(), ptr::null(), string, &mut length);
+            let chars = JS_GetTwoByteStringCharsAndLength(cx, string, &mut length);
             let char_vec = slice::from_raw_parts(chars, length);
 
             if char_vec.iter().any(|&c| c > 0xFF) {
@@ -259,7 +232,7 @@ impl<T: DomObject + IDLInterface> FromJSValConvertible for DomRoot<T> {
         value: HandleValue,
         _config: Self::Config,
     ) -> Result<ConversionResult<DomRoot<T>>, ()> {
-        Ok(match root_from_handlevalue(value, cx) {
+        Ok(match root_from_handlevalue(value, cx.into()) {
             Ok(result) => ConversionResult::Success(result),
             Err(()) => ConversionResult::Failure(c"value is not an object".into()),
         })
@@ -428,7 +401,7 @@ where
 /// # Safety
 /// cx must point to a valid, non-null JS context.
 #[allow(clippy::result_unit_err)]
-pub fn root_from_handlevalue<T>(v: HandleValue, cx: &mut js::context::JSContext) -> Result<DomRoot<T>, ()>
+pub fn root_from_handlevalue<T>(v: HandleValue, cx: SafeJSContext) -> Result<DomRoot<T>, ()>
 where
     T: DomObject + IDLInterface,
 {
@@ -437,7 +410,7 @@ where
     }
     #[expect(unsafe_code)]
     unsafe {
-        root_from_object(v.get().to_object(), cx.raw_cx())
+        root_from_object(v.get().to_object(), *cx)
     }
 }
 
@@ -445,14 +418,11 @@ where
 /// integer.
 ///
 /// Handling of invalid UTF-16 in strings depends on the relevant option.
-///
-/// # Safety
-/// - cx must point to a non-null, valid JSContext instance.
-pub fn jsid_to_string(cx: &mut js::context::JSContext, id: HandleId) -> Option<DOMString> {
+pub fn jsid_to_string(cx: &js::context::JSContext, id: HandleId) -> Option<DOMString> {
     let id_raw = *id;
     if id_raw.is_string() {
         let jsstr = ptr::NonNull::new(id_raw.to_string()).unwrap();
-        return Some(unsafe { jsstr_to_string(cx.raw_cx(), jsstr) }.into());
+        return Some(unsafe { jsstr_to_string(cx, jsstr) }.into());
     }
 
     if id_raw.is_int() {
@@ -462,7 +432,7 @@ pub fn jsid_to_string(cx: &mut js::context::JSContext, id: HandleId) -> Option<D
     None
 }
 
-impl<T: Float + crate::JSTraceable + ToJSValConvertible> ToJSValConvertible for Finite<T> {
+impl<T: Float + ToJSValConvertible> ToJSValConvertible for Finite<T> {
     #[inline]
     unsafe fn to_jsval(&self, cx: *mut JSContext, rval: MutableHandleValue) {
         let value = **self;
@@ -470,7 +440,7 @@ impl<T: Float + crate::JSTraceable + ToJSValConvertible> ToJSValConvertible for 
     }
 }
 
-impl<T: Float + crate::JSTraceable + FromJSValConvertible<Config = ()>> FromJSValConvertible for Finite<T> {
+impl<T: Float + FromJSValConvertible<Config = ()>> FromJSValConvertible for Finite<T> {
     type Config = ();
 
     unsafe fn from_jsval(
@@ -551,7 +521,7 @@ where
 /// # Safety
 /// `cx` must point to a valid, non-null JSContext.
 #[allow(clippy::result_unit_err)]
-pub fn native_from_handlevalue<T>(v: HandleValue, cx: &mut js::context::JSContext) -> Result<*const T, ()>
+pub fn native_from_handlevalue<T>(v: HandleValue, cx: SafeJSContext) -> Result<*const T, ()>
 where
     T: DomObject + IDLInterface,
 {
@@ -561,7 +531,7 @@ where
 
     #[expect(unsafe_code)]
     unsafe {
-        native_from_object(v.get().to_object(), cx.raw_cx())
+        native_from_object(v.get().to_object(), *cx)
     }
 }
 
@@ -612,7 +582,7 @@ pub fn is_array_like<D: crate::DomTypes>(
     value: HandleValue,
 ) -> bool {
     let mut is_array = false;
-    assert!(unsafe { IsArrayObject(crate::script_runtime::copy_cx(cx), value, &mut is_array) });
+    assert!(unsafe { IsArrayObject(cx, value, &mut is_array) });
     if is_array {
         return true;
     }

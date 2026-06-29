@@ -134,7 +134,7 @@ use profile_traits::mem::ProfilerMsg;
 use profile_traits::{mem, time};
 use rand::rngs::SmallRng;
 use rand::seq::IndexedRandom;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng, make_rng};
 use rustc_hash::{FxHashMap, FxHashSet};
 use script_traits::{
     ConstellationInputEvent, DiscardBrowsingContext, DocumentActivity, NewPipelineInfo,
@@ -716,7 +716,7 @@ where
                     random_pipeline_closure: random_pipeline_closure_probability.map(|probability| {
                         let rng = random_pipeline_closure_seed
                             .map(|seed| SmallRng::seed_from_u64(seed as u64))
-                            .unwrap_or_else(SmallRng::from_os_rng);
+                            .unwrap_or_else(make_rng);
                         warn!("Randomly closing pipelines using seed {random_pipeline_closure_seed:?}.");
                         (rng, probability)
                     }),
@@ -1417,14 +1417,6 @@ where
             // Close a top level browsing context.
             EmbedderToConstellationMessage::CloseWebView(webview_id) => {
                 self.handle_close_top_level_browsing_context(webview_id);
-            },
-            // Panic a top level browsing context.
-            EmbedderToConstellationMessage::SendError(webview_id, error) => {
-                warn!("Constellation got a SendError message from WebView {webview_id:?}: {error}");
-                let Some(webview_id) = webview_id else {
-                    return;
-                };
-                self.handle_panic_in_webview(webview_id, &error, &None);
             },
             EmbedderToConstellationMessage::FocusWebView(webview_id) => {
                 self.handle_focus_web_view(webview_id);
@@ -4320,6 +4312,10 @@ where
         history_state_id: Option<HistoryStateId>,
         url: ServoUrl,
     ) {
+        if let Some(pipeline) = self.pipelines.get_mut(&pipeline_id) {
+            pipeline.history_state_id = history_state_id;
+            pipeline.url = url.clone();
+        }
         let msg = ScriptThreadMessage::UpdateHistoryState(pipeline_id, history_state_id, url);
         self.send_message_to_pipeline(pipeline_id, msg, "History state updated after closure");
     }
@@ -4894,6 +4890,10 @@ where
                         Some(previous_url.clone())
                     }
                 },
+                SessionHistoryDiff::Hash { ref new_url, .. } => {
+                    *previous_url = new_url.clone();
+                    Some(new_url.clone())
+                },
                 _ => Some(previous_url.clone()),
             };
 
@@ -4917,6 +4917,10 @@ where
                 } else {
                     Some(previous_url.clone())
                 }
+            },
+            SessionHistoryDiff::Hash { ref old_url, .. } => {
+                *previous_url = old_url.clone();
+                Some(old_url.clone())
             },
             _ => Some(previous_url.clone()),
         };

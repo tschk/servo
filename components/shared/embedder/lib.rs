@@ -340,6 +340,9 @@ pub struct ViewportDetails {
     /// The scale factor to use to account for HiDPI scaling. This does not take into account
     /// any page or pinch zoom applied by `Paint` to the contents.
     pub hidpi_scale_factor: Scale<f32, CSSPixel, DevicePixel>,
+
+    /// The device dimensions that this viewport is displayed within.
+    pub device_size: Size2D<f32, DevicePixel>,
 }
 
 impl ViewportDetails {
@@ -629,6 +632,7 @@ pub enum PermissionFeature {
     Bluetooth,
     PersistentStorage,
     ScreenWakeLock(WakeLockType),
+    Gamepad,
 }
 
 /// Used to specify the kind of input method editor appropriate to edit a field.
@@ -795,6 +799,7 @@ pub enum MediaSessionActionType {
 }
 
 /// The status of the load in this `WebView`.
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum LoadStatus {
     /// The load has started, but the headers have not yet been parsed.
@@ -1093,6 +1098,7 @@ pub enum JavaScriptEvaluationError {
     SerializationError(JavaScriptEvaluationResultSerializationError),
 }
 
+#[repr(i32)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ScreenshotCaptureError {
     /// The screenshot request failed to read the screenshot image from the `WebView`'s

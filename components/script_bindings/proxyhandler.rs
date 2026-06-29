@@ -189,7 +189,7 @@ pub(crate) unsafe extern "C" fn get_prototype_if_ordinary(
     _: *mut RawJSContext,
     proxy: RawHandleObject,
     is_ordinary: *mut bool,
-    proto: RawMutableHandleObject,
+    mut proto: RawMutableHandleObject,
 ) -> bool {
     *is_ordinary = true;
     proto.set(GetStaticPrototype(proxy.get()));
@@ -201,7 +201,7 @@ pub(crate) fn get_expando_object(obj: HandleObject, mut expando: MutableHandleOb
     unsafe {
         assert!(is_dom_proxy(obj.get()));
         let val = &mut UndefinedValue();
-        GetProxyPrivate(obj.get(), val);
+        GetProxyPrivate(obj.get(), &mut *val);
         expando.set(if val.is_undefined() {
             ptr::null_mut()
         } else {
@@ -362,13 +362,13 @@ pub(crate) unsafe extern "C" fn maybe_cross_origin_set_prototype_rawcx(
     true
 }
 
-fn get_getter_object(d: &PropertyDescriptor, out: RawMutableHandleObject) {
+fn get_getter_object(d: &PropertyDescriptor, mut out: RawMutableHandleObject) {
     if d.hasGetter_() {
         out.set(d.getter_);
     }
 }
 
-fn get_setter_object(d: &PropertyDescriptor, out: RawMutableHandleObject) {
+fn get_setter_object(d: &PropertyDescriptor, mut out: RawMutableHandleObject) {
     if d.hasSetter_() {
         out.set(d.setter_);
     }

@@ -401,7 +401,7 @@ where
 /// # Safety
 /// cx must point to a valid, non-null JS context.
 #[allow(clippy::result_unit_err)]
-pub fn root_from_handlevalue<T>(v: HandleValue, cx: SafeJSContext) -> Result<DomRoot<T>, ()>
+pub fn root_from_handlevalue<T>(v: HandleValue, mut cx: SafeJSContext) -> Result<DomRoot<T>, ()>
 where
     T: DomObject + IDLInterface,
 {
@@ -521,7 +521,7 @@ where
 /// # Safety
 /// `cx` must point to a valid, non-null JSContext.
 #[allow(clippy::result_unit_err)]
-pub fn native_from_handlevalue<T>(v: HandleValue, cx: SafeJSContext) -> Result<*const T, ()>
+pub fn native_from_handlevalue<T>(v: HandleValue, mut cx: SafeJSContext) -> Result<*const T, ()>
 where
     T: DomObject + IDLInterface,
 {

@@ -215,7 +215,7 @@ fn select_compartment(cx: &mut js::context::JSContext, options: &mut RealmOption
     let mut compartment: Data = ptr::null_mut();
     unsafe {
         JS_IterateCompartments(
-            cx,
+            cx.raw_cx(),
             (&mut compartment) as *mut Data as *mut libc::c_void,
             Some(callback),
         );
@@ -320,7 +320,7 @@ pub(crate) fn create_noncallback_interface_object<D: DomTypes>(
     );
     unsafe {
         assert!(JS_LinkConstructorAndPrototype(
-            cx,
+            cx.raw_cx(),
             rval.handle(),
             interface_prototype_object
         ));
@@ -347,7 +347,13 @@ pub(crate) fn create_named_constructors(
 
     for &(native, name, arity) in named_constructors {
         unsafe {
-            let fun = JS_NewFunction(cx, Some(native), arity, JSFUN_CONSTRUCTOR, name.as_ptr());
+            let fun = JS_NewFunction(
+                cx.raw_cx(),
+                Some(native),
+                arity,
+                JSFUN_CONSTRUCTOR,
+                name.as_ptr(),
+            );
             assert!(!fun.is_null());
             constructor.set(JS_GetFunctionObject(fun));
             assert!(!constructor.is_null());
@@ -410,7 +416,7 @@ pub(crate) fn define_guarded_methods<D: DomTypes>(
     for guard in methods {
         if let Some(specs) = guard.expose::<D>(cx, obj, global) {
             unsafe {
-                define_methods(cx.raw_cx(), obj, specs).unwrap();
+                define_methods(cx, obj, specs).unwrap();
             }
         }
     }
@@ -426,7 +432,7 @@ pub(crate) fn define_guarded_properties<D: DomTypes>(
     for guard in properties {
         if let Some(specs) = guard.expose::<D>(cx, obj, global) {
             unsafe {
-                define_properties(cx.raw_cx(), obj, specs).unwrap();
+                define_properties(cx, obj, specs).unwrap();
             }
         }
     }
@@ -705,7 +711,7 @@ pub fn get_desired_proto(
         }
 
         {
-            let mut realm = AutoRealm::new(cx, NonNull::new(GetRealmGlobalOrNull(&*realm)).unwrap());
+            let mut realm = AutoRealm::new(&mut *cx, NonNull::new(GetRealmGlobalOrNull(&*realm)).unwrap());
             let (global, realm) = realm.global_and_reborrow();
             get_per_interface_object_handle(
                 realm,
@@ -719,7 +725,7 @@ pub fn get_desired_proto(
             }
         }
 
-        maybe_wrap_object(cx.raw_cx(), desired_proto);
+        maybe_wrap_object(cx, desired_proto);
         Ok(())
     }
 }

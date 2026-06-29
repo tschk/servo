@@ -567,7 +567,7 @@ unsafe fn generic_call<D: DomTypes, const EXCEPTION_TO_REJECTION: bool>(
     // [this_implements_operation == true]
 
     if needs_security_check_on_interface_match {
-        let mut realm = js::realm::CurrentRealm::assert(cx);
+        let mut realm = js::realm::CurrentRealm::assert(&mut *cx);
         // [cross_origin_operation == false]
         if is_cross_origin_object::<D>(&mut realm, obj.handle()) &&
             !is_platform_object_same_origin(&realm, obj.handle())

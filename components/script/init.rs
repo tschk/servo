@@ -161,18 +161,22 @@ fn jit_forbidden() -> bool {
     false
 }
 
+fn script_js_backend_from_env_value(value: &str) -> Option<ScriptJsBackend> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "mozjs" | "spidermonkey" => Some(ScriptJsBackend::Mozjs),
+        "v8" | "v8-experimental" | "v8_experimental" => Some(ScriptJsBackend::V8Experimental),
+        _ => None,
+    }
+}
+
 fn configured_js_backend() -> ScriptJsBackend {
     match std::env::var(SOLILOQUY_JS_ENGINE_ENV) {
-        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
-            "" | "mozjs" | "spidermonkey" => ScriptJsBackend::Mozjs,
-            "v8" | "v8-experimental" | "v8_experimental" => ScriptJsBackend::V8Experimental,
-            other => {
-                warn!(
-                    "Unsupported value `{other}` for {SOLILOQUY_JS_ENGINE_ENV}; defaulting Servo script bootstrap to mozjs."
-                );
-                ScriptJsBackend::Mozjs
-            },
-        },
+        Ok(value) => script_js_backend_from_env_value(&value).unwrap_or_else(|| {
+            warn!(
+                "Unsupported value `{value}` for {SOLILOQUY_JS_ENGINE_ENV}; defaulting Servo script bootstrap to mozjs."
+            );
+            ScriptJsBackend::Mozjs
+        }),
         Err(_err) => ScriptJsBackend::Mozjs,
     }
 }
@@ -218,22 +222,25 @@ pub fn init() -> JSEngineSetup {
 
 #[cfg(test)]
 mod tests {
-    use super::configured_js_backend;
+    use super::script_js_backend_from_env_value;
     use crate::script_runtime::ScriptJsBackend;
 
     #[test]
     fn parses_v8_backend_aliases() {
         for value in ["v8", "v8-experimental", "v8_experimental"] {
-            std::env::set_var(super::SOLILOQUY_JS_ENGINE_ENV, value);
-            assert_eq!(configured_js_backend(), ScriptJsBackend::V8Experimental);
+            assert_eq!(
+                script_js_backend_from_env_value(value),
+                Some(ScriptJsBackend::V8Experimental)
+            );
         }
-        std::env::remove_var(super::SOLILOQUY_JS_ENGINE_ENV);
     }
 
     #[test]
     fn defaults_unknown_backend_to_mozjs() {
-        std::env::set_var(super::SOLILOQUY_JS_ENGINE_ENV, "not-a-runtime");
-        assert_eq!(configured_js_backend(), ScriptJsBackend::Mozjs);
-        std::env::remove_var(super::SOLILOQUY_JS_ENGINE_ENV);
+        assert_eq!(script_js_backend_from_env_value("not-a-runtime"), None);
+        assert_eq!(
+            script_js_backend_from_env_value("mozjs"),
+            Some(ScriptJsBackend::Mozjs)
+        );
     }
 }

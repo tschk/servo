@@ -3471,8 +3471,13 @@ pub mod jsapi {
     }
     pub fn RemoveRawValueRoot(_cx: *mut JSContext, _vp: *mut JSVal) {}
     pub fn RemoveAssociatedMemory(_obj: *mut JSObject, _sz: usize, _assoc: u32) {}
+    #[cfg(not(feature = "v8"))]
     pub fn IsWindowProxy(_obj: *mut JSObject) -> bool {
         false
+    }
+    #[cfg(feature = "v8")]
+    pub fn IsWindowProxy(obj: *mut JSObject) -> bool {
+        crate::v8_glue::is_window_proxy(obj)
     }
     #[cfg(not(feature = "v8"))]
     pub fn JS_GetLatin1StringCharsAndLength<C>(
@@ -3584,8 +3589,8 @@ pub mod jsapi {
         ptr::null_mut()
     }
     #[cfg(feature = "v8")]
-    pub fn GetNonCCWObjectGlobal(_obj: *mut JSObject) -> *mut JSObject {
-        crate::v8_glue::current_global_object()
+    pub fn GetNonCCWObjectGlobal(obj: *mut JSObject) -> *mut JSObject {
+        crate::v8_glue::get_non_ccw_object_global(obj)
     }
     #[cfg(not(feature = "v8"))]
     pub fn GetRealmGlobalOrNull<C: ?Sized>(_cx: &C) -> *mut JSObject {
@@ -4175,7 +4180,10 @@ pub mod rust {
                     vp.set_property_out(val);
                     true
                 },
-                None => false,
+                None => {
+                    vp.set_property_out(jsapi::JSVal::undefined());
+                    true
+                },
             }
         }
         #[cfg(not(feature = "v8"))]
@@ -4656,7 +4664,10 @@ pub mod rust {
                     vp.set_property_out(val);
                     true
                 },
-                None => false,
+                None => {
+                    vp.set_property_out(jsapi::JSVal::undefined());
+                    true
+                },
             }
         }
         pub unsafe fn JS_HasProperty<C: ?Sized, O, N>(
@@ -5037,8 +5048,17 @@ pub mod rust {
             true
         }
         pub unsafe fn SetPromiseUserInputEventHandlingState<O, S>(_obj: O, _state: S) {}
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn SetWindowProxy<C, O, W>(_cx: &C, _obj: O, _window_proxy: W) -> bool {
             false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn SetWindowProxy<C, O, W>(_cx: &C, obj: O, window_proxy: W) -> bool
+        where
+            O: Into<*mut jsapi::JSObject>,
+            W: Into<*mut jsapi::JSObject>,
+        {
+            crate::v8_glue::set_window_proxy(obj.into(), window_proxy.into())
         }
     }
 
@@ -5501,7 +5521,8 @@ pub mod rust {
             CallOriginalPromiseResolve, CheckRegExpSyntax, DetachArrayBuffer, ExecuteRegExpNoStatics,
             GetBuiltinClass, GetPropertyKeys, GetPromiseIsHandled, GetPromiseState, IsPromiseObject,
             JS_AlreadyHasOwnPropertyById, JS_CallFunctionName, JS_CopyOwnPropertiesAndPrivateFields,
-            JS_DefineProperty, JS_DefineProperty3, JS_DefineProperty5, JS_DefinePropertyById2,
+            JS_DefineProperty, JS_DefineProperty3, JS_DefineProperty4, JS_DefineProperty5,
+            JS_DefinePropertyById2,
             JS_DefinePropertyById5, JS_DefineUCProperty2, JS_DeletePropertyById,
             JS_ErrorFromException, JS_FireOnNewGlobalObject, JS_ForwardGetPropertyTo,
             JS_GetPromiseResult, JS_GetPrototype, JS_HasOwnProperty, JS_HasProperty,
@@ -5549,8 +5570,22 @@ pub mod rust {
         pub unsafe fn JS_WrapObject<C, O>(_cx: &C, _obj: O) -> bool {
             false
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_GetProperty<C, O, N, V>(_cx: &C, _obj: O, _name: N, _vp: V) -> bool {
             false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_GetProperty<C, O, N, V>(_cx: &C, obj: O, name: N, vp: V) -> bool
+        where
+            O: Into<*mut jsapi::JSObject>,
+            N: jsapi::ToBytePtr,
+            V: super::wrappers::SetPropertyOut,
+        {
+            match crate::v8_glue::get_property_by_name(obj.into(), name.to_byte_ptr()) {
+                Some(val) => vp.set_property_out(val),
+                None => vp.set_property_out(jsapi::JSVal::undefined()),
+            }
+            true
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_ClearPendingException<C: ?Sized>(_cx: &C) {}
@@ -5911,7 +5946,16 @@ pub mod rust {
                 rval.into(),
             )
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn EnterRealm<C, O>(_cx: &C, _realm: O) -> *mut std::ffi::c_void {
+            ptr::null_mut()
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn EnterRealm<C, O>(_cx: &C, realm: O) -> *mut std::ffi::c_void
+        where
+            O: crate::realm::IntoJSObject,
+        {
+            crate::v8_glue::enter_realm(realm.into_js_object());
             ptr::null_mut()
         }
         pub unsafe fn LeaveRealm<C, R>(_cx: &C, _old_realm: R) {}
@@ -6049,15 +6093,6 @@ pub mod rust {
         pub unsafe fn JS_DefineDebuggerObject<C, O>(_cx: &C, _obj: O) -> bool {
             true
         }
-        pub unsafe fn JS_DefineProperty4<C: ?Sized, O, N, V>(
-            _cx: &C,
-            _obj: O,
-            _name: N,
-            _value: V,
-            _attrs: u32,
-        ) -> bool {
-            false
-        }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_ExecuteScript<C, S, R>(_cx: &C, _script: S, _rval: R) -> bool {
             false
@@ -6077,8 +6112,22 @@ pub mod rust {
         pub unsafe fn JS_GetModulePrivate<M>(_module: M) -> jsapi::JSVal {
             jsapi::JSVal::default()
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: &C, _obj: O, _id: I, _vp: V) -> bool {
             false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: &C, obj: O, id: I, vp: V) -> bool
+        where
+            O: Into<*mut jsapi::JSObject>,
+            I: Into<jsapi::jsid>,
+            V: super::wrappers::SetPropertyOut,
+        {
+            match crate::v8_glue::get_property_by_jsid(obj.into(), id.into()) {
+                Some(val) => vp.set_property_out(val),
+                None => vp.set_property_out(jsapi::JSVal::undefined()),
+            }
+            true
         }
         pub unsafe fn JS_GetScriptPrivate<S, V>(_script: S, _value: V) -> bool {
             false
@@ -6623,19 +6672,64 @@ pub mod realms {
     use super::jsapi;
     use std::ptr;
 
+    pub trait IntoJSObject {
+        fn into_js_object(self) -> *mut jsapi::JSObject;
+    }
+    impl IntoJSObject for *mut jsapi::JSObject {
+        fn into_js_object(self) -> *mut jsapi::JSObject {
+            self
+        }
+    }
+    impl IntoJSObject for ptr::NonNull<jsapi::JSObject> {
+        fn into_js_object(self) -> *mut jsapi::JSObject {
+            self.as_ptr()
+        }
+    }
+    impl<'a> IntoJSObject for jsapi::Handle<'a, *mut jsapi::JSObject> {
+        fn into_js_object(self) -> *mut jsapi::JSObject {
+            self.get()
+        }
+    }
+
     pub fn AlreadyInRealm(_cx: *mut jsapi::JSContext) -> bool {
         true
     }
+    #[cfg(not(feature = "v8"))]
     pub fn EnterRealm(_cx: *mut jsapi::JSContext, _obj: *mut jsapi::JSObject) {}
+    #[cfg(feature = "v8")]
+    pub fn EnterRealm(_cx: *mut jsapi::JSContext, obj: *mut jsapi::JSObject) {
+        crate::v8_glue::enter_realm(obj);
+    }
+    #[cfg(not(feature = "v8"))]
+    pub fn LeaveRealm(_cx: *mut jsapi::JSContext) {}
+    #[cfg(feature = "v8")]
     pub fn LeaveRealm(_cx: *mut jsapi::JSContext) {}
 
-    pub struct AutoRealm<'a>(std::marker::PhantomData<&'a ()>);
+    pub struct AutoRealm<'a> {
+        _marker: std::marker::PhantomData<&'a ()>,
+        #[cfg(feature = "v8")]
+        previous_global: Option<usize>,
+    }
     impl<'a> AutoRealm<'a> {
-        pub fn new<C, O>(_cx: C, _obj: O) -> Self {
-            Self(std::marker::PhantomData)
+        pub fn new<C, O>(_cx: C, obj: O) -> Self
+        where
+            O: IntoJSObject,
+        {
+            #[cfg(feature = "v8")]
+            let previous_global = crate::v8_glue::enter_realm(obj.into_js_object());
+            #[cfg(not(feature = "v8"))]
+            let previous_global = None;
+            Self {
+                _marker: std::marker::PhantomData,
+                #[cfg(feature = "v8")]
+                previous_global,
+            }
         }
-        pub unsafe fn new_from_handle<T, O>(_cx: T, _obj: O) -> Self {
-            Self(std::marker::PhantomData)
+        pub unsafe fn new_from_handle<T, O>(_cx: T, obj: O) -> Self
+        where
+            O: IntoJSObject,
+        {
+            Self::new(_cx, obj)
         }
         pub fn current_realm(&mut self) -> CurrentRealm<'_> {
             CurrentRealm(std::marker::PhantomData)
@@ -6687,7 +6781,20 @@ pub mod realms {
             std::ptr::NonNull::dangling()
         }
         pub fn global(&self) -> jsapi::HandleObject<'static> {
-            jsapi::HandleObject::null()
+            #[cfg(feature = "v8")]
+            {
+                crate::v8_glue::current_global_handle()
+            }
+            #[cfg(not(feature = "v8"))]
+            {
+                jsapi::HandleObject::null()
+            }
+        }
+    }
+    impl<'a> Drop for AutoRealm<'a> {
+        fn drop(&mut self) {
+            #[cfg(feature = "v8")]
+            crate::v8_glue::leave_realm(self.previous_global);
         }
     }
     impl<'a> std::ops::Deref for CurrentRealm<'a> {

@@ -40,9 +40,15 @@ thread_local! {
 
     pub(crate) static CURRENT_GLOBAL_HANDLE: RefCell<Option<usize>> = const { RefCell::new(None) };
 
+    /// Stable `*mut JSObject` slot for `HandleObject` construction from the current realm.
+    pub(crate) static CURRENT_GLOBAL_PTR: RefCell<*mut jsapi::JSObject> =
+        const { RefCell::new(ptr::null_mut()) };
+
     /// Object handle pointer → V8 object.
     pub(crate) static OBJECT_MAP: RefCell<HashMap<usize, v8::Global<v8::Object>>> =
         RefCell::new(HashMap::new());
+
+    pub(crate) static OBJECT_REALMS: RefCell<HashMap<usize, usize>> = RefCell::new(HashMap::new());
 
     /// String handle pointer → V8 string.
     pub(crate) static STRING_MAP: RefCell<HashMap<usize, v8::Global<v8::String>>> =
@@ -94,6 +100,12 @@ thread_local! {
     pub(crate) static REALM_ERROR_PROTOTYPE: RefCell<Option<usize>> = const { RefCell::new(None) };
 
     pub(crate) static REALM_ITERATOR_PROTOTYPE: RefCell<Option<usize>> = const { RefCell::new(None) };
+
+    /// Window global handle → WindowProxy handle (see `set_window_proxy`).
+    pub(crate) static WINDOW_TO_PROXY: RefCell<HashMap<usize, usize>> = RefCell::new(HashMap::new());
+
+    /// WindowProxy handle → Window global handle.
+    pub(crate) static PROXY_TO_WINDOW: RefCell<HashMap<usize, usize>> = RefCell::new(HashMap::new());
 
     /// (object handle pointer, property name) → JS value.
     pub(crate) static PROPERTIES: RefCell<HashMap<(usize, String), jsapi::JSVal>> =
@@ -165,6 +177,16 @@ pub(crate) fn store_object(
         m.borrow_mut()
             .insert(handle as usize, v8::Global::new(scope, obj));
     });
+    CURRENT_GLOBAL_HANDLE.with(|current| {
+        if let Some(global) = *current.borrow() {
+            let global = resolve_object_global(global as *mut jsapi::JSObject) as usize;
+            if global != 0 {
+                OBJECT_REALMS.with(|realms| {
+                    realms.borrow_mut().insert(handle as usize, global);
+                });
+            }
+        }
+    });
     handle
 }
 
@@ -233,6 +255,12 @@ pub fn create_dom_global(
         let global = store_object(cs, global_obj);
         CURRENT_GLOBAL_HANDLE.with(|current| {
             *current.borrow_mut() = Some(global as usize);
+        });
+        CURRENT_GLOBAL_PTR.with(|current| {
+            *current.borrow_mut() = global;
+        });
+        OBJECT_REALMS.with(|realms| {
+            realms.borrow_mut().insert(global as usize, global as usize);
         });
         let object_proto = v8::Object::new(cs);
         let object_proto = store_object(cs, object_proto);
@@ -325,12 +353,126 @@ pub fn get_realm_iterator_prototype() -> *mut jsapi::JSObject {
 }
 
 pub fn current_global_object() -> *mut jsapi::JSObject {
+    CURRENT_GLOBAL_PTR.with(|current| *current.borrow())
+}
+
+pub fn enter_realm(global: *mut jsapi::JSObject) -> Option<usize> {
     CURRENT_GLOBAL_HANDLE.with(|current| {
-        current
-            .borrow()
-            .map(|global| global as *mut jsapi::JSObject)
-            .unwrap_or(ptr::null_mut())
+        let previous = *current.borrow();
+        let global = resolve_window_proxy(global);
+        if !global.is_null() {
+            *current.borrow_mut() = Some(global as usize);
+            CURRENT_GLOBAL_PTR.with(|ptr| *ptr.borrow_mut() = global);
+        }
+        previous
     })
+}
+
+pub fn leave_realm(previous: Option<usize>) {
+    CURRENT_GLOBAL_HANDLE.with(|current| {
+        *current.borrow_mut() = previous;
+    });
+    CURRENT_GLOBAL_PTR.with(|global_ptr| {
+        *global_ptr.borrow_mut() = previous
+            .map(|g| g as *mut jsapi::JSObject)
+            .unwrap_or(std::ptr::null_mut());
+    });
+}
+
+pub fn current_global_handle<'a>() -> jsapi::Handle<'a, *mut jsapi::JSObject> {
+    CURRENT_GLOBAL_PTR.with(|current| {
+        // SAFETY: `CURRENT_GLOBAL_PTR` outlives the returned handle for the active realm.
+        unsafe { jsapi::Handle::from_raw(current.as_ptr() as *const *mut jsapi::JSObject) }
+    })
+}
+
+pub fn set_window_proxy(window: *mut jsapi::JSObject, proxy: *mut jsapi::JSObject) -> bool {
+    if window.is_null() || proxy.is_null() {
+        return false;
+    }
+    WINDOW_TO_PROXY.with(|windows| {
+        windows.borrow_mut().insert(window as usize, proxy as usize);
+    });
+    PROXY_TO_WINDOW.with(|proxies| {
+        proxies.borrow_mut().insert(proxy as usize, window as usize);
+    });
+    true
+}
+
+pub fn is_window_proxy(obj: *mut jsapi::JSObject) -> bool {
+    !obj.is_null() && PROXY_TO_WINDOW.with(|proxies| proxies.borrow().contains_key(&(obj as usize)))
+}
+
+fn resolve_window_proxy(obj: *mut jsapi::JSObject) -> *mut jsapi::JSObject {
+    if obj.is_null() {
+        return obj;
+    }
+    PROXY_TO_WINDOW
+        .with(|proxies| proxies.borrow().get(&(obj as usize)).copied())
+        .map(|window| window as *mut jsapi::JSObject)
+        .unwrap_or(obj)
+}
+
+fn is_dom_global(obj: *mut jsapi::JSObject) -> bool {
+    let clasp = get_object_class(obj);
+    if clasp.is_null() {
+        return false;
+    }
+    // SAFETY: `get_object_class` returns a static `JSClass`/`JSClassDef` pointer.
+    let flags = unsafe { (*clasp).flags };
+    flags & jsapi::JSCLASS_IS_GLOBAL != 0
+}
+
+fn object_realm(obj: *mut jsapi::JSObject) -> Option<usize> {
+    let mut obj = obj as usize;
+    for _ in 0..16 {
+        if let Some(global) = OBJECT_REALMS.with(|realms| realms.borrow().get(&obj).copied()) {
+            return Some(global);
+        }
+        let proto = get_prototype(obj as *mut jsapi::JSObject) as usize;
+        if proto == 0 || proto == obj {
+            return None;
+        }
+        obj = proto;
+    }
+    None
+}
+
+fn resolve_object_global(obj: *mut jsapi::JSObject) -> *mut jsapi::JSObject {
+    let obj = resolve_window_proxy(obj);
+    if obj.is_null() || is_dom_global(obj) {
+        return obj;
+    }
+    object_realm(obj)
+        .map(|global| resolve_window_proxy(global as *mut jsapi::JSObject))
+        .filter(|global| is_dom_global(*global))
+        .unwrap_or(ptr::null_mut())
+}
+
+pub fn get_non_ccw_object_global(obj: *mut jsapi::JSObject) -> *mut jsapi::JSObject {
+    if obj.is_null() {
+        return ptr::null_mut();
+    }
+    if let Some(window) =
+        PROXY_TO_WINDOW.with(|proxies| proxies.borrow().get(&(obj as usize)).copied())
+    {
+        return window as *mut jsapi::JSObject;
+    }
+    let global = resolve_object_global(obj);
+    if !global.is_null() {
+        return global;
+    }
+    if let Some(global) = object_realm(obj) {
+        let global = resolve_object_global(global as *mut jsapi::JSObject);
+        if !global.is_null() {
+            return global;
+        }
+    }
+    let current = current_global_object();
+    if !current.is_null() && is_dom_global(current) {
+        return current;
+    }
+    obj
 }
 
 pub fn new_array_object(values: Vec<jsapi::JSVal>) -> *mut jsapi::JSObject {
@@ -610,6 +752,9 @@ pub fn new_proxy_object(
                 .insert(obj as usize, extra as *mut std::ffi::c_void);
         });
     }
+    if is_dom_global(proto) {
+        set_window_proxy(proto, obj);
+    }
     set_prototype(obj, proto)
 }
 
@@ -705,6 +850,13 @@ pub fn set_prototype(
             m.remove(&(obj as usize));
         } else {
             m.insert(obj as usize, proto as usize);
+            if let Some(global) =
+                OBJECT_REALMS.with(|realms| realms.borrow().get(&(proto as usize)).copied())
+            {
+                OBJECT_REALMS.with(|realms| {
+                    realms.borrow_mut().entry(obj as usize).or_insert(global);
+                });
+            }
         }
     });
     obj
@@ -1423,4 +1575,68 @@ pub(crate) fn thread_js_context() -> Option<crate::context::JSContext> {
             crate::context::JSContext::from_ptr(std::ptr::NonNull::dangling())
         })
     })
+}
+
+#[cfg(all(test, feature = "v8"))]
+mod tests {
+    use super::*;
+
+    static GLOBAL_CLASS: jsapi::JSClass = jsapi::JSClass {
+        name: std::ptr::null(),
+        flags: jsapi::JSCLASS_IS_DOMJSCLASS | jsapi::JSCLASS_IS_GLOBAL,
+        cOps: std::ptr::null(),
+        spec: std::ptr::null(),
+        ext: std::ptr::null(),
+        oOps: std::ptr::null(),
+    };
+
+    #[test]
+    fn non_global_objects_resolve_to_creation_global() {
+        let global = create_dom_global(std::ptr::null_mut(), &GLOBAL_CLASS, std::ptr::null_mut());
+        let object = js_new_object();
+        leave_realm(None);
+
+        assert_eq!(get_non_ccw_object_global(object), global);
+    }
+
+    #[test]
+    fn objects_created_in_window_proxy_realm_resolve_to_window() {
+        let window = create_dom_global(std::ptr::null_mut(), &GLOBAL_CLASS, std::ptr::null_mut());
+        let proxy = js_new_object();
+        assert!(set_window_proxy(window, proxy));
+        enter_realm(proxy);
+        let object = js_new_object();
+        leave_realm(None);
+
+        assert_eq!(get_non_ccw_object_global(object), window);
+    }
+
+    #[test]
+    fn window_proxy_creation_maps_proxy_to_window() {
+        let window = create_dom_global(std::ptr::null_mut(), &GLOBAL_CLASS, std::ptr::null_mut());
+        let proxy = new_proxy_object(std::ptr::null_mut(), std::ptr::null(), window, false);
+
+        assert_eq!(get_non_ccw_object_global(proxy), window);
+    }
+
+    #[test]
+    fn objects_inherit_realm_from_prototype() {
+        let global = create_dom_global(std::ptr::null_mut(), &GLOBAL_CLASS, std::ptr::null_mut());
+        let proto = js_new_object();
+        leave_realm(None);
+        let object = js_new_object_with_proto(std::ptr::null(), proto);
+
+        assert_eq!(get_non_ccw_object_global(object), global);
+    }
+
+    #[test]
+    fn objects_resolve_realm_through_prototype_chain() {
+        let global = create_dom_global(std::ptr::null_mut(), &GLOBAL_CLASS, std::ptr::null_mut());
+        let proto = js_new_object();
+        let child_proto = js_new_object_with_proto(std::ptr::null(), proto);
+        leave_realm(None);
+        let object = js_new_object_with_proto(std::ptr::null(), child_proto);
+
+        assert_eq!(get_non_ccw_object_global(object), global);
+    }
 }

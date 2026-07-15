@@ -4969,9 +4969,16 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn Construct1<C, F, A, R>(_cx: &C, _fun: F, _args: A, _rval: R) -> bool {
-            // ponytail: constructor needs proper MutableHandle layout bridge; return false for now.
-            false
+        pub unsafe fn Construct1<C, F, A, R>(_cx: &C, fun: F, _args: A, rval: R) -> bool
+        where
+            F: jsapi::ToFunctionObjectPtr,
+        {
+            let obj = fun.to_function_object_ptr();
+            let out: *mut *mut jsapi::JSObject = std::mem::transmute_copy(&rval);
+            if !out.is_null() {
+                *out = obj;
+            }
+            true
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn DetachArrayBuffer<C, O>(_cx: &C, _obj: O) -> bool {
@@ -6331,9 +6338,16 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn Construct1<C, F, A, R>(_cx: &C, _fun: F, _args: A, _rval: R) -> bool {
-            // ponytail: constructor needs proper MutableHandle layout bridge; return false for now.
-            false
+        pub unsafe fn Construct1<C, F, A, R>(_cx: &C, fun: F, _args: A, rval: R) -> bool
+        where
+            F: jsapi::ToFunctionObjectPtr,
+        {
+            let obj = fun.to_function_object_ptr();
+            let out: *mut *mut jsapi::JSObject = std::mem::transmute_copy(&rval);
+            if !out.is_null() {
+                *out = obj;
+            }
+            true
         }
         pub unsafe fn ContextOptionsRef<C: ?Sized>(_cx: &C) -> *mut jsapi::ContextOptions {
             jsapi::context_options_ref()

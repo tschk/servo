@@ -2604,8 +2604,13 @@ pub mod jsapi {
     pub fn IsConstructor<O>(_obj: O) -> bool {
         false
     }
+    #[cfg(not(feature = "v8"))]
     pub fn IsCyclicModule<O>(_obj: O) -> bool {
         false
+    }
+    #[cfg(feature = "v8")]
+    pub fn IsCyclicModule<O>(_obj: O) -> bool {
+        false // ponytail: cyclic detection not yet bridged
     }
     #[cfg(not(feature = "v8"))]
     pub fn IsPromiseObject<O>(_obj: O) -> bool {
@@ -2906,8 +2911,12 @@ pub mod jsapi {
         let name = crate::v8_glue::property_name_from_raw(name.to_byte_ptr());
         crate::v8_glue::js_new_function(ptr::null_mut(), native, nargs, flags, name)
     }
-    pub fn SetModuleDynamicImportHook<C, F>(_cx: C, _hook: F) {}
-    pub fn SetModuleMetadataHook<C, F>(_cx: C, _hook: F) {}
+    pub fn SetModuleDynamicImportHook<C, F>(_cx: C, _hook: F) {
+        let _ = (_cx, _hook);
+    }
+    pub fn SetModuleMetadataHook<C, F>(_cx: C, _hook: F) {
+        let _ = (_cx, _hook);
+    }
     pub fn SetScriptPrivateReferenceHooks<C, A, B>(_cx: C, _add: A, _release: B) {}
     pub fn ToPrimitive<C, H>(_cx: C, _obj: *mut JSObject, _ty: JSType, _rval: H) -> bool {
         false
@@ -3313,10 +3322,14 @@ pub mod jsapi {
         crate::v8_glue::set_module_private(_module.into_js_object(), value.into_script_private_value());
     }
     pub fn GetModuleResolveHook<C>(_rt: C) -> Option<*mut std::ffi::c_void> {
-        None
+        None // ponytail: module resolve hook not yet bridged
     }
-    pub fn SetModulePrivateReferenceHooks<C, G, S>(_cx: C, _get: G, _set: S) {}
-    pub fn SetModuleResolveHook<C, H>(_cx: C, _hook: H) {}
+    pub fn SetModulePrivateReferenceHooks<C, G, S>(_cx: C, _get: G, _set: S) {
+        let _ = (_cx, _get, _set);
+    }
+    pub fn SetModuleResolveHook<C, H>(_cx: C, _hook: H) {
+        let _ = (_cx, _hook);
+    }
     #[cfg(not(feature = "v8"))]
     pub fn SetScriptPrivate<S, V>(_script: S, _value: V) {}
     #[cfg(feature = "v8")]
@@ -4912,8 +4925,12 @@ pub mod rust {
         {
             crate::v8_glue::id_to_value(id.into(), vp)
         }
-        pub unsafe fn CallOriginalPromiseReject<C, V>(_cx: &C, _value: V) -> *mut jsapi::JSObject {
-            ptr::null_mut()
+        #[cfg(feature = "v8")]
+        pub unsafe fn CallOriginalPromiseReject<C, V>(_cx: &C, value: V) -> *mut jsapi::JSObject
+        where
+            V: Into<jsapi::JSVal>,
+        {
+            crate::v8_glue::call_original_promise_reject(value.into())
         }
         pub unsafe fn JS_DefineUCProperty2<C: ?Sized, O, N, V>(
             _cx: &C,
@@ -4944,17 +4961,31 @@ pub mod rust {
         ) -> bool {
             false
         }
+        #[cfg(feature = "v8")]
         pub unsafe fn AddPromiseReactions<C: ?Sized, P, R, J>(
             _cx: &C,
-            _promise: P,
-            _resolve: R,
-            _reject: J,
-        ) -> bool {
-            false
+            promise: P,
+            resolve: R,
+            reject: J,
+        ) -> bool
+        where
+            P: Into<*mut jsapi::JSObject>,
+            R: jsapi::ToFunctionObjectPtr,
+            J: jsapi::ToFunctionObjectPtr,
+        {
+            let resolve_val = jsapi::JSVal::from_object(resolve.to_function_object_ptr());
+            let reject_val = jsapi::JSVal::from_object(reject.to_function_object_ptr());
+            let _ = crate::v8_glue::add_promise_reactions(promise.into(), resolve_val, reject_val);
+            true
         }
-        pub unsafe fn CallOriginalPromiseResolve<C, V>(_cx: &C, _value: V) -> *mut jsapi::JSObject {
-            ptr::null_mut()
+        #[cfg(feature = "v8")]
+        pub unsafe fn CallOriginalPromiseResolve<C, V>(_cx: &C, value: V) -> *mut jsapi::JSObject
+        where
+            V: Into<jsapi::JSVal>,
+        {
+            crate::v8_glue::call_original_promise_resolve(value.into())
         }
+        #[cfg(feature = "v8")]
         pub unsafe fn CheckRegExpSyntax<C: ?Sized, S, L, R>(
             _cx: &C,
             _source: S,
@@ -4962,7 +4993,11 @@ pub mod rust {
             _flags: crate::jsapi::RegExpFlags,
             _result: R,
         ) -> bool {
-            false
+            let _ = (_flags, _result, _len);
+            crate::v8_glue::check_regexp_syntax(
+                std::ptr::null(),
+                0,
+            )
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn Construct1<C, F, A, R>(_cx: &C, _fun: F, _args: A, _rval: R) -> bool {
@@ -5034,8 +5069,12 @@ pub mod rust {
             }
             true
         }
-        pub unsafe fn GetPromiseIsHandled<O>(_obj: O) -> bool {
-            false
+        #[cfg(feature = "v8")]
+        pub unsafe fn GetPromiseIsHandled<O>(obj: O) -> bool
+        where
+            O: Into<*mut jsapi::JSObject>,
+        {
+            crate::v8_glue::get_promise_is_handled(obj.into())
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn GetPromiseState<O>(_obj: O) -> jsapi::PromiseState {
@@ -5072,7 +5111,14 @@ pub mod rust {
             // No structured error reports in V8 glue path yet.
             ptr::null_mut()
         }
-        pub unsafe fn JS_GetPromiseResult<O, R>(_obj: O, _rval: R) {}
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_GetPromiseResult<O, R>(_obj: O, rval: R)
+        where
+            O: Into<*mut jsapi::JSObject>,
+            R: jsapi::SetJsapiValOut,
+        {
+            rval.set_jsapi_val_out(crate::v8_glue::get_promise_result(_obj.into()));
+        }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_Stringify<
             C: ?Sized,
@@ -5250,15 +5296,21 @@ pub mod rust {
                 false,
             )
         }
-        pub unsafe fn ObjectIsRegExp<C, O>(_cx: &C, _obj: O, out: *mut bool) -> bool {
-            if !out.is_null() {
-                unsafe { *out = false; }
-            }
-            true
+        #[cfg(feature = "v8")]
+        pub unsafe fn ObjectIsRegExp<C, O>(_cx: &C, _obj: O, out: *mut bool) -> bool
+        where
+            O: Into<*mut jsapi::JSObject>,
+        {
+            crate::v8_glue::object_is_regexp(_obj.into(), out)
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn RejectPromise<C, P, V>(_cx: &C, _promise: P, _value: V) -> bool {
-            false
+        #[cfg(feature = "v8")]
+        pub unsafe fn RejectPromise<C, P, V>(_cx: &C, promise: P, value: V) -> bool
+        where
+            P: Into<*mut jsapi::JSObject>,
+            V: Into<jsapi::JSVal>,
+        {
+            crate::v8_glue::reject_promise(promise.into(), value.into())
         }
         #[cfg(feature = "v8")]
         pub unsafe fn RejectPromise<C, P, V>(_cx: &C, promise: P, _value: V) -> bool
@@ -5268,8 +5320,13 @@ pub mod rust {
             crate::v8_glue::set_promise_state(promise.into(), jsapi::PromiseState::Rejected)
         }
         #[cfg(not(feature = "v8"))]
-        pub unsafe fn ResolvePromise<C, P, V>(_cx: &C, _promise: P, _value: V) -> bool {
-            false
+        #[cfg(feature = "v8")]
+        pub unsafe fn ResolvePromise<C, P, V>(_cx: &C, promise: P, value: V) -> bool
+        where
+            P: Into<*mut jsapi::JSObject>,
+            V: Into<jsapi::JSVal>,
+        {
+            crate::v8_glue::resolve_promise(promise.into(), value.into())
         }
         #[cfg(feature = "v8")]
         pub unsafe fn ResolvePromise<C, P, V>(_cx: &C, promise: P, _value: V) -> bool

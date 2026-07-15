@@ -1519,12 +1519,151 @@ pub fn delete_job_queue(queue: *mut jsapi::JobQueue) {
     }
 }
 
-pub fn dispatchable_run(_cx: *mut jsapi::JSContext) {
+    pub fn dispatchable_run(_cx: *mut jsapi::JSContext) {
     crate::V8_ISOLATE.with(|cell| {
         if let Some(ref mut isolate) = *cell.borrow_mut() {
             isolate.perform_microtask_checkpoint();
         }
     })
+}
+
+// ── Promise resolution ───────────────────────────────────────────────────
+
+pub fn resolve_promise(
+    promise: *mut jsapi::JSObject,
+    value: jsapi::JSVal,
+) -> bool {
+    if promise.is_null() {
+        return false;
+    }
+    if let Ok(mut states) = promise_states().lock() {
+        states.insert(promise as usize, jsapi::PromiseState::Fulfilled);
+    }
+    let _ = value;
+    true
+}
+
+pub fn reject_promise(
+    promise: *mut jsapi::JSObject,
+    value: jsapi::JSVal,
+) -> bool {
+    if promise.is_null() {
+        return false;
+    }
+    if let Ok(mut states) = promise_states().lock() {
+        states.insert(promise as usize, jsapi::PromiseState::Rejected);
+    }
+    let _ = value;
+    true
+}
+
+pub fn get_promise_result(promise: *mut jsapi::JSObject) -> jsapi::JSVal {
+    let _ = promise;
+    jsapi::JSVal::undefined()
+}
+
+pub fn add_promise_reactions(
+    _promise: *mut jsapi::JSObject,
+    _on_fulfilled: jsapi::JSVal,
+    _on_rejected: jsapi::JSVal,
+) -> *mut jsapi::JSObject {
+    // ponytail: reaction tracking not yet bridged; return pending promise.
+    new_promise_object(std::ptr::null_mut())
+}
+
+pub fn call_original_promise_reject(value: jsapi::JSVal) -> *mut jsapi::JSObject {
+    let _ = value;
+    new_promise_object(std::ptr::null_mut())
+}
+
+pub fn call_original_promise_resolve(value: jsapi::JSVal) -> *mut jsapi::JSObject {
+    let _ = value;
+    new_promise_object(std::ptr::null_mut())
+}
+
+pub fn set_any_promise_is_handled(obj: *mut jsapi::JSObject) -> bool {
+    let _ = obj;
+    true
+}
+
+pub fn get_promise_is_handled(obj: *mut jsapi::JSObject) -> bool {
+    if obj.is_null() {
+        return false;
+    }
+    promise_states()
+        .lock()
+        .ok()
+        .is_some_and(|states| states.contains_key(&(obj as usize)))
+}
+
+// ── Module operations ──────────────────────────────────────────────────────
+
+pub fn set_module_dynamic_import_hook(_hook: usize) {}
+pub fn set_module_metadata_hook(_hook: usize) {}
+pub fn get_module_resolve_hook() -> Option<usize> {
+    None
+}
+pub fn set_module_resolve_hook(_hook: usize) {}
+pub fn set_module_private_reference_hooks(_get: usize, _set: usize) {}
+
+pub fn get_module_request_specifier(_module: *mut jsapi::JSObject, _index: u32) -> *mut jsapi::JSObject {
+    ptr::null_mut()
+}
+
+pub fn get_module_request_type(_module: *mut jsapi::JSObject, _index: u32) -> jsapi::ModuleType {
+    jsapi::ModuleType::JavaScript
+}
+
+pub fn get_requested_module_specifier(
+    _module: *mut jsapi::JSObject,
+    _index: u32,
+) -> *mut jsapi::JSObject {
+    ptr::null_mut()
+}
+
+pub fn get_requested_module_type(
+    _module: *mut jsapi::JSObject,
+    _index: u32,
+) -> jsapi::ModuleType {
+    jsapi::ModuleType::JavaScript
+}
+
+pub fn get_requested_modules_count(_module: *mut jsapi::JSObject) -> u32 {
+    0
+}
+
+pub fn is_cyclic_module(_obj: *mut jsapi::JSObject) -> bool {
+    false
+}
+
+// ── RegExp ─────────────────────────────────────────────────────────────────
+
+pub fn check_regexp_syntax(
+    _source: *const u16,
+    _len: u32,
+) -> bool {
+    // ponytail: syntax check via V8 compile; always succeeds for now.
+    true
+}
+
+pub fn execute_regexp_no_statics(
+    _regexp: *mut jsapi::JSObject,
+    _string: *mut jsapi::JSObject,
+    _last_index: u32,
+    _sticky: bool,
+    _rval: *mut jsapi::JSVal,
+) -> bool {
+    false
+}
+
+pub fn object_is_regexp(
+    _obj: *mut jsapi::JSObject,
+    out: *mut bool,
+) -> bool {
+    if !out.is_null() {
+        unsafe { *out = false; }
+    }
+    true
 }
 
 // ── Script execution ───────────────────────────────────────────────────────

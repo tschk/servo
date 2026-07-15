@@ -839,6 +839,8 @@ mod tests {
             status.get("activeEngine"),
             Some(&JSValue::String("soliloquy-dispatch".to_string()))
         );
+        assert_eq!(status.get("bridgeReady"), Some(&JSValue::Boolean(false)));
+        assert_eq!(status.get("controlsDom"), Some(&JSValue::Boolean(false)));
         #[cfg(feature = "soliloquy_v8")]
         {
             assert_eq!(

@@ -4504,8 +4504,14 @@ pub mod rust {
         {
             !crate::v8_glue::set_prototype(obj.into(), proto.into()).is_null()
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_WrapObject<C, O>(_cx: &C, _obj: O) -> bool {
             false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_WrapObject<C, O>(_cx: &C, _obj: O) -> bool {
+            let _ = _obj;
+            true
         }
         pub trait ToJsContextPtr {
             fn to_js_context_ptr(&self) -> *mut jsapi::JSContext;
@@ -5868,8 +5874,14 @@ pub mod rust {
         pub unsafe fn JS_IsExceptionPending<C: ?Sized>(_cx: &C) -> bool {
             crate::v8_glue::is_exception_pending()
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_WrapObject<C, O>(_cx: &C, _obj: O) -> bool {
             false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_WrapObject<C, O>(_cx: &C, _obj: O) -> bool {
+            let _ = _obj;
+            true
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_GetProperty<C, O, N, V>(_cx: &C, _obj: O, _name: N, _vp: V) -> bool {
@@ -5926,8 +5938,13 @@ pub mod rust {
         pub unsafe fn JS_ParseJSON<C, S, L, V>(_cx: &C, _chars: S, _len: L, _vp: V) -> bool {
             false
         }
-        pub unsafe fn GetFunctionRealm<C, F>(_cx: &C, _fun: F) -> *mut jsapi::JSObject {
-            ptr::null_mut()
+        #[cfg(feature = "v8")]
+        pub unsafe fn GetFunctionRealm<C, F>(_cx: &C, _fun: F) -> *mut jsapi::JSObject
+        where
+            F: crate::realm::IntoJSObject,
+        {
+            let _ = _fun;
+            crate::v8_glue::current_global_object()
         }
         pub unsafe fn GetWellKnownSymbol<C, W>(_cx: &C, _which: W) -> jsapi::JSVal {
             jsapi::JSVal::default()
@@ -6576,8 +6593,21 @@ pub mod rust {
         ) -> bool {
             true
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_GetElement<C, O, I, V>(_cx: &C, _obj: O, _index: I, _vp: V) -> bool {
             false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_GetElement<C, O, I, V>(_cx: &C, obj: O, index: I, vp: V) -> bool
+        where
+            O: Into<*mut jsapi::JSObject>,
+            I: crate::jsval::ToArrayIndex,
+            V: jsapi::SetJsapiValOut,
+        {
+            let idx = crate::jsval::index_to_u32(index);
+            let val = crate::v8_glue::get_array_element(obj.into(), idx);
+            vp.set_jsapi_val_out(val.unwrap_or_else(jsapi::JSVal::undefined));
+            true
         }
         pub unsafe fn JS_GetScriptedCallerPrivate<C, V>(_cx: &C, _vp: V) -> bool {
             false
@@ -7583,6 +7613,30 @@ pub mod jsval {
     pub fn StringValue<S: ToStringPtr>(s: S) -> JSVal {
         JSVal::from_string(s.to_string_ptr())
     }
+    /// Convert any integer-like index to u32 for JS_GetElement etc.
+    /// Uses a trait object approach since i32/u32/usize don't share a common Into<u32>.
+    pub trait ToArrayIndex {
+        fn to_array_index(self) -> u32;
+    }
+    impl ToArrayIndex for i32 {
+        fn to_array_index(self) -> u32 {
+            self as u32
+        }
+    }
+    impl ToArrayIndex for u32 {
+        fn to_array_index(self) -> u32 {
+            self
+        }
+    }
+    impl ToArrayIndex for usize {
+        fn to_array_index(self) -> u32 {
+            self as u32
+        }
+    }
+    pub fn index_to_u32<I: ToArrayIndex>(index: I) -> u32 {
+        index.to_array_index()
+    }
+
     pub fn NumberValue(n: f64) -> JSVal {
         DoubleValue(n)
     }

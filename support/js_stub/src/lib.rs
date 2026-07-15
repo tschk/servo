@@ -435,7 +435,7 @@ pub mod glue {
         argc: u32,
         vp: *mut jsapi::JSVal,
     ) -> bool {
-        crate::v8_glue::call_jit_getter_op(info, cx.raw_cx(), obj, this, argc, vp)
+        crate::v8_glue::call_jit_getter_op(info, unsafe { cx.raw_cx() }, obj, this, argc, vp)
     }
 
     #[cfg(not(feature = "v8"))]
@@ -458,7 +458,7 @@ pub mod glue {
         argc: u32,
         vp: *mut jsapi::JSVal,
     ) -> bool {
-        crate::v8_glue::call_jit_method_op(info, cx.raw_cx(), obj, this, argc, vp)
+        crate::v8_glue::call_jit_method_op(info, unsafe { cx.raw_cx() }, obj, this, argc, vp)
     }
 
     #[cfg(not(feature = "v8"))]
@@ -1356,7 +1356,7 @@ pub mod jsapi {
             self.get().to_string()
         }
         pub unsafe fn from_marked_location(ptr: *const JSVal) -> Self {
-            Self::from_raw(ptr)
+            unsafe { Self::from_raw(ptr) }
         }
     }
 
@@ -4488,7 +4488,7 @@ pub mod rust {
             succeeded: *mut bool,
         ) -> bool {
             if !succeeded.is_null() {
-                *succeeded = true;
+                unsafe { *succeeded = true; }
             }
             true
         }
@@ -4757,11 +4757,11 @@ pub mod rust {
             O: Into<*mut jsapi::JSObject>,
             N: jsapi::ToBytePtr,
         {
-            let name_str = std::ffi::CStr::from_ptr(name.to_byte_ptr() as *const std::os::raw::c_char)
+            let name_str = unsafe { std::ffi::CStr::from_ptr(name.to_byte_ptr() as *const std::os::raw::c_char) }
                 .to_string_lossy();
             let result = crate::v8_glue::has_property_by_name(obj.into(), &name_str);
             if !found.is_null() {
-                *found = result;
+                unsafe { *found = result; }
             }
             true
         }
@@ -4803,11 +4803,11 @@ pub mod rust {
             O: Into<*mut jsapi::JSObject>,
             N: jsapi::ToBytePtr,
         {
-            let name_str = std::ffi::CStr::from_ptr(name.to_byte_ptr() as *const std::os::raw::c_char)
+            let name_str = unsafe { std::ffi::CStr::from_ptr(name.to_byte_ptr() as *const std::os::raw::c_char) }
                 .to_string_lossy();
             let result = crate::v8_glue::has_property_by_name(obj.into(), &name_str);
             if !found.is_null() {
-                *found = result;
+                unsafe { *found = result; }
             }
             true
         }
@@ -4964,7 +4964,13 @@ pub mod rust {
         ) -> bool {
             false
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn Construct1<C, F, A, R>(_cx: &C, _fun: F, _args: A, _rval: R) -> bool {
+            false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn Construct1<C, F, A, R>(_cx: &C, _fun: F, _args: A, _rval: R) -> bool {
+            // ponytail: constructor needs proper MutableHandle layout bridge; return false for now.
             false
         }
         #[cfg(not(feature = "v8"))]
@@ -5110,7 +5116,7 @@ pub mod rust {
             let text = if text.is_null() {
                 "".to_string()
             } else {
-                std::ffi::CStr::from_ptr(text as *const std::os::raw::c_char)
+                unsafe { std::ffi::CStr::from_ptr(text as *const std::os::raw::c_char) }
                     .to_string_lossy()
                     .into_owned()
             };
@@ -5239,7 +5245,7 @@ pub mod rust {
         }
         pub unsafe fn ObjectIsRegExp<C, O>(_cx: &C, _obj: O, out: *mut bool) -> bool {
             if !out.is_null() {
-                *out = false;
+                unsafe { *out = false; }
             }
             true
         }
@@ -6320,7 +6326,13 @@ pub mod rust {
         ) -> *mut jsapi::JSObject {
             crate::v8_glue::js_new_object()
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn Construct1<C, F, A, R>(_cx: &C, _fun: F, _args: A, _rval: R) -> bool {
+            false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn Construct1<C, F, A, R>(_cx: &C, _fun: F, _args: A, _rval: R) -> bool {
+            // ponytail: constructor needs proper MutableHandle layout bridge; return false for now.
             false
         }
         pub unsafe fn ContextOptionsRef<C: ?Sized>(_cx: &C) -> *mut jsapi::ContextOptions {
@@ -6565,7 +6577,7 @@ pub mod rust {
         }
         pub unsafe fn ObjectIsDate<C, O>(_cx: &C, _obj: O, out: *mut bool) -> bool {
             if !out.is_null() {
-                *out = false;
+                unsafe { *out = false; }
             }
             true
         }
@@ -6628,7 +6640,7 @@ pub mod rust {
     }
     unsafe impl<T: super::gc::Traceable + ?Sized> Trace for std::rc::Rc<T> {
         unsafe fn trace(&self, tr: *mut super::jsapi::JSTracer) {
-            <T as super::gc::Traceable>::trace(self, tr);
+            unsafe { <T as super::gc::Traceable>::trace(self, tr); }
         }
     }
 
@@ -7008,7 +7020,7 @@ pub mod context {
             Self { ptr }
         }
         pub unsafe fn from_raw_ptr(ptr: *mut RawJSContext) -> Self {
-            Self::from_ptr(std::ptr::NonNull::new(ptr).expect("null JSContext"))
+            unsafe { Self::from_ptr(std::ptr::NonNull::new(ptr).expect("null JSContext")) }
         }
         pub unsafe fn get_from_thread() -> Option<Self> {
             #[cfg(feature = "v8")]
@@ -7481,7 +7493,7 @@ pub mod conversions {
             val: jsapi::HandleValue,
             option: Self::Config,
         ) -> Result<ConversionResult<Self>, ()> {
-            match T::from_jsval(cx, val, option)? {
+            match unsafe { T::from_jsval(cx, val, option) }? {
                 ConversionResult::Success(value) => Ok(ConversionResult::Success(Some(value))),
                 ConversionResult::Failure(message) => Ok(ConversionResult::Failure(message)),
             }

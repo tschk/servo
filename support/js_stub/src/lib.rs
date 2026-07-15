@@ -3303,7 +3303,44 @@ pub mod jsapi {
     }
     pub fn SetModulePrivateReferenceHooks<C, G, S>(_cx: C, _get: G, _set: S) {}
     pub fn SetModuleResolveHook<C, H>(_cx: C, _hook: H) {}
+    #[cfg(not(feature = "v8"))]
     pub fn SetScriptPrivate<S, V>(_script: S, _value: V) {}
+    #[cfg(feature = "v8")]
+    pub fn SetScriptPrivate<S, V>(_script: S, value: V)
+    where
+        S: Into<*mut JSScript>,
+        V: IntoScriptPrivateValue,
+    {
+        crate::v8_glue::set_script_private(_script.into(), value.into_script_private_value());
+    }
+
+    pub trait IntoScriptPrivateValue {
+        fn into_script_private_value(self) -> JSVal;
+    }
+
+    impl IntoScriptPrivateValue for JSVal {
+        fn into_script_private_value(self) -> JSVal {
+            self
+        }
+    }
+
+    impl IntoScriptPrivateValue for &JSVal {
+        fn into_script_private_value(self) -> JSVal {
+            *self
+        }
+    }
+
+    impl IntoScriptPrivateValue for HandleValue<'_> {
+        fn into_script_private_value(self) -> JSVal {
+            self.get()
+        }
+    }
+
+    impl IntoScriptPrivateValue for &HandleValue<'_> {
+        fn into_script_private_value(self) -> JSVal {
+            self.get()
+        }
+    }
     pub fn StealArrayBufferContents<C>(_cx: C, _obj: HandleObject<'_>) -> *mut std::ffi::c_void {
         ptr::null_mut()
     }
@@ -5504,11 +5541,92 @@ pub mod rust {
     ) -> Option<ExceptionStackInfo> {
         None
     }
-    pub fn transform_u16_to_source_text<S>(_source: S) -> *const std::ffi::c_void {
-        ptr::null()
+    pub trait SourceTextPtr {
+        fn as_source_ptr(self) -> *const std::ffi::c_void;
     }
-    pub fn transform_str_to_source_text<S>(_source: S) -> *const std::ffi::c_void {
-        ptr::null()
+
+    impl SourceTextPtr for *const std::ffi::c_void {
+        fn as_source_ptr(self) -> *const std::ffi::c_void {
+            self
+        }
+    }
+
+    impl SourceTextPtr for *mut std::ffi::c_void {
+        fn as_source_ptr(self) -> *const std::ffi::c_void {
+            self as *const std::ffi::c_void
+        }
+    }
+
+    impl SourceTextPtr for &*const std::ffi::c_void {
+        fn as_source_ptr(self) -> *const std::ffi::c_void {
+            *self
+        }
+    }
+
+    impl SourceTextPtr for &mut *const std::ffi::c_void {
+        fn as_source_ptr(self) -> *const std::ffi::c_void {
+            *self
+        }
+    }
+
+    impl SourceTextPtr for &*mut std::ffi::c_void {
+        fn as_source_ptr(self) -> *const std::ffi::c_void {
+            *self as *const std::ffi::c_void
+        }
+    }
+
+    impl SourceTextPtr for &mut *mut std::ffi::c_void {
+        fn as_source_ptr(self) -> *const std::ffi::c_void {
+            *self as *const std::ffi::c_void
+        }
+    }
+
+    pub fn transform_u16_to_source_text<S>(_source: S) -> *const std::ffi::c_void {
+        // UTF-16 path not mirrored yet; empty source still compiles.
+        #[cfg(feature = "v8")]
+        {
+            return crate::v8_glue::store_source_text("");
+        }
+        #[cfg(not(feature = "v8"))]
+        {
+            ptr::null()
+        }
+    }
+    pub fn transform_str_to_source_text<S>(source: S) -> *const std::ffi::c_void
+    where
+        S: AsRef<str>,
+    {
+        #[cfg(feature = "v8")]
+        {
+            return crate::v8_glue::store_source_text(source.as_ref());
+        }
+        #[cfg(not(feature = "v8"))]
+        {
+            let _ = source;
+            ptr::null()
+        }
+    }
+
+    pub trait IntoJSScriptPtr {
+        fn into_js_script_ptr(self) -> *mut super::jsapi::JSScript;
+    }
+
+    impl IntoJSScriptPtr for *mut super::jsapi::JSScript {
+        fn into_js_script_ptr(self) -> *mut super::jsapi::JSScript {
+            self
+        }
+    }
+
+    impl IntoJSScriptPtr for *const super::jsapi::JSScript {
+        fn into_js_script_ptr(self) -> *mut super::jsapi::JSScript {
+            self as *mut super::jsapi::JSScript
+        }
+    }
+
+    impl IntoJSScriptPtr for super::jsapi::Handle<'_, *mut super::jsapi::JSScript> {
+        fn into_js_script_ptr(self) -> *mut super::jsapi::JSScript {
+            self.get()
+        }
     }
     pub mod wrappers2 {
         use super::super::jsapi;
@@ -5966,8 +6084,11 @@ pub mod rust {
             ptr::null_mut()
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn Compile1<C, O, S>(_cx: &C, _options: O, _source: S) -> *mut jsapi::JSScript {
-            crate::v8_glue::js_new_object() as *mut jsapi::JSScript
+        pub unsafe fn Compile1<C, O, S>(_cx: &C, _options: O, source: S) -> *mut jsapi::JSScript
+        where
+            S: super::SourceTextPtr,
+        {
+            crate::v8_glue::compile_script_from_source_ptr(source.as_source_ptr())
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn CompileJsonModule1<C: ?Sized, O, S>(
@@ -6100,12 +6221,21 @@ pub mod rust {
             false
         }
         #[cfg(feature = "v8")]
-        pub unsafe fn JS_ExecuteScript<C, S, R>(_cx: &C, _script: S, rval: R) -> bool
+        pub unsafe fn JS_ExecuteScript<C, S, R>(_cx: &C, script: S, rval: R) -> bool
         where
+            S: crate::rust::IntoJSScriptPtr,
             R: jsapi::SetJsapiValOut,
         {
-            rval.set_jsapi_val_out(jsapi::JSVal::undefined());
-            true
+            match crate::v8_glue::execute_script_handle(script.into_js_script_ptr()) {
+                Some(val) => {
+                    rval.set_jsapi_val_out(val);
+                    true
+                }
+                None => {
+                    rval.set_jsapi_val_out(jsapi::JSVal::undefined());
+                    false
+                }
+            }
         }
         pub unsafe fn JS_GC<C, R>(_cx: &C, _reason: R) {}
         pub unsafe fn JS_GetGCParameter<C, K>(_cx: &C, _key: K) -> u32 {
@@ -6131,8 +6261,20 @@ pub mod rust {
             }
             true
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_GetScriptPrivate<S, V>(_script: S, _value: V) -> bool {
             false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_GetScriptPrivate<S, V>(_script: S, value: V) -> bool
+        where
+            S: crate::rust::IntoJSScriptPtr,
+            V: jsapi::SetJsapiValOut,
+        {
+            value.set_jsapi_val_out(crate::v8_glue::get_script_private(
+                _script.into_js_script_ptr(),
+            ));
+            true
         }
         pub unsafe fn JS_InitDestroyPrincipalsCallback<C, F>(_cx: &C, _callback: F) {}
         pub unsafe fn JS_InitReadPrincipalsCallback<C, F>(_cx: &C, _callback: F) {}
@@ -7174,8 +7316,14 @@ pub mod jsval {
     pub fn BooleanValue(b: bool) -> JSVal {
         JSVal::from_bool(b)
     }
-    pub fn DoubleValue(_d: f64) -> JSVal {
-        JSVal::default()
+    pub fn DoubleValue(d: f64) -> JSVal {
+        // ponytail: no NaN-box double tag; use int when exact, else private bits of f64.
+        if d.is_finite() && d == (d as i32 as f64) && (i32::MIN as f64..=i32::MAX as f64).contains(&d)
+        {
+            JSVal::from_int32(d as i32)
+        } else {
+            JSVal::from_private(d.to_bits() as *const std::ffi::c_void)
+        }
     }
     pub fn Int32Value(i: i32) -> JSVal {
         JSVal::from_int32(i)
@@ -7208,8 +7356,8 @@ pub mod jsval {
     pub fn StringValue<S: ToStringPtr>(s: S) -> JSVal {
         JSVal::from_string(s.to_string_ptr())
     }
-    pub fn NumberValue(_n: f64) -> JSVal {
-        JSVal::default()
+    pub fn NumberValue(n: f64) -> JSVal {
+        DoubleValue(n)
     }
 
     pub mod glue {

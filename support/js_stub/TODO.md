@@ -156,6 +156,14 @@ reborrow sites (`cx` moved into wrapper calls before later `cx.into()` use).
 
 ---
 
+## Done recently (V8-only cutover)
+
+- `JSEngine::init` calls `ensure_v8()`
+- SourceText store + `Compile1` + `JS_ExecuteScript` wired to rusty_v8 compile/run
+- `SetScriptPrivate` / `JS_GetScriptPrivate` store private values on compiled scripts
+- `DoubleValue` / `NumberValue` no longer always undefined
+- Unit tests: compile/execute + script private roundtrip
+
 ## TODO — Remaining issues
 
 ### A. SafeJSContext reborrow generation

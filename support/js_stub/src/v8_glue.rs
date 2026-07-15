@@ -129,6 +129,16 @@ thread_local! {
 
     pub(crate) static PENDING_EXCEPTION: RefCell<Option<jsapi::JSVal>> = const { RefCell::new(None) };
 
+    /// SourceText pointer ids → script source text.
+    pub(crate) static SOURCE_TEXTS: RefCell<HashMap<usize, String>> = RefCell::new(HashMap::new());
+
+    /// Compiled JSScript handle → source text for execute.
+    pub(crate) static SCRIPT_SOURCES: RefCell<HashMap<usize, String>> = RefCell::new(HashMap::new());
+
+    /// Compiled JSScript handle → private JS value (module/script metadata).
+    pub(crate) static SCRIPT_PRIVATES: RefCell<HashMap<usize, jsapi::JSVal>> =
+        RefCell::new(HashMap::new());
+
     /// Monotonically increasing handle ID counter (1-based; 0 = null).
     pub(crate) static NEXT_HANDLE: RefCell<usize> = const { RefCell::new(1) };
 }
@@ -1512,18 +1522,129 @@ pub fn dispatchable_run(_cx: *mut jsapi::JSContext) {
 
 // ── Script execution ───────────────────────────────────────────────────────
 
-pub fn evaluate_script(script: &str) -> bool {
-    with_scope(|hs| {
-        let source = match v8::String::new(hs, script) {
+pub fn store_source_text(source: &str) -> *const std::ffi::c_void {
+    let id = next_handle();
+    SOURCE_TEXTS.with(|m| {
+        m.borrow_mut().insert(id, source.to_string());
+    });
+    id as *const std::ffi::c_void
+}
+
+pub fn source_text_from_ptr(ptr: *const std::ffi::c_void) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    SOURCE_TEXTS.with(|m| m.borrow().get(&(ptr as usize)).cloned())
+}
+
+pub fn compile_script(source: &str) -> *mut jsapi::JSScript {
+    // Validate compile in current realm; store source on success.
+    let ok = with_scope(|hs| {
+        let source = match v8::String::new(hs, source) {
             Some(s) => s,
             None => return false,
         };
-        let script_obj = match v8::Script::compile(hs, source, None) {
-            Some(s) => s,
-            None => return false,
-        };
-        script_obj.run(hs).is_some()
+        v8::Script::compile(hs, source, None).is_some()
+    });
+    if !ok {
+        return ptr::null_mut();
+    }
+    let script = allocate_object_handle() as *mut jsapi::JSScript;
+    SCRIPT_SOURCES.with(|m| {
+        m.borrow_mut().insert(script as usize, source.to_string());
+    });
+    script
+}
+
+pub fn compile_script_from_source_ptr(source: *const std::ffi::c_void) -> *mut jsapi::JSScript {
+    match source_text_from_ptr(source) {
+        Some(text) => compile_script(&text),
+        None => ptr::null_mut(),
+    }
+}
+
+pub fn set_script_private(script: *mut jsapi::JSScript, value: jsapi::JSVal) {
+    if script.is_null() {
+        return;
+    }
+    SCRIPT_PRIVATES.with(|m| {
+        m.borrow_mut().insert(script as usize, value);
+    });
+}
+
+pub fn get_script_private(script: *mut jsapi::JSScript) -> jsapi::JSVal {
+    if script.is_null() {
+        return jsapi::JSVal::undefined();
+    }
+    SCRIPT_PRIVATES.with(|m| {
+        m.borrow()
+            .get(&(script as usize))
+            .copied()
+            .unwrap_or_else(jsapi::JSVal::undefined)
     })
+}
+
+fn v8_local_to_jsval(
+    scope: &mut v8::ContextScope<v8::HandleScope>,
+    value: v8::Local<v8::Value>,
+) -> jsapi::JSVal {
+    if value.is_undefined() {
+        jsapi::JSVal::undefined()
+    } else if value.is_null() {
+        jsapi::JSVal::null()
+    } else if value.is_boolean() {
+        jsapi::JSVal::from_bool(value.boolean_value(scope))
+    } else if value.is_int32() {
+        jsapi::JSVal::from_int32(value.int32_value(scope).unwrap_or(0))
+    } else if value.is_uint32() {
+        jsapi::JSVal::from_uint32(value.uint32_value(scope).unwrap_or(0))
+    } else if value.is_number() {
+        let n = value.number_value(scope).unwrap_or(f64::NAN);
+        if n.is_finite() && n == (n as i32 as f64) && (i32::MIN as f64..=i32::MAX as f64).contains(&n)
+        {
+            jsapi::JSVal::from_int32(n as i32)
+        } else {
+            // ponytail: no NaN-box double tag yet; keep printable numeric string.
+            let s = new_v8_string(scope, &n.to_string());
+            jsapi::JSVal::from_string(s)
+        }
+    } else if value.is_string() {
+        let text = value
+            .to_string(scope)
+            .map(|s| s.to_rust_string_lossy(scope))
+            .unwrap_or_default();
+        let s = new_v8_string(scope, &text);
+        jsapi::JSVal::from_string(s)
+    } else if value.is_object() {
+        if let Ok(obj) = v8::Local::<v8::Object>::try_from(value) {
+            jsapi::JSVal::from_object(store_object(scope, obj))
+        } else {
+            jsapi::JSVal::undefined()
+        }
+    } else {
+        jsapi::JSVal::undefined()
+    }
+}
+
+pub fn evaluate_script(script: &str) -> bool {
+    evaluate_script_value(script).is_some()
+}
+
+pub fn evaluate_script_value(script: &str) -> Option<jsapi::JSVal> {
+    with_scope(|hs| {
+        let source = v8::String::new(hs, script)?;
+        let script_obj = v8::Script::compile(hs, source, None)?;
+        let value = script_obj.run(hs)?;
+        Some(v8_local_to_jsval(hs, value))
+    })
+}
+
+pub fn execute_script_handle(script: *mut jsapi::JSScript) -> Option<jsapi::JSVal> {
+    if script.is_null() {
+        return None;
+    }
+    let source = SCRIPT_SOURCES.with(|m| m.borrow().get(&(script as usize)).cloned())?;
+    evaluate_script_value(&source)
 }
 
 pub fn evaluate_to_string(script: &str) -> Option<String> {
@@ -1638,5 +1759,27 @@ mod tests {
         let object = js_new_object_with_proto(std::ptr::null(), child_proto);
 
         assert_eq!(get_non_ccw_object_global(object), global);
+    }
+
+    #[test]
+    fn compile_and_execute_script_returns_value() {
+        let _global =
+            create_dom_global(std::ptr::null_mut(), &GLOBAL_CLASS, std::ptr::null_mut());
+        let source = store_source_text("1 + 2");
+        let script = compile_script_from_source_ptr(source);
+        assert!(!script.is_null());
+        let value = execute_script_handle(script).expect("execute");
+        assert_eq!(value.to_int32(), 3);
+        assert_eq!(evaluate_to_string("['rv', 8].join('')").as_deref(), Some("rv8"));
+    }
+
+    #[test]
+    fn script_private_roundtrip() {
+        let _global =
+            create_dom_global(std::ptr::null_mut(), &GLOBAL_CLASS, std::ptr::null_mut());
+        let script = compile_script("0");
+        assert!(!script.is_null());
+        set_script_private(script, jsapi::JSVal::from_int32(7));
+        assert_eq!(get_script_private(script).to_int32(), 7);
     }
 }

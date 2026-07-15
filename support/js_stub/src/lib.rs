@@ -5009,9 +5009,9 @@ pub mod rust {
             F: jsapi::ToFunctionObjectPtr,
         {
             let obj = fun.to_function_object_ptr();
-            let out: *mut *mut jsapi::JSObject = std::mem::transmute_copy(&rval);
+            let out: *mut *mut jsapi::JSObject = unsafe { std::mem::transmute_copy(&rval) };
             if !out.is_null() {
-                *out = obj;
+                unsafe { *out = obj; }
             }
             true
         }
@@ -6400,9 +6400,9 @@ pub mod rust {
             F: jsapi::ToFunctionObjectPtr,
         {
             let obj = fun.to_function_object_ptr();
-            let out: *mut *mut jsapi::JSObject = std::mem::transmute_copy(&rval);
+            let out: *mut *mut jsapi::JSObject = unsafe { std::mem::transmute_copy(&rval) };
             if !out.is_null() {
-                *out = obj;
+                unsafe { *out = obj; }
             }
             true
         }

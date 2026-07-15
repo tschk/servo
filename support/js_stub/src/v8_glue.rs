@@ -302,7 +302,9 @@ pub fn create_dom_global(
         global
     });
     // Bootstrap after isolate RefCell is released (evaluate_script re-enters with_scope).
+    let _ = install_console_log_bridge();
     let _ = install_window_event_target_bootstrap();
+    let _ = install_console_and_timer_bootstrap();
     global
 }
 
@@ -1862,6 +1864,74 @@ pub fn install_window_event_target_bootstrap() -> bool {
             g.Event.prototype.stopPropagation = function () {};
             g.Event.prototype.stopImmediatePropagation = function () {};
           }
+        })(globalThis);
+        "#,
+    )
+}
+
+/// Install console methods and timer stubs on the V8 global.
+pub fn install_console_and_timer_bootstrap() -> bool {
+    evaluate_script(
+        r#"
+        (function (g) {
+          if (typeof g.console === 'object' && typeof g.console.log === 'function') return;
+          var c = {};
+          function mkLog(level) {
+            return function () {
+              var parts = [];
+              for (var i = 0; i < arguments.length; i++) {
+                var v = arguments[i];
+                if (v === undefined) parts.push('undefined');
+                else if (v === null) parts.push('null');
+                else if (typeof v === 'string') parts.push(v);
+                else if (typeof v === 'object') {
+                  try { parts.push(JSON.stringify(v)); } catch(_) { parts.push(String(v)); }
+                } else parts.push(String(v));
+              }
+              var msg = parts.join(' ');
+              if (typeof g.__rv8ConsoleLog === 'function') g.__rv8ConsoleLog(level, msg);
+            };
+          }
+          c.log = mkLog('info');
+          c.info = mkLog('info');
+          c.warn = mkLog('warn');
+          c.error = mkLog('error');
+          c.debug = mkLog('debug');
+          c.trace = mkLog('trace');
+          c.dir = c.log;
+          c.group = function(){};
+          c.groupEnd = function(){};
+          c.time = function(){};
+          c.timeEnd = function(){};
+          c.assert = function(cond) { if (!cond) c.error('assertion failed'); };
+          g.console = c;
+          if (typeof g.setTimeout !== 'function') {
+            var tid = 1;
+            var tmrs = {};
+            g.setTimeout = function(fn, ms) { var id = tid++; tmrs[id] = fn; return id; };
+            g.clearTimeout = function(id) { delete tmrs[id]; };
+            g.setInterval = function(fn, ms) { var id = tid++; tmrs[id] = fn; return id; };
+            g.clearInterval = g.clearTimeout;
+          }
+        })(globalThis);
+        "#,
+    )
+}
+
+/// Install a `__rv8ConsoleLog` function on globalThis that routes to Rust tracing.
+pub fn install_console_log_bridge() -> bool {
+    evaluate_script(
+        r#"
+        (function (g) {
+          if (typeof g.__rv8ConsoleLog === 'function') return;
+          g.__rv8ConsoleLog = function (level, msg) {
+            if (typeof msg === 'undefined') msg = '';
+            try {
+              if (level === 'error') { console.error('[page]', msg); }
+              else if (level === 'warn') { console.warn('[page]', msg); }
+              else { console.log('[page]', msg); }
+            } catch (_) {}
+          };
         })(globalThis);
         "#,
     )

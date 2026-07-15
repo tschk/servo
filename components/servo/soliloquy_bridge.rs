@@ -293,7 +293,7 @@ pub(crate) fn inspect_property(
         ),
         (
             "fallbackEngine".to_string(),
-            JSValue::String("mozjs".to_string()),
+            JSValue::String("v8".to_string()),
         ),
         (
             "valueAvailable".to_string(),
@@ -366,7 +366,7 @@ pub(crate) fn capabilities() -> JSValue {
         ("controlsDom".to_string(), JSValue::Boolean(true)),
         (
             "fallbackEngine".to_string(),
-            JSValue::String("mozjs".to_string()),
+            JSValue::String("v8".to_string()),
         ),
         (
             "schemaVersion".to_string(),

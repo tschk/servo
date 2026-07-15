@@ -1072,15 +1072,13 @@ impl DerefMut for Runtime {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScriptJsBackend {
-    Mozjs,
-    V8Experimental,
+    V8,
 }
 
 impl ScriptJsBackend {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Mozjs => "mozjs",
-            Self::V8Experimental => "v8-experimental",
+            Self::V8 => "v8",
         }
     }
 }
@@ -1091,23 +1089,24 @@ pub struct JSEngineSetup {
 }
 
 impl JSEngineSetup {
-    pub fn mozjs() -> Self {
-        let engine = JSEngine::init().unwrap();
+    /// Bootstrap the Servo script runtime on V8 (`js_stub` / rusty_v8).
+    pub fn v8() -> Self {
+        let engine = JSEngine::init().expect("V8 JS engine init");
         *JS_ENGINE.lock().unwrap() = Some(engine.handle());
         Self {
-            backend: ScriptJsBackend::Mozjs,
+            backend: ScriptJsBackend::V8,
             engine,
         }
     }
 
+    #[deprecated(note = "mozjs removed; use JSEngineSetup::v8")]
+    pub fn mozjs() -> Self {
+        Self::v8()
+    }
+
+    #[deprecated(note = "use JSEngineSetup::v8")]
     pub fn v8_experimental() -> Self {
-        warn!(
-            "Soliloquy requested `{}` for Servo script bootstrap, but Servo script internals still depend on mozjs. Bootstrapping mozjs while exposing the experimental backend selection path.",
-            ScriptJsBackend::V8Experimental.as_str()
-        );
-        let mut setup = Self::mozjs();
-        setup.backend = ScriptJsBackend::V8Experimental;
-        setup
+        Self::v8()
     }
 
     pub fn backend(&self) -> ScriptJsBackend {
@@ -1121,7 +1120,7 @@ impl JSEngineSetup {
 
 impl Default for JSEngineSetup {
     fn default() -> Self {
-        Self::mozjs()
+        Self::v8()
     }
 }
 

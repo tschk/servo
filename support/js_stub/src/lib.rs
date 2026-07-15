@@ -5442,6 +5442,8 @@ pub mod rust {
     }
     impl JSEngine {
         pub fn init() -> Result<Self, ()> {
+            #[cfg(feature = "v8")]
+            super::ensure_v8();
             Ok(Self)
         }
         pub fn handle(&self) -> JSEngineHandle {

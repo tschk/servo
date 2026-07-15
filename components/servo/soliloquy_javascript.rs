@@ -30,34 +30,21 @@ thread_local! {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SoliloquyJavascriptBackend {
-    Mozjs,
-    V8Experimental,
+    V8,
 }
 
 impl SoliloquyJavascriptBackend {
     pub(crate) fn from_environment() -> Self {
-        match std::env::var(SOLILOQUY_JS_ENGINE_ENV) {
-            Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
-                "v8" | "v8-experimental" | "v8_experimental" => Self::V8Experimental,
-                _ => Self::Mozjs,
-            },
-            Err(_) => {
-                #[cfg(feature = "soliloquy_v8")]
-                {
-                    Self::V8Experimental
-                }
-                #[cfg(not(feature = "soliloquy_v8"))]
-                {
-                    Self::Mozjs
-                }
-            },
+        // Legacy env aliases accepted; only V8 remains.
+        if let Ok(value) = std::env::var(SOLILOQUY_JS_ENGINE_ENV) {
+            let _ = value;
         }
+        Self::V8
     }
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::Mozjs => "mozjs",
-            Self::V8Experimental => "v8-experimental",
+            Self::V8 => "v8",
         }
     }
 }
@@ -76,14 +63,7 @@ impl SoliloquyJavascriptDispatcher {
         webview_id: WebViewId,
         script: &str,
     ) -> Option<SoliloquyJavascriptEvaluation> {
-        match SoliloquyJavascriptBackend::from_environment() {
-            SoliloquyJavascriptBackend::Mozjs => {
-                MozjsScriptBackend.maybe_evaluate(webview_id, script)
-            },
-            SoliloquyJavascriptBackend::V8Experimental => {
-                V8DispatchScriptBackend::default().maybe_evaluate(webview_id, script)
-            },
-        }
+        V8DispatchScriptBackend::default().maybe_evaluate(webview_id, script)
     }
 }
 
@@ -93,18 +73,6 @@ trait SoliloquyScriptBackend {
         webview_id: WebViewId,
         script: &str,
     ) -> Option<SoliloquyJavascriptEvaluation>;
-}
-
-struct MozjsScriptBackend;
-
-impl SoliloquyScriptBackend for MozjsScriptBackend {
-    fn maybe_evaluate(
-        &self,
-        _webview_id: WebViewId,
-        _script: &str,
-    ) -> Option<SoliloquyJavascriptEvaluation> {
-        None
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -548,7 +516,7 @@ fn dispatch_command(
             SoliloquyBridgeResult::value(JSValue::Object(HashMap::from([
                 (
                     "requestedEngine".to_string(),
-                    JSValue::String("v8-experimental".to_string()),
+                    JSValue::String("v8".to_string()),
                 ),
                 (
                     "activeEngine".to_string(),
@@ -715,16 +683,17 @@ mod tests {
     }
 
     #[test]
-    fn dispatcher_is_disabled_without_v8_experimental() {
+    fn dispatcher_defaults_to_v8_without_env() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
         clear_engine_env(&_guard);
         assert_eq!(
             SoliloquyJavascriptBackend::from_environment(),
-            SoliloquyJavascriptBackend::Mozjs
+            SoliloquyJavascriptBackend::V8
         );
-        assert!(
-            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(1), "1 + 1").is_none()
+        assert_eq!(
+            SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(1), "1 + 1"),
+            Some(Ok(JSValue::Number(2.0)))
         );
     }
 
@@ -732,7 +701,7 @@ mod tests {
     fn dispatcher_handles_literals_and_simple_addition() {
         let _guard = ENV_LOCK.lock().unwrap();
         reset_webview_snapshots();
-        set_engine_env(&_guard, "v8-experimental");
+        set_engine_env(&_guard, "v8");
         assert_eq!(
             SoliloquyJavascriptDispatcher::maybe_evaluate(test_webview_id(1), "1 + 1"),
             Some(Ok(JSValue::Number(2.0)))
@@ -746,7 +715,7 @@ mod tests {
                 test_webview_id(1),
                 "window.__soliloquyEngineBackend"
             ),
-            Some(Ok(JSValue::String("v8-experimental".into())))
+            Some(Ok(JSValue::String("v8".into())))
         );
         clear_engine_env(&_guard);
     }
@@ -1017,7 +986,7 @@ mod tests {
         );
         assert_eq!(
             object.get("fallbackEngine"),
-            Some(&JSValue::String("mozjs".to_string()))
+            Some(&JSValue::String("v8".to_string()))
         );
         assert_eq!(object.get("valueAvailable"), Some(&JSValue::Boolean(true)));
         assert_eq!(

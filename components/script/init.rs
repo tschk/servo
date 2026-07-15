@@ -163,8 +163,10 @@ fn jit_forbidden() -> bool {
 
 fn script_js_backend_from_env_value(value: &str) -> Option<ScriptJsBackend> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "" | "mozjs" | "spidermonkey" => Some(ScriptJsBackend::Mozjs),
-        "v8" | "v8-experimental" | "v8_experimental" => Some(ScriptJsBackend::V8Experimental),
+        // Legacy aliases accepted; V8 is the only engine.
+        "" | "v8" | "v8-experimental" | "v8_experimental" | "mozjs" | "spidermonkey" => {
+            Some(ScriptJsBackend::V8)
+        },
         _ => None,
     }
 }
@@ -173,11 +175,11 @@ fn configured_js_backend() -> ScriptJsBackend {
     match std::env::var(SOLILOQUY_JS_ENGINE_ENV) {
         Ok(value) => script_js_backend_from_env_value(&value).unwrap_or_else(|| {
             warn!(
-                "Unsupported value `{value}` for {SOLILOQUY_JS_ENGINE_ENV}; defaulting Servo script bootstrap to mozjs."
+                "Unsupported value `{value}` for {SOLILOQUY_JS_ENGINE_ENV}; defaulting Servo script bootstrap to v8."
             );
-            ScriptJsBackend::Mozjs
+            ScriptJsBackend::V8
         }),
-        Err(_err) => ScriptJsBackend::Mozjs,
+        Err(_err) => ScriptJsBackend::V8,
     }
 }
 
@@ -214,10 +216,9 @@ pub fn init() -> JSEngineSetup {
         "Initializing Servo script runtime with `{}` backend selection.",
         backend.as_str()
     );
-    match backend {
-        ScriptJsBackend::Mozjs => JSEngineSetup::mozjs(),
-        ScriptJsBackend::V8Experimental => JSEngineSetup::v8_experimental(),
-    }
+    // Single engine: V8 via js_stub.
+    let _ = backend;
+    JSEngineSetup::v8()
 }
 
 #[cfg(test)]
@@ -227,20 +228,16 @@ mod tests {
 
     #[test]
     fn parses_v8_backend_aliases() {
-        for value in ["v8", "v8-experimental", "v8_experimental"] {
+        for value in ["v8", "v8-experimental", "v8_experimental", "mozjs", "spidermonkey", ""] {
             assert_eq!(
                 script_js_backend_from_env_value(value),
-                Some(ScriptJsBackend::V8Experimental)
+                Some(ScriptJsBackend::V8)
             );
         }
     }
 
     #[test]
-    fn defaults_unknown_backend_to_mozjs() {
+    fn rejects_unknown_backend_names() {
         assert_eq!(script_js_backend_from_env_value("not-a-runtime"), None);
-        assert_eq!(
-            script_js_backend_from_env_value("mozjs"),
-            Some(ScriptJsBackend::Mozjs)
-        );
     }
 }

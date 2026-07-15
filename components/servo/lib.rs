@@ -80,6 +80,10 @@ pub use crate::gamepad_delegate::{
     GamepadDelegate, GamepadHapticEffectRequest, GamepadHapticEffectRequestType,
 };
 pub use crate::network_manager::{CacheEntry, NetworkManager};
+pub use crate::soliloquy_bridge::{
+    record_webview_history_change, record_webview_load_status, record_webview_navigation_request,
+    record_webview_page_title,
+};
 pub use crate::servo::{Servo, ServoBuilder, run_content_process};
 pub use crate::servo_delegate::{ServoDelegate, ServoError};
 pub use crate::site_data_manager::{SiteData, SiteDataManager, StorageType};

@@ -187,25 +187,25 @@ impl SoliloquyBridgeResult {
     }
 }
 
-pub(crate) fn record_webview_page_title(webview_id: WebViewId, title: Option<String>) {
+pub fn record_webview_page_title(webview_id: WebViewId, title: Option<String>) {
     update_webview_snapshot(webview_id, |snapshot| {
         snapshot.page_title = title;
     });
 }
 
-pub(crate) fn record_webview_navigation_request(webview_id: WebViewId, url: String) {
+pub fn record_webview_navigation_request(webview_id: WebViewId, url: String) {
     update_webview_snapshot(webview_id, |snapshot| {
         snapshot.current_url = Some(url);
     });
 }
 
-pub(crate) fn record_webview_history_change(webview_id: WebViewId, current_url: Option<String>) {
+pub fn record_webview_history_change(webview_id: WebViewId, current_url: Option<String>) {
     update_webview_snapshot(webview_id, |snapshot| {
         snapshot.current_url = current_url;
     });
 }
 
-pub(crate) fn record_webview_load_status(webview_id: WebViewId, load_status: LoadStatus) {
+pub fn record_webview_load_status(webview_id: WebViewId, load_status: LoadStatus) {
     update_webview_snapshot(webview_id, |snapshot| {
         snapshot.ready_state = Some(match load_status {
             LoadStatus::Started => "loading".to_string(),
@@ -301,6 +301,15 @@ pub(crate) fn inspect_property(
         ),
         ("value".to_string(), value),
     ]))
+}
+
+/// True when embedder/Servo has pushed at least one live DOM field for this webview.
+pub(crate) fn webview_bridge_ready(webview_id: WebViewId) -> bool {
+    webview_snapshot(webview_id).is_some_and(|snapshot| {
+        snapshot.page_title.is_some()
+            || snapshot.current_url.is_some()
+            || snapshot.ready_state.is_some()
+    })
 }
 
 pub(crate) fn describe_webview(webview_id: WebViewId, backend: &str) -> JSValue {

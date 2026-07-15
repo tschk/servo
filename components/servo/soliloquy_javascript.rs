@@ -16,7 +16,7 @@ use servo_base::id::WebViewId;
 use crate::soliloquy_bridge::{
     SoliloquyBridgeCommand, SoliloquyBridgeMutation, SoliloquyBridgeReadTarget,
     SoliloquyBridgeResult, SoliloquyBridgeWrite, capabilities, describe_webview, inspect_property,
-    read_property, resolve_write, webview_bridge_id, write_property,
+    read_property, resolve_write, webview_bridge_id, webview_bridge_ready, write_property,
 };
 
 const SOLILOQUY_JS_ENGINE_ENV: &str = "SOLILOQUY_JS_ENGINE";
@@ -475,7 +475,9 @@ fn evaluate_engine_probe(
             )))
         },
         "window.__soliloquyEngineBridgeReady" | "globalThis.__soliloquyEngineBridgeReady" => {
-            Some(SoliloquyJavascriptEvaluation::ok(JSValue::Boolean(false)))
+            Some(SoliloquyJavascriptEvaluation::ok(JSValue::Boolean(
+                webview_bridge_ready(webview_id),
+            )))
         },
         "window.__soliloquyWebViewId" | "globalThis.__soliloquyWebViewId" => Some(
             SoliloquyJavascriptEvaluation::ok(JSValue::Number(webview_bridge_id(webview_id))),
@@ -564,8 +566,14 @@ fn dispatch_command(
                     "ownerLifetime".to_string(),
                     JSValue::String(isolate_owner.lifetime_label().to_string()),
                 ),
-                ("bridgeReady".to_string(), JSValue::Boolean(false)),
-                ("controlsDom".to_string(), JSValue::Boolean(false)),
+                (
+                    "bridgeReady".to_string(),
+                    JSValue::Boolean(webview_bridge_ready(webview_id)),
+                ),
+                (
+                    "controlsDom".to_string(),
+                    JSValue::Boolean(webview_bridge_ready(webview_id)),
+                ),
                 ("commandChannel".to_string(), JSValue::Boolean(true)),
             ]))),
             None,

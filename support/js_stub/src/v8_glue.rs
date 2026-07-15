@@ -244,7 +244,7 @@ pub fn create_dom_global(
 ) -> *mut jsapi::JSObject {
     crate::ensure_v8();
 
-    crate::V8_ISOLATE.with(|cell| {
+    let global = crate::V8_ISOLATE.with(|cell| {
         let mut borrow = cell.borrow_mut();
         if borrow.is_none() {
             *borrow = Some(v8::Isolate::new(v8::CreateParams::default()));
@@ -296,7 +296,10 @@ pub fn create_dom_global(
             classes.insert(global as usize, clasp as usize);
         }
         global
-    })
+    });
+    // Bootstrap after isolate RefCell is released (evaluate_script re-enters with_scope).
+    let _ = install_window_event_target_bootstrap();
+    global
 }
 
 // ── Object construction ────────────────────────────────────────────────────
@@ -1663,6 +1666,112 @@ pub fn evaluate_to_string(script: &str) -> Option<String> {
     })
 }
 
+/// Minimal EventTarget surface so classic scripts can call addEventListener before full DOM bindings land.
+pub fn install_window_event_target_bootstrap() -> bool {
+    evaluate_script(
+        r#"
+        (function (g) {
+          if (typeof g.addEventListener === 'function') return;
+          function EventTarget() {
+            this._listeners = Object.create(null);
+          }
+          EventTarget.prototype.addEventListener = function (type, listener) {
+            if (!type || typeof listener !== 'function') return;
+            var key = String(type);
+            var list = this._listeners[key] || (this._listeners[key] = []);
+            if (list.indexOf(listener) === -1) list.push(listener);
+          };
+          EventTarget.prototype.removeEventListener = function (type, listener) {
+            var key = String(type);
+            var list = this._listeners && this._listeners[key];
+            if (!list) return;
+            var i = list.indexOf(listener);
+            if (i !== -1) list.splice(i, 1);
+          };
+          EventTarget.prototype.dispatchEvent = function (event) {
+            var type = event && event.type ? String(event.type) : '';
+            var list = (this._listeners && this._listeners[type]) ? this._listeners[type].slice() : [];
+            for (var i = 0; i < list.length; i++) {
+              try { list[i].call(this, event); } catch (_) {}
+            }
+            return true;
+          };
+          g.EventTarget = EventTarget;
+          var proto = EventTarget.prototype;
+          g.addEventListener = proto.addEventListener.bind(g);
+          g.removeEventListener = proto.removeEventListener.bind(g);
+          g.dispatchEvent = proto.dispatchEvent.bind(g);
+          if (typeof g._listeners !== 'object' || g._listeners === null) {
+            g._listeners = Object.create(null);
+          }
+          if (typeof g.Event !== 'function') {
+            g.Event = function Event(type, init) {
+              this.type = String(type || '');
+              this.bubbles = !!(init && init.bubbles);
+              this.cancelable = !!(init && init.cancelable);
+              this.defaultPrevented = false;
+              this.target = null;
+              this.currentTarget = null;
+            };
+            g.Event.prototype.preventDefault = function () {
+              if (this.cancelable) this.defaultPrevented = true;
+            };
+            g.Event.prototype.stopPropagation = function () {};
+            g.Event.prototype.stopImmediatePropagation = function () {};
+          }
+        })(globalThis);
+        "#,
+    )
+}
+
+/// Install a minimal SpiderMonkey-shaped `Debugger` constructor on the current global.
+pub fn define_debugger_object(_obj: *mut jsapi::JSObject) -> bool {
+    // Keep API surface present so Servo debugger globals boot under V8.
+    evaluate_script(
+        r#"
+        (function (g) {
+          if (typeof g.Debugger === 'function') return;
+          function Debugger() {}
+          Debugger.prototype.addDebuggee = function () { return this; };
+          Debugger.prototype.removeDebuggee = function () { return this; };
+          Debugger.prototype.getNewestFrame = function () { return null; };
+          Debugger.prototype.findScripts = function () { return []; };
+          Debugger.prototype.findAllGlobals = function () { return []; };
+          Debugger.prototype.clearAllBreakpoints = function () {};
+          Debugger.prototype.onNewScript = undefined;
+          Debugger.prototype.onDebuggerStatement = undefined;
+          Debugger.prototype.onExceptionUnwind = undefined;
+          Debugger.Object = function DebuggerObject() {};
+          Debugger.Script = function DebuggerScript() {};
+          Debugger.Frame = function DebuggerFrame() {};
+          Debugger.Environment = function DebuggerEnvironment() {};
+          Debugger.Source = function DebuggerSource() {};
+          g.Debugger = Debugger;
+        })(globalThis);
+        "#,
+    )
+}
+
+pub fn new_date_object(ms: f64) -> *mut jsapi::JSObject {
+    with_scope(|hs| {
+        let date_ctor = {
+            let key = v8::String::new(hs, "Date").unwrap_or_else(|| v8::String::empty(hs));
+            hs.get_current_context()
+                .global(hs)
+                .get(hs, key.into())
+                .and_then(|v| v8::Local::<v8::Function>::try_from(v).ok())
+        };
+        let Some(date_ctor) = date_ctor else {
+            return ptr::null_mut();
+        };
+        let arg = v8::Number::new(hs, ms);
+        match date_ctor.new_instance(hs, &[arg.into()]) {
+            Some(obj) => store_object(hs, obj),
+            None => ptr::null_mut(),
+        }
+    })
+}
+
 // ── Internal: scope helper ─────────────────────────────────────────────────
 
 /// Helper: creates a HandleScope + ContextScope for the current global realm,
@@ -1781,5 +1890,22 @@ mod tests {
         assert!(!script.is_null());
         set_script_private(script, jsapi::JSVal::from_int32(7));
         assert_eq!(get_script_private(script).to_int32(), 7);
+    }
+
+    #[test]
+    fn window_event_target_bootstrap_available() {
+        let _global =
+            create_dom_global(std::ptr::null_mut(), &GLOBAL_CLASS, std::ptr::null_mut());
+        assert_eq!(
+            evaluate_to_string("typeof addEventListener").as_deref(),
+            Some("function")
+        );
+        assert_eq!(
+            evaluate_to_string(
+                "var n=0; addEventListener('x', function(){ n=1; }); dispatchEvent(new Event('x')); String(n)"
+            )
+            .as_deref(),
+            Some("1")
+        );
     }
 }

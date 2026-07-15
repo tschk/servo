@@ -6213,8 +6213,16 @@ pub mod rust {
         pub unsafe fn JS_AddInterruptCallback<C, F>(_cx: &C, _callback: F) -> bool {
             false
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_DefineDebuggerObject<C, O>(_cx: &C, _obj: O) -> bool {
             true
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_DefineDebuggerObject<C, O>(_cx: &C, obj: O) -> bool
+        where
+            O: crate::realms::IntoJSObject,
+        {
+            crate::v8_glue::define_debugger_object(obj.into_js_object())
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_ExecuteScript<C, S, R>(_cx: &C, _script: S, _rval: R) -> bool {
@@ -6316,8 +6324,38 @@ pub mod rust {
         pub unsafe fn ModuleLink<C, M>(_cx: &C, _module: M) -> bool {
             true
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn NewDateObject<C, T>(_cx: &C, _time: T) -> *mut jsapi::JSObject {
             ptr::null_mut()
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn NewDateObject<C, T>(_cx: &C, time: T) -> *mut jsapi::JSObject
+        where
+            T: IntoDateMs,
+        {
+            crate::v8_glue::new_date_object(time.into_date_ms())
+        }
+
+        pub trait IntoDateMs {
+            fn into_date_ms(self) -> f64;
+        }
+
+        impl IntoDateMs for f64 {
+            fn into_date_ms(self) -> f64 {
+                self
+            }
+        }
+
+        impl IntoDateMs for jsapi::ClippedTime {
+            fn into_date_ms(self) -> f64 {
+                self.t
+            }
+        }
+
+        impl IntoDateMs for &jsapi::ClippedTime {
+            fn into_date_ms(self) -> f64 {
+                self.t
+            }
         }
         pub unsafe fn ObjectIsDate<C, O>(_cx: &C, _obj: O, out: *mut bool) -> bool {
             if !out.is_null() {

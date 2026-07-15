@@ -4731,6 +4731,7 @@ pub mod rust {
                 },
             }
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_HasProperty<C: ?Sized, O, N>(
             _cx: &C,
             _obj: O,
@@ -4738,6 +4739,25 @@ pub mod rust {
             _found: *mut bool,
         ) -> bool {
             false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_HasProperty<C: ?Sized, O, N>(
+            _cx: &C,
+            obj: O,
+            name: N,
+            found: *mut bool,
+        ) -> bool
+        where
+            O: Into<*mut jsapi::JSObject>,
+            N: jsapi::ToBytePtr,
+        {
+            let name_str = std::ffi::CStr::from_ptr(name.to_byte_ptr() as *const std::os::raw::c_char)
+                .to_string_lossy();
+            let result = crate::v8_glue::has_property_by_name(obj.into(), &name_str);
+            if !found.is_null() {
+                *found = result;
+            }
+            true
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_HasPropertyById<C: ?Sized, O, I>(
@@ -4757,6 +4777,7 @@ pub mod rust {
             found.set_bool_out(crate::v8_glue::has_property_by_jsid(obj.into(), id.into()));
             true
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_HasOwnProperty<C: ?Sized, O, N>(
             _cx: &C,
             _obj: O,
@@ -4764,6 +4785,25 @@ pub mod rust {
             _found: *mut bool,
         ) -> bool {
             false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_HasOwnProperty<C: ?Sized, O, N>(
+            _cx: &C,
+            obj: O,
+            name: N,
+            found: *mut bool,
+        ) -> bool
+        where
+            O: Into<*mut jsapi::JSObject>,
+            N: jsapi::ToBytePtr,
+        {
+            let name_str = std::ffi::CStr::from_ptr(name.to_byte_ptr() as *const std::os::raw::c_char)
+                .to_string_lossy();
+            let result = crate::v8_glue::has_property_by_name(obj.into(), &name_str);
+            if !found.is_null() {
+                *found = result;
+            }
+            true
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_ForwardGetPropertyTo<C: ?Sized, O, I, R, V>(
@@ -4796,6 +4836,7 @@ pub mod rust {
                 None => false,
             }
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_DeletePropertyById<C: ?Sized, O, I, R>(
             _cx: &C,
             _obj: O,
@@ -4803,6 +4844,30 @@ pub mod rust {
             _result: R,
         ) -> bool {
             false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_DeletePropertyById<C: ?Sized, O, I, R>(
+            _cx: &C,
+            obj: O,
+            id: I,
+            _result: R,
+        ) -> bool
+        where
+            O: Into<*mut jsapi::JSObject>,
+            I: Into<jsapi::jsid>,
+        {
+            let id = id.into();
+            if id.is_string() {
+                let name = crate::v8_glue::string_text(id.to_string());
+                if let Some(name) = name {
+                    crate::v8_glue::delete_property_ignoring_result(
+                        std::ptr::null_mut(),
+                        obj.into(),
+                        name.as_ptr(),
+                    );
+                }
+            }
+            true
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_GetPendingException<C, V>(_cx: &C, _vp: V) -> bool {
@@ -4985,34 +5050,72 @@ pub mod rust {
             false
         }
         pub unsafe fn JS_ErrorFromException<C, V>(_cx: &C, _value: V) -> *mut jsapi::JSErrorReport {
+            // No structured error reports in V8 glue path yet.
             ptr::null_mut()
         }
         pub unsafe fn JS_GetPromiseResult<O, R>(_obj: O, _rval: R) {}
-        pub unsafe fn JS_ParseJSON<C, S, V>(_cx: &C, _chars: S, _len: u32, _vp: V) -> bool {
-            false
-        }
-        pub unsafe fn JS_ReadStructuredClone<C: ?Sized, D, Ver, S, V, CB, Cl, P>(
-            _cx: &C,
-            _data: D,
-            _version: Ver,
-            _scope: S,
-            _vp: V,
-            _callbacks: CB,
-            _closure: Cl,
-            _policy: P,
-        ) -> bool {
-            false
-        }
-        pub unsafe fn JS_Stringify<C: ?Sized, V, R, S, W, D>(
+        #[cfg(not(feature = "v8"))]
+        pub unsafe fn JS_Stringify<
+            C: ?Sized,
+            V,
+            R,
+            S,
+            W,
+            D,
+        >(
             _cx: &C,
             _value: V,
             _replacer: R,
             _space: S,
-            _callback: W,
+            _writer: W,
             _data: D,
         ) -> bool {
             false
         }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_Stringify<
+            C: ?Sized,
+            V,
+            R,
+            S,
+            W,
+            D,
+        >(
+            _cx: &C,
+            _value: V,
+            _replacer: R,
+            _space: S,
+            _writer: W,
+            _data: D,
+        ) -> bool {
+            false
+        }
+        #[cfg(not(feature = "v8"))]
+        pub unsafe fn JS_ParseJSON<C, S, V>(_cx: &C, _chars: S, _len: u32, _vp: V) -> bool {
+            false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_ParseJSON<C, S, V>(_cx: &C, _chars: S, _len: u32, _vp: V) -> bool
+        where
+            S: jsapi::ToBytePtr,
+            V: jsapi::SetJsapiValOut,
+        {
+            let text = _chars.to_byte_ptr();
+            let text = if text.is_null() {
+                "".to_string()
+            } else {
+                std::ffi::CStr::from_ptr(text as *const std::os::raw::c_char)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            let result = crate::v8_glue::evaluate_script_value(&text);
+            if let Some(val) = result {
+                _vp.set_jsapi_val_out(val);
+                return true;
+            }
+            false
+        }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_TransplantObject<C: ?Sized, O, T>(
             _cx: &C,
             _orig: O,
@@ -5020,6 +5123,18 @@ pub mod rust {
         ) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_TransplantObject<C: ?Sized, O, T>(
+            _cx: &C,
+            _orig: O,
+            target: T,
+        ) -> *mut jsapi::JSObject
+        where
+            T: Into<*mut jsapi::JSObject>,
+        {
+            target.into()
+        }
+        #[cfg(feature = "v8")]
         pub unsafe fn JS_TypeOfValue<C, V>(_cx: &C, value: V) -> jsapi::JSType
         where
             V: Into<jsapi::JSVal>,
@@ -5044,6 +5159,37 @@ pub mod rust {
             V: Into<jsapi::JSVal>,
         {
             crate::v8_glue::value_to_source(value.into())
+        }
+        #[cfg(not(feature = "v8"))]
+        pub unsafe fn JS_ReadStructuredClone<C: ?Sized, D, Ver, S, V, CB, Cl, P>(
+            _cx: &C,
+            _data: D,
+            _version: Ver,
+            _scope: S,
+            _vp: V,
+            _cb: CB,
+            _closure: Cl,
+            _policy: P,
+        ) -> bool {
+            false
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_ReadStructuredClone<C: ?Sized, D, Ver, S, V, CB, Cl, P>(
+            _cx: &C,
+            _data: D,
+            _version: Ver,
+            _scope: S,
+            vp: V,
+            _cb: CB,
+            _closure: Cl,
+            _policy: P,
+        ) -> bool
+        where
+            V: jsapi::SetJsapiValOut,
+        {
+            // ponytail: structured clone not fully bridged; return undefined so scripts continue.
+            vp.set_jsapi_val_out(jsapi::JSVal::undefined());
+            true
         }
         pub unsafe fn JS_WriteStructuredClone<C: ?Sized, V, D, S, P, CB, Cl, R>(
             _cx: &C,

@@ -139,6 +139,10 @@ thread_local! {
     pub(crate) static SCRIPT_PRIVATES: RefCell<HashMap<usize, jsapi::JSVal>> =
         RefCell::new(HashMap::new());
 
+    /// Module object handle → private JS value.
+    pub(crate) static MODULE_PRIVATES: RefCell<HashMap<usize, jsapi::JSVal>> =
+        RefCell::new(HashMap::new());
+
     /// Monotonically increasing handle ID counter (1-based; 0 = null).
     pub(crate) static NEXT_HANDLE: RefCell<usize> = const { RefCell::new(1) };
 }
@@ -1770,6 +1774,97 @@ pub fn new_date_object(ms: f64) -> *mut jsapi::JSObject {
             None => ptr::null_mut(),
         }
     })
+}
+
+// ── JSVal type query ──────────────────────────────────────────────────────
+
+pub fn js_type_of_value(val: jsapi::JSVal) -> jsapi::JSType {
+    if val.is_undefined() {
+        jsapi::JSType::JSTYPE_UNDEFINED
+    } else if val.is_null() {
+        jsapi::JSType::JSTYPE_NULL
+    } else if val.is_boolean() {
+        jsapi::JSType::JSTYPE_BOOLEAN
+    } else if val.is_number() {
+        jsapi::JSType::JSTYPE_NUMBER
+    } else if val.is_string() {
+        jsapi::JSType::JSTYPE_STRING
+    } else if val.is_object() {
+        jsapi::JSType::JSTYPE_OBJECT
+    } else {
+        jsapi::JSType::JSTYPE_OBJECT
+    }
+}
+
+// ── Module private ─────────────────────────────────────────────────────────
+
+pub fn get_module_private(module: *mut jsapi::JSObject) -> jsapi::JSVal {
+    if module.is_null() {
+        return jsapi::JSVal::undefined();
+    }
+    MODULE_PRIVATES.with(|m| {
+        m.borrow()
+            .get(&(module as usize))
+            .copied()
+            .unwrap_or_else(jsapi::JSVal::undefined)
+    })
+}
+
+pub fn set_module_private(module: *mut jsapi::JSObject, value: jsapi::JSVal) {
+    if module.is_null() {
+        return;
+    }
+    MODULE_PRIVATES.with(|m| {
+        m.borrow_mut().insert(module as usize, value);
+    });
+}
+
+// ── Array detection by JSVal ───────────────────────────────────────────────
+
+pub fn is_array_object_from_value(val: jsapi::JSVal) -> bool {
+    let obj = val.to_object();
+    if obj.is_null() {
+        return false;
+    }
+    ARRAYS.with(|m| m.borrow().contains_key(&(obj as usize)))
+}
+
+// ── Property query ─────────────────────────────────────────────────────────
+
+pub fn has_own_property_by_id(obj: *mut jsapi::JSObject, id: jsapi::jsid) -> bool {
+    if obj.is_null() {
+        return false;
+    }
+    if id.is_string() {
+        let name = string_text(id.to_string());
+        if let Some(name) = name {
+            return PROPERTIES.with(|m| m.borrow().contains_key(&(obj as usize, name)));
+        }
+    }
+    if id.is_int() {
+        let idx = id.to_int() as u32;
+        return ARRAYS.with(|m| {
+            m.borrow()
+                .get(&(obj as usize))
+                .is_some_and(|v| (idx as usize) < v.len())
+        });
+    }
+    false
+}
+
+pub fn has_property_by_name(obj: *mut jsapi::JSObject, name: &str) -> bool {
+    if obj.is_null() {
+        return false;
+    }
+    PROPERTIES.with(|m| m.borrow().contains_key(&(obj as usize, name.to_string())))
+}
+
+// ── Global object event dispatch ───────────────────────────────────────────
+
+pub fn fire_on_new_global_object(global: *mut jsapi::JSObject) {
+    // Minimal: run a microtask checkpoint so queued callbacks (Debugger hooks) run.
+    let _ = global;
+    dispatchable_run(std::ptr::null_mut());
 }
 
 // ── Internal: scope helper ─────────────────────────────────────────────────

@@ -2503,9 +2503,14 @@ pub mod jsapi {
     }
     #[derive(Copy, Clone, PartialEq, Eq)]
     pub enum JSType {
+        JSTYPE_UNDEFINED,
+        JSTYPE_OBJECT,
         JSTYPE_FUNCTION,
         JSTYPE_STRING,
-        JSTYPE_OBJECT,
+        JSTYPE_NUMBER,
+        JSTYPE_BOOLEAN,
+        JSTYPE_SYMBOL,
+        JSTYPE_NULL,
     }
     #[derive(Copy, Clone, PartialEq, Eq)]
     pub enum ESClass {
@@ -3297,7 +3302,16 @@ pub mod jsapi {
     {
         crate::v8_glue::get_function_native_reserved(fun.to_function_object_ptr(), which)
     }
+    #[cfg(not(feature = "v8"))]
     pub fn SetModulePrivate<M, V>(_module: M, _value: V) {}
+    #[cfg(feature = "v8")]
+    pub fn SetModulePrivate<M, V>(_module: M, value: V)
+    where
+        M: crate::realm::IntoJSObject,
+        V: IntoScriptPrivateValue,
+    {
+        crate::v8_glue::set_module_private(_module.into_js_object(), value.into_script_private_value());
+    }
     pub fn GetModuleResolveHook<C>(_rt: C) -> Option<*mut std::ffi::c_void> {
         None
     }
@@ -4573,11 +4587,13 @@ pub mod rust {
         #[cfg(feature = "v8")]
         pub fn IsArrayObject<C, V>(_cx: &C, val: V, out: *mut bool) -> bool
         where
-            V: jsapi::ToFunctionObjectPtr,
+            V: Into<jsapi::JSVal>,
         {
             if !out.is_null() {
                 // SAFETY: non-null JSAPI out-param checked above.
-                unsafe { *out = crate::v8_glue::is_array_object(val.to_function_object_ptr()) };
+                unsafe {
+                    *out = crate::v8_glue::is_array_object_from_value(val.into());
+                }
             }
             true
         }
@@ -4660,7 +4676,15 @@ pub mod rust {
         {
             crate::v8_glue::set_property_by_jsid(obj.into(), id.into(), val.to_property_value())
         }
+        #[cfg(not(feature = "v8"))]
         pub fn JS_FireOnNewGlobalObject<O>(_cx: *mut jsapi::JSContext, _obj: O) {}
+        #[cfg(feature = "v8")]
+        pub fn JS_FireOnNewGlobalObject<O>(_cx: *mut jsapi::JSContext, obj: O)
+        where
+            O: crate::realms::IntoJSObject,
+        {
+            crate::v8_glue::fire_on_new_global_object(obj.into_js_object())
+        }
         #[cfg(not(feature = "v8"))]
         pub fn JS_AlreadyHasOwnPropertyById<C: ?Sized, O, I>(
             _cx: &C,
@@ -4996,8 +5020,19 @@ pub mod rust {
         ) -> *mut jsapi::JSObject {
             ptr::null_mut()
         }
-        pub unsafe fn JS_TypeOfValue<C, V>(_cx: &C, _value: V) -> jsapi::JSType {
-            jsapi::JSType::JSTYPE_OBJECT
+        pub unsafe fn JS_TypeOfValue<C, V>(_cx: &C, value: V) -> jsapi::JSType
+        where
+            V: Into<jsapi::JSVal>,
+        {
+            #[cfg(feature = "v8")]
+            {
+                return crate::v8_glue::js_type_of_value(value.into());
+            }
+            #[cfg(not(feature = "v8"))]
+            {
+                let _ = value;
+                jsapi::JSType::JSTYPE_OBJECT
+            }
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_ValueToSource<C, V>(_cx: &C, _value: V) -> *mut jsapi::JSString {
@@ -6249,8 +6284,16 @@ pub mod rust {
         pub unsafe fn JS_GetGCParameter<C, K>(_cx: &C, _key: K) -> u32 {
             0
         }
+        #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_GetModulePrivate<M>(_module: M) -> jsapi::JSVal {
             jsapi::JSVal::default()
+        }
+        #[cfg(feature = "v8")]
+        pub unsafe fn JS_GetModulePrivate<M>(_module: M) -> jsapi::JSVal
+        where
+            M: crate::realm::IntoJSObject,
+        {
+            crate::v8_glue::get_module_private(_module.into_js_object())
         }
         #[cfg(not(feature = "v8"))]
         pub unsafe fn JS_GetPropertyById<C, O, I, V>(_cx: &C, _obj: O, _id: I, _vp: V) -> bool {
